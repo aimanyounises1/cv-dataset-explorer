@@ -26,9 +26,12 @@ local embeddings, no cloud services or paid APIs.
 - **Curation workflow** — tag samples (manually, in bulk from the map, or via the assistant), filter by tag, and export any filtered subset as a JSON manifest (`GET /api/export`).
 - **Optional VLM enrichment** — tag every image with a local vision-language model via [Ollama](https://ollama.com).
 
-The app **degrades gracefully**: without embeddings it still serves browsing,
-keyword search, and stats; without the agent stack the assistant tab explains
-exactly how to enable it. Every ML feature reports its own availability.
+**Design intent — layers, not a monolith.** Browsing, keyword search, and stats
+run on plain SQLite with nothing else installed; every ML capability (semantic
+search, map, QA, benchmark, assistant) is an optional layer that reports its
+own availability and degrades gracefully when its prerequisites are missing —
+without embeddings you still get browsing/keyword search/stats, and without
+the agent stack the assistant tab explains exactly how to enable it.
 
 ## Requirements
 

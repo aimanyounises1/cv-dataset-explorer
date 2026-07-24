@@ -69,13 +69,16 @@ def suspect_captions(
 @router.get("/qa/consistency", response_model=list[SuspectCaption])
 def inconsistent_samples(
     limit: int = Query(30, ge=1, le=100),
+    split: Optional[str] = None,
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Samples whose 5 captions disagree most with each other (ambiguous images
     or outlier captions). Reuses SuspectCaption with consistency as the score."""
+    where, params = build_filters(split, None, None)
+    and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
     rows = conn.execute(
-        "SELECT * FROM samples WHERE caption_consistency IS NOT NULL "
-        "ORDER BY caption_consistency ASC LIMIT ?", (limit,)).fetchall()
+        f"SELECT s.* FROM samples s WHERE s.caption_consistency IS NOT NULL{and_where} "
+        "ORDER BY s.caption_consistency ASC LIMIT ?", params + [limit]).fetchall()
     out = []
     for r in rows:
         first = conn.execute(
