@@ -23,6 +23,18 @@ OLLAMA_URL = os.environ.get("CVDE_OLLAMA_URL", "http://localhost:11434")
 VLM_MODEL = os.environ.get("CVDE_VLM_MODEL", "qwen2.5vl:7b")
 CHAT_MODEL = os.environ.get("CVDE_CHAT_MODEL", "qwen3:8b")  # needs tool calling
 
+# Retrieval ------------------------------------------------------------------
+# Reciprocal-rank-fusion constant. 60 is the value Cormack et al. (SIGIR 2009)
+# fixed "during a pilot investigation" — a convention, not a tuned optimum for
+# this corpus, so it is configurable and logged with every fused search.
+RRF_K = int(os.environ.get("CVDE_RRF_K", "60"))
+
+# A query term matching this fraction of images or more is too common for
+# keyword ranking to discriminate, and the UI says so. Calibrated on Flickr8k,
+# where the most common content word ("dog") matches 22.6% of images and no
+# content word reaches FTS5's 50% IDF clamp — see docs/REQUIREMENTS.md §13.14.
+DF_WARN_FRACTION = float(os.environ.get("CVDE_DF_WARN_FRACTION", "0.20"))
+
 # Misc -----------------------------------------------------------------------
 THUMB_SIZE = 320
 DUPLICATE_THRESHOLD = float(os.environ.get("CVDE_DUP_THRESHOLD", "0.95"))

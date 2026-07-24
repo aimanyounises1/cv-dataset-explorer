@@ -115,6 +115,42 @@ def test_match_explanation_fields(client):
     assert "soccer" in item["matched_terms"]
 
 
+def test_match_paths_name_the_retrieval_path(client):
+    # Every result says which path found it and at what rank (FR-SE-U1).
+    item = client.get("/api/search",
+                      params={"q": "soccer", "mode": "keyword"}).json()["items"][0]
+    assert item["match_paths"] == [{"path": "keyword", "rank": 1}]
+
+
+def test_keyword_mode_publishes_no_score_basis(client):
+    # Keyword ranking exposes no numeric score, so there is nothing to mislabel.
+    body = client.get("/api/search", params={"q": "soccer", "mode": "keyword"}).json()
+    assert body["score_basis"] is None
+    assert body["items"][0]["score"] is None
+
+
+def test_term_stats_report_document_frequency(client):
+    # A term in 1 of 3 images is 33% of the corpus: over the 20% warn threshold.
+    stats = client.get("/api/search",
+                       params={"q": "dog", "mode": "keyword"}).json()["term_stats"]
+    assert stats == [{"term": "dog", "images": 1, "fraction": 0.3333, "common": True}]
+
+
+def test_term_stats_flag_terms_that_match_nothing(client):
+    # A zero-hit term is what explains an empty result page (FR-SE-U3).
+    body = client.get("/api/search", params={"q": "zebra", "mode": "keyword"}).json()
+    assert body["items"] == []
+    assert body["term_stats"] == [
+        {"term": "zebra", "images": 0, "fraction": 0.0, "common": False}]
+
+
+def test_stopwords_are_not_reported_as_common_terms(client):
+    # "the" is in most captions but warning about it would be noise.
+    stats = client.get("/api/search",
+                       params={"q": "the dog", "mode": "keyword"}).json()["term_stats"]
+    assert [s["term"] for s in stats] == ["dog"]
+
+
 def test_bulk_tag(client):
     ids = [it["id"] for it in client.get("/api/samples").json()["items"][:2]]
     r = client.post("/api/tags/bulk", json={"sample_ids": ids, "name": "Batch-Tag"})

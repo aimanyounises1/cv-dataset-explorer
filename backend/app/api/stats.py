@@ -8,17 +8,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from .. import config
+from ..db import STOPWORDS
 from ..ml.index import get_index
 from ..schemas import CaptionStats, DuplicatePair, StatsOverview
 from .deps import first_captions, get_conn, row_to_card
 
 router = APIRouter()
-
-STOPWORDS = set(
-    "a an and are as at be by for from has he in is it its of on that the to was "
-    "were will with his her their this there two three while over under near up "
-    "down out off no not they them then than into onto".split()
-)
 
 _caption_stats_cache: Optional[CaptionStats] = None
 
