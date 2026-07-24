@@ -43,7 +43,7 @@ class Embedder:
             for i in range(0, len(images), batch_size):
                 batch = images[i : i + batch_size]
                 inputs = self.processor(images=batch, return_tensors="pt").to(self.device)
-                feats = self.model.get_image_features(**inputs)
+                feats = _features_tensor(self.model.get_image_features(**inputs))
                 chunks.append(feats.float().cpu().numpy())
         embs = np.concatenate(chunks, axis=0)
         return _normalize(embs)
@@ -55,8 +55,13 @@ class Embedder:
                 text=texts, padding="max_length", max_length=64,
                 truncation=True, return_tensors="pt",
             ).to(self.device)
-            feats = self.model.get_text_features(**inputs)
+            feats = _features_tensor(self.model.get_text_features(**inputs))
         return _normalize(feats.float().cpu().numpy())
+
+
+def _features_tensor(feats):
+    """transformers <5 returns a tensor; >=5 wraps it in a ModelOutput."""
+    return feats.pooler_output if hasattr(feats, "pooler_output") else feats
 
 
 def _normalize(x: np.ndarray) -> np.ndarray:

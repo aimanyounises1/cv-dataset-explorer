@@ -21,3 +21,4 @@ vite.config.ts.timestamp-*.mjs
 .idea/
 .jbeval/
 .omc/
+.claude/
