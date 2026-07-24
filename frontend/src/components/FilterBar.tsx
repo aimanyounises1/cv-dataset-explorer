@@ -9,8 +9,6 @@ export interface Filters {
   attr: string; // "group:label"
 }
 
-export const EMPTY_FILTERS: Filters = { split: "", tag: "", vlm_tag: "", attr: "" };
-
 interface Props {
   filters: Filters;
   onChange: (f: Filters) => void;
@@ -20,11 +18,15 @@ export default function FilterBar({ filters, onChange }: Props) {
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [vlmTags, setVlmTags] = useState<TagInfo[]>([]);
   const [coverage, setCoverage] = useState<AttributeGroup[]>([]);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    api.tags().then(setTags).catch(() => setTags([]));
-    api.vlmTags().then(setVlmTags).catch(() => setVlmTags([]));
-    api.coverage().then(setCoverage).catch(() => setCoverage([]));
+    // Facets that fail to load must be distinguishable from facets that
+    // simply have no data (the dropdowns hide themselves when empty).
+    const fail = () => setFailed(true);
+    api.tags().then(setTags).catch(fail);
+    api.vlmTags().then(setVlmTags).catch(fail);
+    api.coverage().then(setCoverage).catch(fail);
   }, []);
 
   return (
@@ -80,6 +82,12 @@ export default function FilterBar({ filters, onChange }: Props) {
             <option key={t.name} value={t.name}>{t.name} ({t.count})</option>
           ))}
         </select>
+      )}
+      {failed && (
+        <span className="pill warn-pill"
+              title="Some filter facets failed to load from the API.">
+          filters degraded
+        </span>
       )}
     </>
   );

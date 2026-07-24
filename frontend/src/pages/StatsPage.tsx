@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { AttributeGroup, CaptionStats, DuplicatePair, StatsOverview } from "../api/types";
+import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../components/chartTheme";
 
 export default function StatsPage() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);
@@ -12,13 +13,18 @@ export default function StatsPage() {
   const [dups, setDups] = useState<DuplicatePair[]>([]);
   const [coverage, setCoverage] = useState<AttributeGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sectionErrors, setSectionErrors] = useState<string[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
+    // A failed section must say so — an error rendering as an empty chart
+    // would be indistinguishable from "nothing to report".
+    const fail = (what: string) => () =>
+      setSectionErrors((prev) => [...prev, what]);
     api.overview().then(setOverview).catch((e) => setError(String(e)));
-    api.captionStats().then(setCaptions).catch(() => undefined);
-    api.duplicates().then(setDups).catch(() => undefined);
-    api.coverage().then(setCoverage).catch(() => undefined);
+    api.captionStats().then(setCaptions).catch(fail("caption statistics"));
+    api.duplicates().then(setDups).catch(fail("near-duplicates"));
+    api.coverage().then(setCoverage).catch(fail("attribute coverage"));
   }, []);
 
   if (error) return <div className="error">{error}</div>;
@@ -56,16 +62,22 @@ export default function StatsPage() {
         </div>
       </div>
 
+      {sectionErrors.length > 0 && (
+        <div className="error">
+          Failed to load: {sectionErrors.join(", ")}. The sections below may be incomplete.
+        </div>
+      )}
+
       <div className="charts">
         <div className="panel">
           <h3>Samples per split</h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={splitData}>
-              <CartesianGrid stroke="#2a3342" vertical={false} />
-              <XAxis dataKey="name" stroke="#9aa4b2" />
-              <YAxis stroke="#9aa4b2" />
-              <Tooltip contentStyle={{ background: "#161b24", border: "1px solid #2a3342" }} />
-              <Bar dataKey="count" fill="#4f9cff" radius={[4, 4, 0, 0]} />
+              <CartesianGrid stroke={GRID_STROKE} vertical={false} />
+              <XAxis dataKey="name" stroke={AXIS_STROKE} />
+              <YAxis stroke={AXIS_STROKE} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Bar dataKey="count" fill={SERIES.blue} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -73,11 +85,11 @@ export default function StatsPage() {
           <h3>Image size (longest side)</h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={sizeData}>
-              <CartesianGrid stroke="#2a3342" vertical={false} />
-              <XAxis dataKey="name" stroke="#9aa4b2" />
-              <YAxis stroke="#9aa4b2" />
-              <Tooltip contentStyle={{ background: "#161b24", border: "1px solid #2a3342" }} />
-              <Bar dataKey="count" fill="#3ecf8e" radius={[4, 4, 0, 0]} />
+              <CartesianGrid stroke={GRID_STROKE} vertical={false} />
+              <XAxis dataKey="name" stroke={AXIS_STROKE} />
+              <YAxis stroke={AXIS_STROKE} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} />
+              <Bar dataKey="count" fill={SERIES.green} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -87,11 +99,11 @@ export default function StatsPage() {
               <h3>Caption length distribution (words)</h3>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={captions.length_histogram}>
-                  <CartesianGrid stroke="#2a3342" vertical={false} />
-                  <XAxis dataKey="bucket" stroke="#9aa4b2" />
-                  <YAxis stroke="#9aa4b2" />
-                  <Tooltip contentStyle={{ background: "#161b24", border: "1px solid #2a3342" }} />
-                  <Bar dataKey="count" fill="#c792ea" radius={[4, 4, 0, 0]} />
+                  <CartesianGrid stroke={GRID_STROKE} vertical={false} />
+                  <XAxis dataKey="bucket" stroke={AXIS_STROKE} />
+                  <YAxis stroke={AXIS_STROKE} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Bar dataKey="count" fill={SERIES.purple} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -99,11 +111,11 @@ export default function StatsPage() {
               <h3>Most frequent caption words</h3>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={captions.top_words.slice(0, 15)}>
-                  <CartesianGrid stroke="#2a3342" vertical={false} />
-                  <XAxis dataKey="word" stroke="#9aa4b2" interval={0} angle={-35} textAnchor="end" height={60} />
-                  <YAxis stroke="#9aa4b2" />
-                  <Tooltip contentStyle={{ background: "#161b24", border: "1px solid #2a3342" }} />
-                  <Bar dataKey="count" fill="#ffbe50" radius={[4, 4, 0, 0]} />
+                  <CartesianGrid stroke={GRID_STROKE} vertical={false} />
+                  <XAxis dataKey="word" stroke={AXIS_STROKE} interval={0} angle={-35} textAnchor="end" height={60} />
+                  <YAxis stroke={AXIS_STROKE} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} />
+                  <Bar dataKey="count" fill={SERIES.amber} radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -125,15 +137,15 @@ export default function StatsPage() {
                 <h3>{g.grp.replace(/_/g, " ")}</h3>
                 <ResponsiveContainer width="100%" height={Math.max(160, g.labels.length * 34)}>
                   <BarChart data={g.labels} layout="vertical">
-                    <CartesianGrid stroke="#2a3342" horizontal={false} />
-                    <XAxis type="number" stroke="#9aa4b2" />
-                    <YAxis type="category" dataKey="label" stroke="#9aa4b2" width={110} />
+                    <CartesianGrid stroke={GRID_STROKE} horizontal={false} />
+                    <XAxis type="number" stroke={AXIS_STROKE} />
+                    <YAxis type="category" dataKey="label" stroke={AXIS_STROKE} width={110} />
                     <Tooltip
-                      contentStyle={{ background: "#161b24", border: "1px solid #2a3342" }}
+                      contentStyle={TOOLTIP_STYLE}
                       formatter={(v, _n, item) =>
                         [`${v} (${((item?.payload?.fraction ?? 0) * 100).toFixed(1)}%)`, "count"]}
                     />
-                    <Bar dataKey="count" fill="#4f9cff" radius={[0, 4, 4, 0]}
+                    <Bar dataKey="count" fill={SERIES.blue} radius={[0, 4, 4, 0]}
                          cursor="pointer"
                          onClick={(data) => {
                            const label = (data as unknown as { label?: string }).label;
@@ -152,7 +164,9 @@ export default function StatsPage() {
       </div>
       {dups.length === 0 ? (
         <div className="empty">
-          No near-duplicates found (or embeddings not computed yet).
+          {overview.embeddings_available
+            ? "No near-duplicate pairs above the similarity threshold."
+            : <>Requires embeddings — run <code>python -m app.ingest</code> first.</>}
         </div>
       ) : (
         <div className="dup-list">

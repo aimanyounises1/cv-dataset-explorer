@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { SampleCard, SearchMode } from "../api/types";
 import FilterBar, { Filters } from "../components/FilterBar";
 import ImageCard from "../components/ImageCard";
+import { useDebounce } from "../hooks/useDebounce";
 
 const PER_PAGE = 60;
 const MODES: SearchMode[] = ["hybrid", "semantic", "keyword"];
@@ -15,12 +16,14 @@ const SUGGESTIONS = [
   "splashing through snow",
 ];
 
-/** All search/filter state lives in the URL: shareable links, working
- * back-button, and filters persist when navigating to a sample and back. */
+/** All search/filter state — including pagination depth — lives in the URL:
+ * shareable links, working back-button, and "Load more" depth survives
+ * navigating to a sample and back. */
 export default function GalleryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") ?? "";
   const mode = (searchParams.get("mode") ?? "hybrid") as SearchMode;
+  const page = Math.max(1, Number(searchParams.get("page")) || 1);
   const filters: Filters = useMemo(() => ({
     split: searchParams.get("split") ?? "",
     tag: searchParams.get("tag") ?? "",
@@ -31,10 +34,13 @@ export default function GalleryPage() {
   const [input, setInput] = useState(query);
   const [items, setItems] = useState<SampleCard[]>([]);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Lets the fetch effect see the current list without depending on it.
+  const itemsRef = useRef<SampleCard[]>([]);
+  useEffect(() => { itemsRef.current = items; }, [items]);
 
   const setParams = (updates: Record<string, string>) => {
     setSearchParams((prev) => {
@@ -50,17 +56,14 @@ export default function GalleryPage() {
   // Keep the input in sync when the URL changes externally (back/forward).
   useEffect(() => { setInput(query); }, [query]);
 
-  // Debounce typed input into the URL.
+  // Debounce typed input into the URL; a query change restarts pagination.
+  const debouncedInput = useDebounce(input, 400);
   useEffect(() => {
-    const t = setTimeout(() => {
-      if (input.trim() !== query) setParams({ q: input.trim() });
-    }, 400);
-    return () => clearTimeout(t);
+    if (debouncedInput.trim() !== query) setParams({ q: debouncedInput.trim(), page: "" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input]);
+  }, [debouncedInput]);
 
   const filterKey = `${query}|${mode}|${filters.split}|${filters.tag}|${filters.vlm_tag}|${filters.attr}`;
-  useEffect(() => { setPage(1); }, [filterKey]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -73,11 +76,24 @@ export default function GalleryPage() {
           setItems(res.items);
           setTotal(res.items.length);
           setNotice(res.degraded ? res.message ?? null : null);
-        } else {
-          const res = await api.listSamples(
-            { page, per_page: PER_PAGE, ...filters }, ctrl.signal);
-          setItems((prev) => (page > 1 ? [...prev, ...res.items] : res.items));
+        } else if (page > 1 && itemsRef.current.length === (page - 1) * PER_PAGE) {
+          // "Load more": append just the next page.
+          const res = await api.listSamples({ page, per_page: PER_PAGE, ...filters }, ctrl.signal);
+          setItems((prev) => [...prev, ...res.items]);
           setTotal(res.total);
+          setNotice(null);
+        } else {
+          // Fresh mount (possibly at ?page=N after back-navigation): load 1..N.
+          let all: SampleCard[] = [];
+          let count = 0;
+          for (let p = 1; p <= page; p++) {
+            const res = await api.listSamples({ page: p, per_page: PER_PAGE, ...filters }, ctrl.signal);
+            all = all.concat(res.items);
+            count = res.total;
+            if (res.items.length < PER_PAGE) break;
+          }
+          setItems(all);
+          setTotal(count);
           setNotice(null);
         }
         setLoading(false);
@@ -109,7 +125,7 @@ export default function GalleryPage() {
               key={m}
               className={mode === m ? "active" : ""}
               aria-pressed={mode === m}
-              onClick={() => setParams({ mode: m === "hybrid" ? "" : m })}
+              onClick={() => setParams({ mode: m === "hybrid" ? "" : m, page: "" })}
               title={
                 m === "semantic" ? "SigLIP text-to-image similarity"
                 : m === "keyword" ? "BM25 full-text over captions + VLM tags (Porter-stemmed)"
@@ -122,7 +138,9 @@ export default function GalleryPage() {
         </div>
         <FilterBar
           filters={filters}
-          onChange={(f) => setParams({ split: f.split, tag: f.tag, vlm_tag: f.vlm_tag, attr: f.attr })}
+          onChange={(f) => setParams({
+            split: f.split, tag: f.tag, vlm_tag: f.vlm_tag, attr: f.attr, page: "",
+          })}
         />
       </div>
 
@@ -153,7 +171,8 @@ export default function GalleryPage() {
 
       {!query && items.length < total && (
         <div className="load-more">
-          <button className="primary" onClick={() => setPage((p) => p + 1)} disabled={loading}>
+          <button className="primary" onClick={() => setParams({ page: String(page + 1) })}
+                  disabled={loading}>
             Load more ({items.length.toLocaleString()} / {total.toLocaleString()})
           </button>
         </div>
