@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { SampleCard, SampleDetail } from "../api/types";
 import ImageCard from "../components/ImageCard";
 import TagEditor from "../components/TagEditor";
+import { useNeighbours } from "../hooks/useResultOrder";
 
 function AgreementBadge({ value }: { value?: number | null }) {
   if (value == null) return null;
@@ -42,6 +43,23 @@ export default function SamplePage() {
     window.scrollTo(0, 0);
   }, [id, refresh]);
 
+  // Sequential triage: step through the result list without returning to it.
+  const neighbours = useNeighbours(id);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.key === "ArrowLeft" || e.key === "k") && neighbours.prev != null) {
+        navigate(`/samples/${neighbours.prev}`);
+      } else if ((e.key === "ArrowRight" || e.key === "j") && neighbours.next != null) {
+        navigate(`/samples/${neighbours.next}`);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [neighbours, navigate]);
+
   if (error) return <div className="error">{error}</div>;
   if (!detail) return <div className="loading">Loading…</div>;
 
@@ -50,7 +68,22 @@ export default function SamplePage() {
 
   return (
     <div>
-      <button className="ghost back-btn" onClick={back}>← Back</button>
+      <div className="detail-nav">
+        <button className="ghost back-btn" onClick={back}>← Back</button>
+        {neighbours.position != null && (
+          <div className="detail-stepper">
+            <button className="ghost" disabled={neighbours.prev == null}
+                    onClick={() => neighbours.prev != null && navigate(`/samples/${neighbours.prev}`)}
+                    title="Previous result (← or k)">← Prev</button>
+            <span className="meta-line" style={{ margin: 0 }}>
+              {neighbours.position} / {neighbours.total}
+            </span>
+            <button className="ghost" disabled={neighbours.next == null}
+                    onClick={() => neighbours.next != null && navigate(`/samples/${neighbours.next}`)}
+                    title="Next result (→ or j)">Next →</button>
+          </div>
+        )}
+      </div>
       <div className="detail" style={{ marginTop: 12 }}>
         <div>
           <img className="detail-image" src={detail.image_url} alt={detail.captions[0]?.text ?? detail.filename} />
@@ -112,7 +145,7 @@ export default function SamplePage() {
       <div className="section-title">Similar images</div>
       {similarError && <div className="notice">{similarError}</div>}
       <div className="grid">
-        {similar.map((s) => <ImageCard key={s.id} sample={s} />)}
+        {similar.map((s) => <ImageCard key={s.id} sample={s} scoreBasis="cosine" />)}
       </div>
     </div>
   );

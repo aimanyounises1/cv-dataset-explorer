@@ -17,6 +17,11 @@ frontend/dist/
 *.log
 vite.config.ts.timestamp-*.mjs
 
+# Working material, not deliverables. requirements.txt is the canonical
+# dependency manifest; uv.lock files here only create a second source of truth.
+uv.lock
+docs/REQUIREMENTS.md
+
 # IDE / local tooling
 .idea/
 .jbeval/

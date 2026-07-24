@@ -45,10 +45,11 @@ export default function EvalPage() {
       <p className="meta-line" style={{ maxWidth: 720 }}>
         Every caption in Flickr8k is ground truth: querying with a caption should
         retrieve its own image. This runs the standard text→image retrieval
-        protocol (recall@k over a 1,000-caption sample) against all three search
-        modes — measuring, not assuming, which one is best. Note: keyword search
-        is flattered here because the query caption is literally in the index;
-        semantic recall is the honest generalization signal.
+        protocol against all three search modes — measuring, not assuming, which
+        one is best. The query caption is excluded from the index it searches, so
+        keyword mode has to find the image through the other four captions rather
+        than matching itself; without that exclusion the number would measure
+        nothing but self-retrieval.
       </p>
       <button className="primary" onClick={() => void run()} disabled={running}>
         {running ? "Running benchmark…" : result ? "Re-run benchmark" : "Run benchmark"}
@@ -59,8 +60,18 @@ export default function EvalPage() {
 
       {result?.available && (
         <>
+          {/* Recall@k is meaningless without the pool it was computed over:
+              published Flickr8k baselines rank against 1,000 candidates, so a
+              number measured against the full corpus is a harder task and not
+              comparable to them. State the pool next to the metric, always. */}
           <div className="meta-line" style={{ marginTop: 18 }}>
-            {result.sample_size.toLocaleString()} caption queries · higher is better
+            {result.sample_size.toLocaleString()} caption queries ranked against a pool of{" "}
+            <strong>{result.pool_size.toLocaleString()} images</strong> · higher recall is better
+          </div>
+          <div className="meta-line">
+            Not comparable to published Flickr8k numbers, which use a 1,000-image pool —
+            a {result.pool_size.toLocaleString()}-image pool is the harder task.
+            MRR and median rank are computed to depth {result.depth}.
           </div>
           <div className="panel" style={{ maxWidth: 720 }}>
             <ResponsiveContainer width="100%" height={300}>
@@ -82,7 +93,11 @@ export default function EvalPage() {
           </div>
           <table className="eval-table">
             <thead>
-              <tr><th>mode</th><th>R@1</th><th>R@5</th><th>R@10</th></tr>
+              <tr>
+                <th>mode</th><th>R@1</th><th>R@5</th><th>R@10</th>
+                <th title={`Mean reciprocal rank within the top ${result.depth}`}>MRR@{result.depth}</th>
+                <th title="Median rank of the correct image (lower is better)">median rank</th>
+              </tr>
             </thead>
             <tbody>
               {result.results.map((r) => (
@@ -91,6 +106,14 @@ export default function EvalPage() {
                   {["1", "5", "10"].map((k) => (
                     <td key={k}>{((r.recall_at[k] ?? 0) * 100).toFixed(1)}%</td>
                   ))}
+                  <td>{r.mrr.toFixed(3)}</td>
+                  {/* Only the semantic path scores the whole pool, so only it can
+                      report a median past the evaluated depth. */}
+                  <td title={r.median_rank == null
+                    ? `The median falls outside the top ${result.depth}, which this path does not rank beyond`
+                    : undefined}>
+                    {r.median_rank == null ? `> ${result.depth}` : r.median_rank.toFixed(1)}
+                  </td>
                 </tr>
               ))}
             </tbody>

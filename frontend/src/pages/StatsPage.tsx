@@ -68,6 +68,43 @@ export default function StatsPage() {
         </div>
       )}
 
+      {/* Where the data came from and what is known to be off about it —
+          a dataset tool that hides its own provenance is asking to be trusted
+          on faith. */}
+      <details className="caveat">
+        <summary>Dataset provenance and known limitations</summary>
+        <ul>
+          <li>
+            <strong>Source.</strong> The <code>jxie/flickr8k</code> copy on Hugging Face,
+            ingested locally. Its dataset card carries no construction methodology and
+            specifies no license.
+          </li>
+          <li>
+            <strong>Row count.</strong> This copy contains exactly{" "}
+            {overview.total_samples.toLocaleString()} images (6,000 / 1,000 / 1,000 across
+            train / validation / test), while the original Flickr8k distribution has about
+            8,091. Roughly 90 images are absent, with no explanation given upstream.
+          </li>
+          <li>
+            <strong>Splits.</strong> The counts match the canonical Hodosh split, but the
+            per-image assignments are undocumented in this copy and have not been verified
+            against the original split files.
+          </li>
+          <li>
+            <strong>Licensing.</strong> Upstream Flickr8k is distributed for
+            non-commercial research and education only. This copy states no license of its
+            own, so the upstream terms are the safe assumption. Images are not
+            redistributed by this repository — they are downloaded to your machine.
+          </li>
+          <li>
+            <strong>Composition.</strong> Captions were written by US-based crowdworkers
+            and the images were drawn from a handful of Flickr hobby groups, so the corpus
+            is not a neutral sample of the visual world — expect people, dogs, and outdoor
+            action to dominate.
+          </li>
+        </ul>
+      </details>
+
       <div className="charts">
         <div className="panel">
           <h3>Samples per split</h3>

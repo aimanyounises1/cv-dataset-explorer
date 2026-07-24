@@ -77,6 +77,32 @@ select {
 }
 .meta-line { color: var(--text-dim); font-size: 13px; margin-bottom: 12px; }
 
+/* Collapsible honesty panels: caveats a user can open, not modal noise. */
+.caveat {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 14px; margin-bottom: 14px;
+  color: var(--text-dim); font-size: 13px;
+}
+.caveat > summary {
+  cursor: pointer; color: var(--text); font-weight: 600; list-style: revert;
+}
+.caveat > summary:hover { color: var(--accent); }
+.caveat ul { margin: 10px 0 0; padding-left: 18px; }
+.caveat li { margin-bottom: 8px; line-height: 1.55; }
+.caveat p { margin: 10px 0 0; line-height: 1.55; }
+.caveat strong { color: var(--text); }
+.caveat code {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; font-size: 12px;
+}
+
+/* Sample detail: back button plus sequential-triage stepper. */
+.detail-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.detail-stepper { display: flex; align-items: center; gap: 10px; }
+
 /* Grid */
 .grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px;
@@ -209,6 +235,8 @@ mark {
 .suspect-caption { font-size: 13px; line-height: 1.4; margin-bottom: 8px; }
 .suspect-meta { display: flex; gap: 6px; flex-wrap: wrap; }
 .pill.warn-pill { color: #ffbe50; border-color: rgba(255, 190, 80, 0.4); }
+/* Which retrieval path produced a result, and at what rank. */
+.pill.path-pill { color: var(--accent); border-color: rgba(79, 156, 255, 0.35); }
 .agree-badge {
   font-size: 11px; padding: 1px 7px; border-radius: 999px; margin-left: 6px;
   border: 1px solid var(--border);

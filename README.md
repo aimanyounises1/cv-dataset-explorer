@@ -2,7 +2,7 @@
 
 A local, web-based visualization and exploration tool for image–caption datasets,
 built for the [Flickr8k dataset](https://huggingface.co/datasets/jxie/flickr8k)
-(8,091 images × 5 human captions).
+(8,000 images × 5 human captions — see [Data provenance](#data-provenance-and-licensing)).
 
 Everything runs on a single developer machine: SQLite for storage, SigLIP 2 for
 local embeddings, no cloud services or paid APIs.
@@ -32,6 +32,31 @@ search, map, QA, benchmark, assistant) is an optional layer that reports its
 own availability and degrades gracefully when its prerequisites are missing —
 without embeddings you still get browsing/keyword search/stats, and without
 the agent stack the assistant tab explains exactly how to enable it.
+
+## Data provenance and licensing
+
+**What gets ingested.** The `jxie/flickr8k` copy on Hugging Face contains exactly
+**8,000 rows** (6,000 train / 1,000 validation / 1,000 test), while the original
+Flickr8k distribution has roughly **8,091 images**. About 90 images are absent
+from this copy, with no explanation upstream — worth knowing before comparing
+any number here against a published Flickr8k result. The split *counts* match the
+canonical Hodosh split; the per-image *assignments* are undocumented in this copy
+and are not verified by this tool.
+
+**Licensing.** Upstream Flickr8k is distributed for **non-commercial research and
+education only**, and the individual photographs remain under their original
+Flickr licenses. The `jxie/flickr8k` copy specifies **no license of its own**, so
+the upstream terms are the safe assumption. This repository contains **no dataset
+images**: ingestion downloads them to your machine, and `data/` is gitignored.
+Treat anything you export as carrying the same restrictions.
+
+**Model weights** are downloaded from Hugging Face at first use
+(SigLIP 2 base, ~1.5 GB, Apache-2.0). The optional Ollama models carry their own
+licenses. No dataset or model weights are redistributed here.
+
+**Network access.** Preparation makes two one-time downloads — the dataset and the
+model weights. After they are cached, the entire system runs offline; no cloud
+services, hosted APIs, or external vector databases are in the runtime path.
 
 ## Requirements
 

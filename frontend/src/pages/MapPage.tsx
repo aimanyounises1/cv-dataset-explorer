@@ -84,6 +84,43 @@ export default function MapPage() {
           </span>
         )}
       </div>
+      {/* A 2-D projection of a 768-D space is a way to get around the dataset,
+          not a measurement of it: most of a point's true nearest neighbours are
+          not its neighbours here, and neither cluster size nor the gap between
+          clusters carries meaning. Saying so in-product is the difference
+          between a navigation aid and a misleading chart. */}
+      {/* Open by default: a caveat you have to discover does not prevent the
+          misreading it exists to prevent. */}
+      <details className="caveat" open>
+        <summary>
+          Reading this map: it is a navigation surface, not an analysis surface
+        </summary>
+        <ul>
+          <li>
+            <strong>Distances are not similarities.</strong> UMAP preserves local
+            neighbourhoods approximately and distorts distance by orders of magnitude.
+            At this scale, published measurements find that well over half of a point's
+            true high-dimensional neighbours are missing from its 2-D neighbourhood.
+          </li>
+          <li>
+            <strong>Cluster size and spacing mean nothing.</strong> The algorithm
+            expands dense regions and contracts sparse ones, and the gap between two
+            blobs is not a measure of how different they are. Colours are k-means
+            groups in the original space, drawn here — not clusters discovered in 2-D.
+          </li>
+          <li>
+            <strong>For an honest neighbourhood, open a sample.</strong> The
+            “Similar images” list on the detail page is exact nearest-neighbour
+            search in the full 768-dimensional embedding space; trust it over the
+            picture whenever the two disagree.
+          </li>
+        </ul>
+        <p>
+          Use the map to find regions worth looking at, then lasso them
+          (shift+drag) and inspect the actual images.
+        </p>
+      </details>
+
       <ScatterPlot
         points={points}
         onSelect={(id) => navigate(`/samples/${id}`)}
