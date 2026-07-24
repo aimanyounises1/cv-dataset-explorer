@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Data artifacts (downloaded / generated locally)
+backend/data/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Misc
+.DS_Store
+*.log
+vite.config.ts.timestamp-*.mjs
+
+# IDE / local tooling
+.idea/
+.jbeval/
+.omc/
