@@ -1,0 +1,22 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+numpy>=1.26
+pillow>=10.0
+tqdm>=4.66
+httpx>=0.27
+
+# Dataset download
+datasets>=2.19
+huggingface_hub>=0.23
+
+# Embeddings (SigLIP 2). Runs on Apple Silicon (MPS), CUDA, or CPU.
+torch>=2.2
+transformers>=4.49
+
+# Analytics
+scikit-learn>=1.4
+umap-learn>=0.5.5
+
+# Tests
+pytest>=8.0

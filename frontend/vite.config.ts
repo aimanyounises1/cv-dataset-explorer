@@ -1,0 +1,13 @@
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+// API + media requests are proxied to the FastAPI backend in dev.
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      "/api": "http://localhost:8000",
+      "/media": "http://localhost:8000",
+    },
+  },
+});
