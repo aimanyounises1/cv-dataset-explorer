@@ -1,11 +1,15 @@
+import { Suspense, lazy } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
-import ChatPage from "./pages/ChatPage";
-import EvalPage from "./pages/EvalPage";
 import GalleryPage from "./pages/GalleryPage";
-import MapPage from "./pages/MapPage";
-import QualityPage from "./pages/QualityPage";
-import SamplePage from "./pages/SamplePage";
-import StatsPage from "./pages/StatsPage";
+
+// All non-default routes load on demand, so the gallery ships without
+// recharts, the canvas map, or the chat view in its initial bundle.
+const SamplePage = lazy(() => import("./pages/SamplePage"));
+const MapPage = lazy(() => import("./pages/MapPage"));
+const StatsPage = lazy(() => import("./pages/StatsPage"));
+const QualityPage = lazy(() => import("./pages/QualityPage"));
+const EvalPage = lazy(() => import("./pages/EvalPage"));
+const ChatPage = lazy(() => import("./pages/ChatPage"));
 
 export default function App() {
   return (
@@ -25,15 +29,17 @@ export default function App() {
         </nav>
       </header>
       <main>
-        <Routes>
-          <Route path="/" element={<GalleryPage />} />
-          <Route path="/samples/:id" element={<SamplePage />} />
-          <Route path="/map" element={<MapPage />} />
-          <Route path="/stats" element={<StatsPage />} />
-          <Route path="/quality" element={<QualityPage />} />
-          <Route path="/eval" element={<EvalPage />} />
-          <Route path="/chat" element={<ChatPage />} />
-        </Routes>
+        <Suspense fallback={<div className="loading">Loading…</div>}>
+          <Routes>
+            <Route path="/" element={<GalleryPage />} />
+            <Route path="/samples/:id" element={<SamplePage />} />
+            <Route path="/map" element={<MapPage />} />
+            <Route path="/stats" element={<StatsPage />} />
+            <Route path="/quality" element={<QualityPage />} />
+            <Route path="/eval" element={<EvalPage />} />
+            <Route path="/chat" element={<ChatPage />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );
