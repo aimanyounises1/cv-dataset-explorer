@@ -4,6 +4,15 @@
 set -e
 cd "$(dirname "$0")"
 
+if [[ ! -x backend/.venv/bin/uvicorn ]]; then
+  echo "backend/.venv not found — follow the Setup steps in README.md first." >&2
+  exit 1
+fi
+if [[ ! -d frontend/node_modules ]]; then
+  echo "frontend/node_modules not found — run: cd frontend && npm install" >&2
+  exit 1
+fi
+
 echo "Starting backend on :8000 ..."
 (
   cd backend
