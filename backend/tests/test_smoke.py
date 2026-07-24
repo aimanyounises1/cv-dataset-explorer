@@ -137,7 +137,11 @@ def test_admin_reload(client):
     assert r.json()["image_index"] is False
 
 
-def test_chat_unavailable_is_graceful(client):
+def test_chat_unavailable_is_graceful(client, monkeypatch):
+    # Pin Ollama to a dead port so the degraded path is exercised even on
+    # machines where a real Ollama happens to be running.
+    from app import config
+    monkeypatch.setattr(config, "OLLAMA_URL", "http://127.0.0.1:9")
     r = client.get("/api/chat/status")
     assert r.status_code == 200 and r.json()["available"] is False
     r = client.post("/api/chat",
