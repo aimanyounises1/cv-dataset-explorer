@@ -1,0 +1,19 @@
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # bugbear
+]
+ignore = [
+    "B008",  # function call in argument default — FastAPI's Depends/Query/Body pattern
+    "E501",  # long lines: a handful of SQL strings/prompts read better unwrapped
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -41,6 +41,26 @@ def add_tag(sample_id: int, name: str = Body(..., embed=True),
     return {"ok": True}
 
 
+@router.post("/tags/bulk")
+def bulk_tag(sample_ids: list[int] = Body(...), name: str = Body(...),
+             conn: sqlite3.Connection = Depends(get_conn)):
+    """Tag many samples at once (used by map box-selection)."""
+    name = name.strip().lower()
+    if not name:
+        raise HTTPException(400, "Empty tag")
+    if not sample_ids:
+        raise HTTPException(400, "No samples selected")
+    conn.execute("INSERT OR IGNORE INTO tags(name) VALUES (?)", (name,))
+    tag_id = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()["id"]
+    conn.executemany(
+        "INSERT OR IGNORE INTO sample_tags(sample_id, tag_id) "
+        "SELECT id, ? FROM samples WHERE id = ?",
+        [(tag_id, sid) for sid in sample_ids])
+    conn.commit()
+    n = conn.execute("SELECT COUNT(*) FROM sample_tags WHERE tag_id = ?", (tag_id,)).fetchone()[0]
+    return {"ok": True, "tag": name, "tagged": n}
+
+
 @router.delete("/samples/{sample_id}/tags/{name}")
 def remove_tag(sample_id: int, name: str, conn: sqlite3.Connection = Depends(get_conn)):
     conn.execute(

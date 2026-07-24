@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ..ml.index import get_index
-from ..schemas import SampleCard, SampleDetail, SampleList
+from ..schemas import CaptionOut, SampleCard, SampleDetail, SampleList
 from .deps import build_filters, first_captions, get_conn, image_url, row_to_card, thumb_url
 
 router = APIRouter()
@@ -18,9 +18,10 @@ def list_samples(
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
+    attr: Optional[str] = None,
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    where, params = build_filters(split, tag, vlm_tag)
+    where, params = build_filters(split, tag, vlm_tag, attr)
     total = conn.execute(f"SELECT COUNT(*) FROM samples s{where}", params).fetchone()[0]
     rows = conn.execute(
         f"SELECT s.* FROM samples s{where} ORDER BY s.id LIMIT ? OFFSET ?",
@@ -36,18 +37,25 @@ def get_sample(sample_id: int, conn: sqlite3.Connection = Depends(get_conn)):
     row = conn.execute("SELECT * FROM samples WHERE id = ?", (sample_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "Sample not found")
-    captions = [r["text"] for r in conn.execute(
-        "SELECT text FROM captions WHERE sample_id = ? ORDER BY idx", (sample_id,))]
+    captions = [CaptionOut(text=r["text"],
+                           agreement=round(r["agreement"], 4) if r["agreement"] is not None else None)
+                for r in conn.execute(
+        "SELECT text, agreement FROM captions WHERE sample_id = ? ORDER BY idx", (sample_id,))]
     tags = [r["name"] for r in conn.execute(
         "SELECT t.name FROM tags t JOIN sample_tags st ON st.tag_id = t.id "
         "WHERE st.sample_id = ? ORDER BY t.name", (sample_id,))]
     vlm_tags = [r["tag"] for r in conn.execute(
         "SELECT tag FROM vlm_tags WHERE sample_id = ? ORDER BY tag", (sample_id,))]
+    attributes = {r["grp"]: r["label"] for r in conn.execute(
+        "SELECT grp, label FROM attributes WHERE sample_id = ?", (sample_id,))}
+    consistency = row["caption_consistency"] if "caption_consistency" in row.keys() else None
     return SampleDetail(
         id=row["id"], filename=row["filename"], split=row["split"],
         width=row["width"], height=row["height"], filesize=row["filesize"],
         image_url=image_url(row["filename"]), thumb_url=thumb_url(row["filename"]),
-        captions=captions, tags=tags, vlm_tags=vlm_tags, cluster=row["cluster"],
+        captions=captions, tags=tags, vlm_tags=vlm_tags, attributes=attributes,
+        cluster=row["cluster"],
+        caption_consistency=round(consistency, 4) if consistency is not None else None,
     )
 
 
@@ -76,16 +84,32 @@ def export_subset(
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
+    attr: Optional[str] = None,
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    """JSON manifest of the current filtered subset (filenames + captions),
-    e.g. for handing a curated slice to a training pipeline."""
-    where, params = build_filters(split, tag, vlm_tag)
+    """JSON manifest of the current filtered subset (ids, filenames, captions,
+    user tags), e.g. for handing a curated slice to a training pipeline."""
+    where, params = build_filters(split, tag, vlm_tag, attr)
     rows = conn.execute(f"SELECT s.* FROM samples s{where} ORDER BY s.id", params).fetchall()
-    result = []
-    for r in rows:
-        caps = [c["text"] for c in conn.execute(
-            "SELECT text FROM captions WHERE sample_id = ? ORDER BY idx", (r["id"],))]
-        result.append({"filename": r["filename"], "split": r["split"], "captions": caps})
-    return {"count": len(result), "filters": {"split": split, "tag": tag, "vlm_tag": vlm_tag},
-            "samples": result}
+    ids = [r["id"] for r in rows]
+    caps: dict[int, list[str]] = {}
+    tag_map: dict[int, list[str]] = {}
+    if ids:
+        qmarks = ",".join("?" * len(ids))
+        for c in conn.execute(
+            f"SELECT sample_id, text FROM captions WHERE sample_id IN ({qmarks}) "
+            "ORDER BY sample_id, idx", ids):
+            caps.setdefault(c["sample_id"], []).append(c["text"])
+        for t in conn.execute(
+            f"SELECT st.sample_id, t.name FROM sample_tags st "
+            f"JOIN tags t ON t.id = st.tag_id WHERE st.sample_id IN ({qmarks})", ids):
+            tag_map.setdefault(t["sample_id"], []).append(t["name"])
+    return {
+        "count": len(rows),
+        "filters": {"split": split, "tag": tag, "vlm_tag": vlm_tag, "attr": attr},
+        "samples": [
+            {"id": r["id"], "filename": r["filename"], "split": r["split"],
+             "captions": caps.get(r["id"], []), "tags": tag_map.get(r["id"], [])}
+            for r in rows
+        ],
+    }

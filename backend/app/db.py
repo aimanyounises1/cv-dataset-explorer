@@ -29,14 +29,26 @@ CREATE TABLE IF NOT EXISTS captions (
     id INTEGER PRIMARY KEY,
     sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,
     idx INTEGER NOT NULL,
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    agreement REAL  -- SigLIP image-caption similarity (CLIPScore-style QA signal)
 );
 CREATE INDEX IF NOT EXISTS idx_captions_sample ON captions(sample_id);
 
--- Full-text index over captions (external content table).
+-- Full-text index over captions (external content table, Porter stemming so
+-- "run" matches "running").
 CREATE VIRTUAL TABLE IF NOT EXISTS captions_fts USING fts5(
-    text, content='captions', content_rowid='id'
+    text, content='captions', content_rowid='id', tokenize='porter unicode61'
 );
+
+-- Zero-shot attributes (SigLIP label-bank classification), filterable facets.
+CREATE TABLE IF NOT EXISTS attributes (
+    sample_id INTEGER NOT NULL REFERENCES samples(id) ON DELETE CASCADE,
+    grp TEXT NOT NULL,
+    label TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    PRIMARY KEY (sample_id, grp)
+);
+CREATE INDEX IF NOT EXISTS idx_attributes_grp_label ON attributes(grp, label);
 
 -- User-curated tags.
 CREATE TABLE IF NOT EXISTS tags (
@@ -72,7 +84,30 @@ def connect() -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring pre-existing databases up to the current schema (idempotent)."""
+    def columns(table: str) -> set[str]:
+        return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+
+    if "agreement" not in columns("captions"):
+        conn.execute("ALTER TABLE captions ADD COLUMN agreement REAL")
+    if "caption_consistency" not in columns("samples"):
+        conn.execute("ALTER TABLE samples ADD COLUMN caption_consistency REAL")
+
+    # Rebuild the FTS index if it predates Porter stemming.
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name = 'captions_fts'").fetchone()
+    if row and "porter" not in (row["sql"] or ""):
+        conn.executescript(
+            "DROP TABLE captions_fts;"
+            "CREATE VIRTUAL TABLE captions_fts USING fts5("
+            "  text, content='captions', content_rowid='id', tokenize='porter unicode61');"
+        )
+        conn.execute("INSERT INTO captions_fts(rowid, text) SELECT id, text FROM captions")
 
 
 @contextmanager

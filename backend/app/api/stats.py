@@ -23,6 +23,15 @@ STOPWORDS = set(
 _caption_stats_cache: Optional[CaptionStats] = None
 
 
+def clear_caches() -> None:
+    """Reset in-memory + on-disk stats caches (called by /api/admin/reload)."""
+    global _caption_stats_cache
+    _caption_stats_cache = None
+    if config.CACHE_DIR.exists():
+        for f in config.CACHE_DIR.glob("*.json"):
+            f.unlink(missing_ok=True)
+
+
 @router.get("/stats/overview", response_model=StatsOverview)
 def overview(conn: sqlite3.Connection = Depends(get_conn)):
     total = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]

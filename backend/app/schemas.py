@@ -13,6 +13,8 @@ class SampleCard(BaseModel):
     thumb_url: str
     caption: Optional[str] = None       # representative caption
     score: Optional[float] = None       # search relevance, when applicable
+    match_caption: Optional[str] = None  # the caption that explains this match
+    matched_terms: Optional[list[str]] = None  # terms to highlight (keyword hits)
 
 
 class SampleList(BaseModel):
@@ -20,6 +22,11 @@ class SampleList(BaseModel):
     total: int
     page: int
     per_page: int
+
+
+class CaptionOut(BaseModel):
+    text: str
+    agreement: Optional[float] = None   # SigLIP image-caption similarity
 
 
 class SampleDetail(BaseModel):
@@ -31,10 +38,12 @@ class SampleDetail(BaseModel):
     filesize: Optional[int]
     image_url: str
     thumb_url: str
-    captions: list[str]
+    captions: list[CaptionOut]
     tags: list[str]
     vlm_tags: list[str]
+    attributes: dict[str, str] = {}
     cluster: Optional[int] = None
+    caption_consistency: Optional[float] = None
 
 
 class SearchResponse(BaseModel):
@@ -76,3 +85,56 @@ class MapPoint(BaseModel):
 class TagInfo(BaseModel):
     name: str
     count: int
+
+
+class SuspectCaption(BaseModel):
+    caption: str
+    agreement: float
+    sibling_mean: Optional[float] = None  # mean agreement of the other 4 captions
+    sample: SampleCard
+
+
+class QASummary(BaseModel):
+    available: bool
+    scored_captions: int
+    mean_agreement: Optional[float] = None
+
+
+class AttributeLabel(BaseModel):
+    label: str
+    count: int
+    fraction: float
+
+
+class AttributeGroup(BaseModel):
+    grp: str
+    labels: list[AttributeLabel]
+
+
+class EvalModeResult(BaseModel):
+    mode: str
+    recall_at: dict[str, float]         # {"1": .., "5": .., "10": ..}
+
+
+class EvalResponse(BaseModel):
+    available: bool
+    message: Optional[str] = None
+    sample_size: int = 0
+    results: list[EvalModeResult] = []
+
+
+class ChatMessage(BaseModel):
+    role: str                            # "user" | "assistant"
+    content: str
+
+
+class ChatTraceStep(BaseModel):
+    agent: str
+    tool: str
+    input: str
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    samples: list[SampleCard] = []
+    trace: list[ChatTraceStep] = []

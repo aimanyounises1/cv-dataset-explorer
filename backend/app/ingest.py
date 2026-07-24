@@ -106,10 +106,10 @@ def compute_projection(conn) -> None:
     conn.executemany(
         "UPDATE samples SET umap_x=?, umap_y=?, cluster=? WHERE id=?",
         [(float(xy[i, 0]), float(xy[i, 1]), int(labels[i]), int(sid))
-         for i, sid in enumerate(index.sample_ids)],
+         for i, sid in enumerate(index.ids)],
     )
     conn.commit()
-    logger.info("Projection stored for %d samples.", len(index.sample_ids))
+    logger.info("Projection stored for %d samples.", len(index.ids))
 
 
 def main() -> int:
@@ -131,6 +131,8 @@ def main() -> int:
     if not args.skip_embeddings:
         compute_embeddings(conn)
         compute_projection(conn)
+        from .analyze import run_all
+        run_all(conn)  # caption QA scores + zero-shot attributes
     else:
         logger.info("Skipped embeddings (--skip-embeddings).")
 
