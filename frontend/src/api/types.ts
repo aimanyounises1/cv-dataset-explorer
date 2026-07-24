@@ -1,3 +1,8 @@
+export interface MatchPath {
+  path: string; // "keyword" | "semantic"
+  rank: number; // 1-based rank within that path
+}
+
 export interface SampleCard {
   id: number;
   filename: string;
@@ -9,6 +14,7 @@ export interface SampleCard {
   score?: number | null;
   match_caption?: string | null;
   matched_terms?: string[] | null;
+  match_paths?: MatchPath[] | null;
 }
 
 export interface SampleList {
@@ -40,11 +46,21 @@ export interface SampleDetail {
   caption_consistency?: number | null;
 }
 
+export interface TermStat {
+  term: string;
+  images: number;
+  fraction: number;
+  common: boolean;
+}
+
 export interface SearchResponse {
   items: SampleCard[];
   mode_used: string;
   degraded: boolean;
   message?: string | null;
+  score_basis?: string | null; // "cosine" | "rrf" | null
+  rrf_k?: number | null;
+  term_stats: TermStat[];
 }
 
 export interface StatsOverview {
@@ -108,12 +124,16 @@ export interface AttributeGroup {
 export interface EvalModeResult {
   mode: string;
   recall_at: Record<string, number>;
+  mrr: number;
+  median_rank?: number | null;
 }
 
 export interface EvalResponse {
   available: boolean;
   message?: string | null;
   sample_size: number;
+  pool_size: number;
+  depth: number;
   results: EvalModeResult[];
 }
 

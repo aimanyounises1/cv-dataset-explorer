@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { SampleCard, SearchMode } from "../api/types";
+import type { SampleCard, SearchMode, TermStat } from "../api/types";
 import FilterBar, { Filters } from "../components/FilterBar";
 import ImageCard from "../components/ImageCard";
 import { useDebounce } from "../hooks/useDebounce";
+import { saveResultOrder } from "../hooks/useResultOrder";
+
+interface SearchMeta {
+  basis?: string | null;
+  rrfK?: number | null;
+  terms: TermStat[];
+}
 
 const PER_PAGE = 60;
 const MODES: SearchMode[] = ["hybrid", "semantic", "keyword"];
@@ -37,10 +44,14 @@ export default function GalleryPage() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [meta, setMeta] = useState<SearchMeta>({ terms: [] });
 
   // Lets the fetch effect see the current list without depending on it.
   const itemsRef = useRef<SampleCard[]>([]);
   useEffect(() => { itemsRef.current = items; }, [items]);
+
+  // Publish the result order for keyboard triage on the sample page.
+  useEffect(() => { saveResultOrder(items.map((s) => s.id)); }, [items]);
 
   const setParams = (updates: Record<string, string>) => {
     setSearchParams((prev) => {
@@ -76,12 +87,14 @@ export default function GalleryPage() {
           setItems(res.items);
           setTotal(res.items.length);
           setNotice(res.degraded ? res.message ?? null : null);
+          setMeta({ basis: res.score_basis, rrfK: res.rrf_k, terms: res.term_stats ?? [] });
         } else if (page > 1 && itemsRef.current.length === (page - 1) * PER_PAGE) {
           // "Load more": append just the next page.
           const res = await api.listSamples({ page, per_page: PER_PAGE, ...filters }, ctrl.signal);
           setItems((prev) => [...prev, ...res.items]);
           setTotal(res.total);
           setNotice(null);
+          setMeta({ terms: [] });
         } else {
           // Fresh mount (possibly at ?page=N after back-navigation): load 1..N.
           let all: SampleCard[] = [];
@@ -95,6 +108,7 @@ export default function GalleryPage() {
           setItems(all);
           setTotal(count);
           setNotice(null);
+          setMeta({ terms: [] });
         }
         setLoading(false);
       } catch (e) {
@@ -107,6 +121,10 @@ export default function GalleryPage() {
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, page]);
+
+  const common = meta.terms.filter((t) => t.common);
+  const missing = meta.terms.filter((t) => t.images === 0);
+  const hasFilters = Boolean(filters.split || filters.tag || filters.vlm_tag || filters.attr);
 
   return (
     <div>
@@ -156,18 +174,51 @@ export default function GalleryPage() {
       {notice && <div className="notice">{notice}</div>}
       {error && <div className="error">{error}</div>}
 
+      {/* Keyword ranking cannot discriminate on a term that most of the corpus
+          shares, and a term nothing matches explains an empty page. Say both. */}
+      {common.length > 0 && (
+        <div className="notice">
+          {common.map((t) => (
+            <div key={t.term}>
+              <strong>“{t.term}”</strong> appears in {t.images.toLocaleString()} images
+              ({(t.fraction * 100).toFixed(0)}% of the dataset) — too common for keyword
+              ranking to separate. Add another term, or switch to semantic search.
+            </div>
+          ))}
+        </div>
+      )}
+      {missing.length > 0 && (
+        <div className="notice">
+          No caption contains {missing.map((t) => `“${t.term}”`).join(", ")}
+          {mode === "keyword"
+            ? " — keyword search matches caption text only. Semantic search can still find it."
+            : " — only semantic matches contribute for that term."}
+        </div>
+      )}
+
       <div className="meta-line" aria-live="polite">
         {query
           ? `${items.length} result${items.length === 1 ? "" : "s"} for “${query}” (${mode})`
           : `${total.toLocaleString()} samples`}
+        {query && meta.basis === "rrf" && meta.rrfK != null &&
+          ` · fused by reciprocal rank, k=${meta.rrfK}`}
       </div>
 
       <div className="grid">
-        {items.map((s) => <ImageCard key={s.id} sample={s} />)}
+        {items.map((s) => <ImageCard key={s.id} sample={s} scoreBasis={meta.basis} />)}
       </div>
 
       {loading && <div className="loading">Loading…</div>}
-      {!loading && items.length === 0 && <div className="empty">No samples found.</div>}
+      {!loading && items.length === 0 && (
+        <div className="empty">
+          No samples found.
+          {missing.length > 0
+            ? ` No caption contains ${missing.map((t) => `“${t.term}”`).join(", ")}.`
+            : hasFilters
+              ? " Try clearing a filter — every active filter is applied before ranking."
+              : ""}
+        </div>
+      )}
 
       {!query && items.length < total && (
         <div className="load-more">
