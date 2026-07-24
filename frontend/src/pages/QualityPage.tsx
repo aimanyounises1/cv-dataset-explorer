@@ -30,11 +30,16 @@ export default function QualityPage() {
   const [suspects, setSuspects] = useState<SuspectCaption[]>([]);
   const [inconsistent, setInconsistent] = useState<SuspectCaption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sectionErrors, setSectionErrors] = useState<string[]>([]);
 
   useEffect(() => {
+    // On a QA page, a swallowed error rendering as "no problems found" is the
+    // worst failure mode — failed sections must announce themselves.
+    const fail = (what: string) => () =>
+      setSectionErrors((prev) => [...prev, what]);
     api.qaSummary().then(setSummary).catch((e) => setError(String(e)));
-    api.suspectCaptions({ limit: 50 }).then(setSuspects).catch(() => setSuspects([]));
-    api.inconsistentSamples().then(setInconsistent).catch(() => setInconsistent([]));
+    api.suspectCaptions({ limit: 50 }).then(setSuspects).catch(fail("suspect captions"));
+    api.inconsistentSamples().then(setInconsistent).catch(fail("consistency ranking"));
   }, []);
 
   if (error) return <div className="error">{error}</div>;
@@ -63,16 +68,24 @@ export default function QualityPage() {
         </div>
       </div>
 
+      {sectionErrors.length > 0 && (
+        <div className="error">Could not load: {sectionErrors.join(", ")}.</div>
+      )}
+
       <div className="section-title">Most suspect captions</div>
       <p className="meta-line">
         Lowest image-caption agreement first. Low score + high sibling mean ⇒ the
         caption is likely wrong; all-low ⇒ the image itself is unusual.
       </p>
-      <div className="suspect-list">
-        {suspects.map((s, i) => (
-          <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="agreement" />
-        ))}
-      </div>
+      {suspects.length === 0 ? (
+        <div className="empty">No scored captions to show.</div>
+      ) : (
+        <div className="suspect-list">
+          {suspects.map((s, i) => (
+            <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="agreement" />
+          ))}
+        </div>
+      )}
 
       {inconsistent.length > 0 && (
         <>

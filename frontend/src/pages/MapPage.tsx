@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { MapPoint } from "../api/types";
 import ScatterPlot from "../components/ScatterPlot";
@@ -11,6 +11,7 @@ export default function MapPage() {
   const [tagName, setTagName] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [lastTag, setLastTag] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,10 +28,12 @@ export default function MapPage() {
     try {
       const res = await api.bulkTag(selected, name);
       setToast(`Tagged ${selected.length} samples as “${res.tag}”`);
+      setLastTag(res.tag);
       setTagName("");
       setSelected([]);
     } catch (err) {
       setToast(err instanceof Error ? err.message : "Bulk tag failed");
+      setLastTag(null);
     } finally {
       setBusy(false);
     }
@@ -73,9 +76,11 @@ export default function MapPage() {
         {toast && (
           <span className="pill score" role="status">
             {toast}{" "}
-            <a className="attr-link" href="#" onClick={(e) => { e.preventDefault(); navigate("/"); }}>
-              open gallery
-            </a>
+            {lastTag && (
+              <Link className="attr-link" to={`/?tag=${encodeURIComponent(lastTag)}`}>
+                review slice in gallery
+              </Link>
+            )}
           </span>
         )}
       </div>

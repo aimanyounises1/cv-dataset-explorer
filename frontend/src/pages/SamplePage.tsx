@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { SampleCard, SampleDetail } from "../api/types";
 import ImageCard from "../components/ImageCard";
@@ -86,9 +86,9 @@ export default function SamplePage() {
                 <span key={grp} style={{ display: "contents" }}>
                   <dt>{grp.replace(/_/g, " ")}</dt>
                   <dd>
-                    <a className="attr-link" href={`/?attr=${encodeURIComponent(`${grp}:${label}`)}`}>
+                    <Link className="attr-link" to={`/?attr=${encodeURIComponent(`${grp}:${label}`)}`}>
                       {label}
-                    </a>
+                    </Link>
                   </dd>
                 </span>
               ))}

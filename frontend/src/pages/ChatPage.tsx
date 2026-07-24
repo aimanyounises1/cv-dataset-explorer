@@ -15,12 +15,23 @@ const SUGGESTIONS = [
   "How is the dataset split, and is semantic search enabled?",
 ];
 
+const STORAGE_KEY = "cvde-chat-turns";
+
+function loadTurns(): Turn[] {
+  try {
+    return JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "[]") as Turn[];
+  } catch {
+    return [];
+  }
+}
+
 /** Assistant view: a Fugu-style multi-agent orchestration (LangGraph + Ollama)
  * behind a single chat box. The trace chips show which specialist and tools
- * each answer came from. */
+ * each answer came from. The conversation is kept in sessionStorage so
+ * clicking through to a sample and coming back doesn't lose it. */
 export default function ChatPage() {
   const [status, setStatus] = useState<ChatStatus | null>(null);
-  const [turns, setTurns] = useState<Turn[]>([]);
+  const [turns, setTurns] = useState<Turn[]>(loadTurns);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -29,6 +40,14 @@ export default function ChatPage() {
     api.chatStatus().then(setStatus).catch(() =>
       setStatus({ available: false, model: "?", reason: "Backend unreachable." }));
   }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(turns));
+    } catch {
+      // Best effort: a full sessionStorage only loses persistence, not the chat.
+    }
+  }, [turns]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -143,6 +162,12 @@ export default function ChatPage() {
         <button className="primary" type="submit" disabled={busy || !input.trim()}>
           Send
         </button>
+        {turns.length > 0 && (
+          <button className="ghost" type="button" disabled={busy}
+                  onClick={() => setTurns([])}>
+            New chat
+          </button>
+        )}
       </form>
     </div>
   );
