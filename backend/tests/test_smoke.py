@@ -1,20 +1,14 @@
 """Smoke tests: API works end-to-end on a seeded temp database, without the
 embedding stack (exercises the graceful-degradation path).
+Data-dir isolation happens in conftest.py, before any `app` import.
 
     cd backend && pytest
 """
-import os
-import tempfile
-
 import pytest
+from fastapi.testclient import TestClient
 
-_tmpdir = tempfile.mkdtemp()
-os.environ["CVDE_DATA_DIR"] = _tmpdir  # must be set before importing the app
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-from app import db  # noqa: E402
-from app.main import app  # noqa: E402
+from app import db
+from app.main import app
 
 
 @pytest.fixture(scope="module")
@@ -95,3 +89,65 @@ def test_stats(client):
     r = client.get("/api/stats/captions")
     assert r.status_code == 200
     assert len(r.json()["top_words"]) > 0
+
+
+def test_keyword_search_respects_filters_in_sql(client):
+    # "a man rides..." lives in the test split; filtering to train must
+    # exclude it even though it's the top keyword hit.
+    r = client.get("/api/search", params={"q": "rides", "mode": "keyword"})
+    assert len(r.json()["items"]) == 1
+    r = client.get("/api/search",
+                   params={"q": "rides", "mode": "keyword", "split": "train"})
+    assert r.json()["items"] == []
+
+
+def test_porter_stemming(client):
+    # Caption says "runs"; the stemmed FTS index should match query "running".
+    r = client.get("/api/search", params={"q": "running", "mode": "keyword"})
+    items = r.json()["items"]
+    assert len(items) == 1 and "runs" in items[0]["match_caption"]
+
+
+def test_match_explanation_fields(client):
+    r = client.get("/api/search", params={"q": "soccer", "mode": "keyword"})
+    item = r.json()["items"][0]
+    assert "soccer" in item["match_caption"]
+    assert "soccer" in item["matched_terms"]
+
+
+def test_bulk_tag(client):
+    ids = [it["id"] for it in client.get("/api/samples").json()["items"][:2]]
+    r = client.post("/api/tags/bulk", json={"sample_ids": ids, "name": "Batch-Tag"})
+    assert r.status_code == 200 and r.json()["tag"] == "batch-tag"
+    assert client.get("/api/samples", params={"tag": "batch-tag"}).json()["total"] == 2
+
+
+def test_qa_and_eval_degrade_gracefully(client):
+    r = client.get("/api/qa/summary")
+    assert r.status_code == 200 and r.json()["available"] is False
+    r = client.get("/api/eval/retrieval")
+    assert r.status_code == 200 and r.json()["available"] is False
+    assert client.get("/api/qa/captions").json() == []
+    assert client.get("/api/attributes/coverage").json() == []
+
+
+def test_admin_reload(client):
+    r = client.post("/api/admin/reload")
+    assert r.status_code == 200
+    assert r.json()["image_index"] is False
+
+
+def test_chat_unavailable_is_graceful(client):
+    r = client.get("/api/chat/status")
+    assert r.status_code == 200 and r.json()["available"] is False
+    r = client.post("/api/chat",
+                    json={"messages": [{"role": "user", "content": "hi"}]})
+    assert r.status_code == 503  # clear setup instructions, not a crash
+    assert "Ollama" in r.json()["detail"] or "agent stack" in r.json()["detail"]
+
+
+def test_export_manifest(client):
+    r = client.get("/api/export", params={"split": "test"})
+    body = r.json()
+    assert body["count"] == 1
+    assert body["samples"][0]["captions"]

@@ -71,15 +71,29 @@ def _normalize(x: np.ndarray) -> np.ndarray:
 
 
 _embedder: Optional[Embedder] = None
+_lock = __import__("threading").Lock()
+_failed_at: Optional[float] = None
+_RETRY_AFTER_S = 120.0  # don't pay a full failed model-load on every request
 
 
 def get_embedder() -> Optional[Embedder]:
-    """Singleton, or None if the model stack is unavailable."""
-    global _embedder
-    if _embedder is None:
+    """Thread-safe singleton, or None if the model stack is unavailable.
+    A failed load is cached briefly so each request doesn't retry a ~GB load."""
+    global _embedder, _failed_at
+    import time
+
+    if _embedder is not None:
+        return _embedder
+    with _lock:
+        if _embedder is not None:
+            return _embedder
+        if _failed_at is not None and time.monotonic() - _failed_at < _RETRY_AFTER_S:
+            return None
         try:
             _embedder = Embedder()
+            _failed_at = None
         except Exception as exc:  # torch missing, no network for weights, etc.
             logger.warning("Embedding model unavailable: %s", exc)
+            _failed_at = time.monotonic()
             return None
     return _embedder
