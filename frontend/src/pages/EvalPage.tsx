@@ -4,11 +4,12 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { EvalResponse } from "../api/types";
+import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../components/chartTheme";
 
 const MODE_COLORS: Record<string, string> = {
-  semantic: "#4f9cff",
-  keyword: "#ffbe50",
-  hybrid: "#3ecf8e",
+  semantic: SERIES.blue,
+  keyword: SERIES.amber,
+  hybrid: SERIES.green,
 };
 
 /** Self-benchmark: each of the dataset's own captions should retrieve its own
@@ -64,12 +65,12 @@ export default function EvalPage() {
           <div className="panel" style={{ maxWidth: 720 }}>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={chartData}>
-                <CartesianGrid stroke="#2a3342" vertical={false} />
-                <XAxis dataKey="k" stroke="#9aa4b2" />
-                <YAxis stroke="#9aa4b2" domain={[0, 1]}
+                <CartesianGrid stroke={GRID_STROKE} vertical={false} />
+                <XAxis dataKey="k" stroke={AXIS_STROKE} />
+                <YAxis stroke={AXIS_STROKE} domain={[0, 1]}
                        tickFormatter={(v: number) => `${Math.round(v * 100)}%`} />
                 <Tooltip
-                  contentStyle={{ background: "#161b24", border: "1px solid #2a3342" }}
+                  contentStyle={TOOLTIP_STYLE}
                   formatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
                 />
                 <Legend />
