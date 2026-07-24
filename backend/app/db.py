@@ -61,7 +61,9 @@ CREATE INDEX IF NOT EXISTS idx_vlm_tags_tag ON vlm_tags(tag);
 
 def connect() -> sqlite3.Connection:
     config.ensure_dirs()
-    conn = sqlite3.connect(config.DB_PATH)
+    # check_same_thread=False: FastAPI may run a sync dependency and its
+    # endpoint on different threadpool threads; access is still sequential.
+    conn = sqlite3.connect(config.DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
