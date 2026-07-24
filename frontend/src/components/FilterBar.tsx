@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { TagInfo } from "../api/types";
+import type { AttributeGroup, TagInfo } from "../api/types";
 
 export interface Filters {
   split: string;
   tag: string;
   vlm_tag: string;
+  attr: string; // "group:label"
 }
+
+export const EMPTY_FILTERS: Filters = { split: "", tag: "", vlm_tag: "", attr: "" };
 
 interface Props {
   filters: Filters;
@@ -16,10 +19,12 @@ interface Props {
 export default function FilterBar({ filters, onChange }: Props) {
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [vlmTags, setVlmTags] = useState<TagInfo[]>([]);
+  const [coverage, setCoverage] = useState<AttributeGroup[]>([]);
 
   useEffect(() => {
     api.tags().then(setTags).catch(() => setTags([]));
     api.vlmTags().then(setVlmTags).catch(() => setVlmTags([]));
+    api.coverage().then(setCoverage).catch(() => setCoverage([]));
   }, []);
 
   return (
@@ -27,18 +32,36 @@ export default function FilterBar({ filters, onChange }: Props) {
       <select
         value={filters.split}
         onChange={(e) => onChange({ ...filters, split: e.target.value })}
-        title="Split"
+        aria-label="Filter by split"
       >
         <option value="">All splits</option>
         <option value="train">train</option>
         <option value="validation">validation</option>
         <option value="test">test</option>
       </select>
+      {coverage.length > 0 && (
+        <select
+          value={filters.attr}
+          onChange={(e) => onChange({ ...filters, attr: e.target.value })}
+          aria-label="Filter by attribute"
+        >
+          <option value="">All attributes</option>
+          {coverage.map((g) => (
+            <optgroup key={g.grp} label={g.grp.replace(/_/g, " ")}>
+              {g.labels.map((l) => (
+                <option key={l.label} value={`${g.grp}:${l.label}`}>
+                  {l.label} ({l.count})
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      )}
       {tags.length > 0 && (
         <select
           value={filters.tag}
           onChange={(e) => onChange({ ...filters, tag: e.target.value })}
-          title="My tags"
+          aria-label="Filter by my tags"
         >
           <option value="">All my tags</option>
           {tags.map((t) => (
@@ -50,7 +73,7 @@ export default function FilterBar({ filters, onChange }: Props) {
         <select
           value={filters.vlm_tag}
           onChange={(e) => onChange({ ...filters, vlm_tag: e.target.value })}
-          title="VLM tags"
+          aria-label="Filter by VLM tags"
         >
           <option value="">All VLM tags</option>
           {vlmTags.map((t) => (

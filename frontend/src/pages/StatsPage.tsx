@@ -1,21 +1,24 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { api } from "../api/client";
-import type { CaptionStats, DuplicatePair, StatsOverview } from "../api/types";
+import type { AttributeGroup, CaptionStats, DuplicatePair, StatsOverview } from "../api/types";
 
 export default function StatsPage() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);
   const [captions, setCaptions] = useState<CaptionStats | null>(null);
   const [dups, setDups] = useState<DuplicatePair[]>([]);
+  const [coverage, setCoverage] = useState<AttributeGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     api.overview().then(setOverview).catch((e) => setError(String(e)));
     api.captionStats().then(setCaptions).catch(() => undefined);
     api.duplicates().then(setDups).catch(() => undefined);
+    api.coverage().then(setCoverage).catch(() => undefined);
   }, []);
 
   if (error) return <div className="error">{error}</div>;
@@ -107,6 +110,42 @@ export default function StatsPage() {
           </>
         )}
       </div>
+
+      {coverage.length > 0 && (
+        <>
+          <div className="section-title">Attribute coverage (zero-shot)</div>
+          <p className="meta-line">
+            SigLIP label-bank classification over existing embeddings. Small
+            slices are the dataset's long tail — click any bar to open that
+            slice in the gallery.
+          </p>
+          <div className="charts">
+            {coverage.map((g) => (
+              <div className="panel" key={g.grp}>
+                <h3>{g.grp.replace(/_/g, " ")}</h3>
+                <ResponsiveContainer width="100%" height={Math.max(160, g.labels.length * 34)}>
+                  <BarChart data={g.labels} layout="vertical">
+                    <CartesianGrid stroke="#2a3342" horizontal={false} />
+                    <XAxis type="number" stroke="#9aa4b2" />
+                    <YAxis type="category" dataKey="label" stroke="#9aa4b2" width={110} />
+                    <Tooltip
+                      contentStyle={{ background: "#161b24", border: "1px solid #2a3342" }}
+                      formatter={(v, _n, item) =>
+                        [`${v} (${((item?.payload?.fraction ?? 0) * 100).toFixed(1)}%)`, "count"]}
+                    />
+                    <Bar dataKey="count" fill="#4f9cff" radius={[0, 4, 4, 0]}
+                         cursor="pointer"
+                         onClick={(data) => {
+                           const label = (data as unknown as { label?: string }).label;
+                           if (label) navigate(`/?attr=${encodeURIComponent(`${g.grp}:${label}`)}`);
+                         }} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <div className="section-title">
         Near-duplicate pairs {dups.length > 0 && `(${dups.length})`}

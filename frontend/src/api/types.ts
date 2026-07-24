@@ -7,6 +7,8 @@ export interface SampleCard {
   thumb_url: string;
   caption?: string | null;
   score?: number | null;
+  match_caption?: string | null;
+  matched_terms?: string[] | null;
 }
 
 export interface SampleList {
@@ -14,6 +16,11 @@ export interface SampleList {
   total: number;
   page: number;
   per_page: number;
+}
+
+export interface CaptionOut {
+  text: string;
+  agreement?: number | null;
 }
 
 export interface SampleDetail {
@@ -25,10 +32,12 @@ export interface SampleDetail {
   filesize?: number | null;
   image_url: string;
   thumb_url: string;
-  captions: string[];
+  captions: CaptionOut[];
   tags: string[];
   vlm_tags: string[];
+  attributes: Record<string, string>;
   cluster?: number | null;
+  caption_consistency?: number | null;
 }
 
 export interface SearchResponse {
@@ -70,6 +79,65 @@ export interface MapPoint {
 export interface TagInfo {
   name: string;
   count: number;
+}
+
+export interface SuspectCaption {
+  caption: string;
+  agreement: number;
+  sibling_mean?: number | null;
+  sample: SampleCard;
+}
+
+export interface QASummary {
+  available: boolean;
+  scored_captions: number;
+  mean_agreement?: number | null;
+}
+
+export interface AttributeLabel {
+  label: string;
+  count: number;
+  fraction: number;
+}
+
+export interface AttributeGroup {
+  grp: string;
+  labels: AttributeLabel[];
+}
+
+export interface EvalModeResult {
+  mode: string;
+  recall_at: Record<string, number>;
+}
+
+export interface EvalResponse {
+  available: boolean;
+  message?: string | null;
+  sample_size: number;
+  results: EvalModeResult[];
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ChatTraceStep {
+  agent: string;
+  tool: string;
+  input: string;
+}
+
+export interface ChatResponse {
+  reply: string;
+  samples: SampleCard[];
+  trace: ChatTraceStep[];
+}
+
+export interface ChatStatus {
+  available: boolean;
+  model: string;
+  reason?: string;
 }
 
 export type SearchMode = "hybrid" | "semantic" | "keyword";
