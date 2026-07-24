@@ -8,23 +8,27 @@ Correctness notes:
 - If the embedding stack is unavailable, semantic/hybrid transparently degrade
   to keyword search and the response says so.
 - Each result carries the caption that best explains the match (FTS best hit
-  for keyword; most query-similar caption for semantic) so the UI can show
-  WHY something matched.
+  for keyword; most query-similar caption for semantic), the path(s) that
+  retrieved it and their ranks, so the UI can show WHY something matched.
+- Scores from different modes are not comparable (a text-image cosine and an
+  RRF sum live on different scales), so every response names its score basis
+  and the UI labels it. Ranks, not scores, are what fusion combines.
 """
+import logging
 import sqlite3
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from .. import db
+from .. import config, db
 from ..ml.embedder import get_embedder
 from ..ml.index import get_caption_index, get_index
-from ..schemas import SearchResponse
+from ..schemas import MatchPath, SearchResponse, TermStat
 from .deps import build_filters, filtered_id_set, first_captions, get_conn, row_to_card
 
-router = APIRouter()
+logger = logging.getLogger(__name__)
 
-RRF_K = 60  # standard reciprocal-rank-fusion constant
+router = APIRouter()
 
 
 def _keyword_ranking(
@@ -62,6 +66,34 @@ def _keyword_ranking(
         seen = set(ids)
         ids += [r["sid"] for r in tag_rows if r["sid"] not in seen][: top_k - len(ids)]
     return ids, best_caption
+
+
+def _term_stats(conn, q: str) -> list[TermStat]:
+    """Document frequency of each content term in the query.
+
+    Two failure modes become visible from this: a term matching nothing (which
+    explains an empty result set) and a term matching a large share of the
+    corpus (where BM25 has almost nothing to rank on). Counts are corpus-wide
+    and stemmed, matching how the query itself is evaluated.
+    """
+    total = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0] or 1
+    stats, seen = [], set()
+    for raw in q.split():
+        term = raw.strip().lower()
+        if not term or term in db.STOPWORDS or term in seen:
+            continue
+        seen.add(term)
+        match = db.fts_escape(term)
+        if not match:
+            continue
+        n = conn.execute(
+            "SELECT COUNT(DISTINCT c.sample_id) FROM captions_fts f "
+            "JOIN captions c ON c.id = f.rowid WHERE captions_fts MATCH ?",
+            (match,),
+        ).fetchone()[0]
+        stats.append(TermStat(term=term, images=n, fraction=round(n / total, 4),
+                              common=n / total >= config.DF_WARN_FRACTION))
+    return stats
 
 
 def _semantic_ranking(q: str, allowed: Optional[set[int]], top_k: int):
@@ -107,6 +139,9 @@ def run_search(
     scores: dict[int, float] = {}
     match_captions: dict[int, str] = {}
     matched_terms: Optional[list[str]] = None
+    paths: dict[int, list[MatchPath]] = {}
+    score_basis: Optional[str] = None
+    rrf_k: Optional[int] = None
 
     semantic, qvec = (None, None)
     if mode in ("semantic", "hybrid"):
@@ -116,29 +151,46 @@ def run_search(
             message = ("Semantic search unavailable (embeddings not computed) — "
                        "using keyword search.")
 
+    def record(path: str, ids) -> None:
+        for rank, sid in enumerate(ids):
+            paths.setdefault(sid, []).append(MatchPath(path=path, rank=rank + 1))
+
     if mode == "semantic":
         ordered = [sid for sid, _ in semantic]
         scores = dict(semantic)
+        score_basis = "cosine"
+        record("semantic", ordered)
         match_captions = _best_captions_for(conn, ordered, qvec)
     elif mode == "keyword":
         ordered, match_captions = _keyword_ranking(
             conn, q, top_k, split, tag, vlm_tag, attr)
+        record("keyword", ordered)
         matched_terms = [t for t in q.split() if t.strip()]
     else:  # hybrid: reciprocal-rank fusion
         keyword, kw_captions = _keyword_ranking(
             conn, q, top_k, split, tag, vlm_tag, attr)
+        rrf_k = config.RRF_K
         fused: dict[int, float] = {}
         for rank, (sid, _s) in enumerate(semantic):
-            fused[sid] = fused.get(sid, 0.0) + 1.0 / (RRF_K + rank + 1)
+            fused[sid] = fused.get(sid, 0.0) + 1.0 / (rrf_k + rank + 1)
         for rank, sid in enumerate(keyword):
-            fused[sid] = fused.get(sid, 0.0) + 1.0 / (RRF_K + rank + 1)
+            fused[sid] = fused.get(sid, 0.0) + 1.0 / (rrf_k + rank + 1)
         ordered = sorted(fused, key=lambda sid: -fused[sid])[:top_k]
         scores = fused
+        score_basis = "rrf"
+        record("semantic", [sid for sid, _ in semantic])
+        record("keyword", keyword)
+        logger.debug("Fused %d semantic + %d keyword results with RRF k=%d",
+                     len(semantic), len(keyword), rrf_k)
         match_captions = {**_best_captions_for(conn, ordered, qvec), **kw_captions}
         matched_terms = [t for t in q.split() if t.strip()]
 
+    term_stats = _term_stats(conn, q) if mode in ("keyword", "hybrid") else []
+
     if not ordered:
-        return SearchResponse(items=[], mode_used=mode, degraded=degraded, message=message)
+        return SearchResponse(items=[], mode_used=mode, degraded=degraded,
+                              message=message, score_basis=score_basis,
+                              rrf_k=rrf_k, term_stats=term_stats)
 
     qmarks = ",".join("?" * len(ordered))
     rows = {r["id"]: r for r in conn.execute(
@@ -151,8 +203,11 @@ def run_search(
         card = row_to_card(rows[sid], caption=captions.get(sid), score=scores.get(sid))
         card.match_caption = match_captions.get(sid)
         card.matched_terms = matched_terms
+        card.match_paths = paths.get(sid)
         items.append(card)
-    return SearchResponse(items=items, mode_used=mode, degraded=degraded, message=message)
+    return SearchResponse(items=items, mode_used=mode, degraded=degraded,
+                          message=message, score_basis=score_basis, rrf_k=rrf_k,
+                          term_stats=term_stats)
 
 
 @router.get("/search", response_model=SearchResponse)

@@ -143,3 +143,27 @@ def test_retrieval_benchmark(client):
     assert set(modes) == {"semantic", "keyword", "hybrid"}
     # Caption embeddings equal their image embeddings ⇒ semantic R@1 is perfect.
     assert modes["semantic"]["1"] == 1.0
+
+
+def test_benchmark_excludes_the_held_out_caption(client):
+    """FR-EV-2: the query caption must not be in the index it searches.
+
+    Each fixture sample has exactly one caption, so once that caption is
+    excluded the lexical path has no text left pointing at the right image and
+    recall must be 0. Without the exclusion every query would trivially match
+    its own row and keyword recall would read 1.0 — a number measuring nothing.
+    """
+    body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+    modes = {res["mode"]: res for res in body["results"]}
+    assert modes["keyword"]["recall_at"]["10"] == 0.0
+    assert modes["keyword"]["median_rank"] is None  # never found within depth
+
+
+def test_benchmark_reports_pool_size_and_rank_metrics(client):
+    """FR-EV-4: a recall number without its candidate pool is not comparable."""
+    body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+    assert body["pool_size"] == 4        # the fixture corpus, not the query count
+    assert body["depth"] == 10
+    semantic = next(r for r in body["results"] if r["mode"] == "semantic")
+    assert semantic["mrr"] == 1.0
+    assert semantic["median_rank"] == 1.0

@@ -4,6 +4,12 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class MatchPath(BaseModel):
+    """Which retrieval path produced this result, and where it placed."""
+    path: str                           # "keyword" | "semantic"
+    rank: int                           # 1-based rank within that path
+
+
 class SampleCard(BaseModel):
     id: int
     filename: str
@@ -15,6 +21,7 @@ class SampleCard(BaseModel):
     score: Optional[float] = None       # search relevance, when applicable
     match_caption: Optional[str] = None  # the caption that explains this match
     matched_terms: Optional[list[str]] = None  # terms to highlight (keyword hits)
+    match_paths: Optional[list[MatchPath]] = None  # why this result is here
 
 
 class SampleList(BaseModel):
@@ -46,11 +53,23 @@ class SampleDetail(BaseModel):
     caption_consistency: Optional[float] = None
 
 
+class TermStat(BaseModel):
+    """Document frequency of one query term, so the user can see when keyword
+    ranking has nothing to discriminate on."""
+    term: str
+    images: int                         # images with the term in any caption
+    fraction: float                     # images / corpus size
+    common: bool                        # at or above the warning threshold
+
+
 class SearchResponse(BaseModel):
     items: list[SampleCard]
     mode_used: str                      # actual mode after any fallback
     degraded: bool = False              # true if semantic search was unavailable
     message: Optional[str] = None
+    score_basis: Optional[str] = None   # what `score` means: cosine | rrf | None
+    rrf_k: Optional[int] = None         # fusion constant, when fusion ran
+    term_stats: list[TermStat] = []     # per-term document frequency (lexical modes)
 
 
 class StatsOverview(BaseModel):
@@ -114,12 +133,16 @@ class AttributeGroup(BaseModel):
 class EvalModeResult(BaseModel):
     mode: str
     recall_at: dict[str, float]         # {"1": .., "5": .., "10": ..}
+    mrr: float = 0.0                    # mean reciprocal rank within the depth
+    median_rank: Optional[float] = None  # None when the median falls past depth
 
 
 class EvalResponse(BaseModel):
     available: bool
     message: Optional[str] = None
-    sample_size: int = 0
+    sample_size: int = 0                # number of caption queries run
+    pool_size: int = 0                  # candidate images each query ranks against
+    depth: int = 0                      # rank depth MRR/median are computed to
     results: list[EvalModeResult] = []
 
 

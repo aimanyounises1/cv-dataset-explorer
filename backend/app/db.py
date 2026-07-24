@@ -124,3 +124,12 @@ def fts_escape(query: str) -> str:
     """Turn free text into a safe FTS5 MATCH expression (implicit AND of terms)."""
     terms = [t.replace('"', '""') for t in query.split() if t.strip()]
     return " ".join(f'"{t}"' for t in terms)
+
+
+# Function words carry no retrieval signal; they are indexed (the tokenizer does
+# not strip them) but are never worth reporting to the user as "too common".
+STOPWORDS = frozenset(
+    "a an and are as at be by for from has he in is it its of on that the to was "
+    "were will with his her their this there two three while over under near up "
+    "down out off no not they them then than into onto".split()
+)
