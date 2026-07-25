@@ -52,6 +52,7 @@ export const api = {
 
   qaSummary: () => get<QASummary>("/qa/summary"),
   suspectCaptions: (params?: Params) => get<SuspectCaption[]>("/qa/captions", params),
+  // (params carries limit / split / max_agreement — the review threshold)
   inconsistentSamples: () => get<SuspectCaption[]>("/qa/consistency"),
   coverage: () => get<AttributeGroup[]>("/attributes/coverage"),
   evalRetrieval: (sampleSize = 1000) =>

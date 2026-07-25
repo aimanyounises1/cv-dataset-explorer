@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { AttributeGroup, CaptionStats, DuplicatePair, StatsOverview } from "../api/types";
-import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../components/chartTheme";
+import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../lib/viz";
 
 export default function StatsPage() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);

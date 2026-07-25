@@ -118,6 +118,12 @@ export interface MapPoint {
   y: number;
   cluster: number;
   thumb_url: string;
+  split: string;
+  agreement?: number | null;
+  legibility?: number | null;
+  rarity?: number | null;
+  difficulty?: number | null;
+  clutter?: number | null;
 }
 
 export interface TagInfo {
@@ -136,6 +142,9 @@ export interface QASummary {
   available: boolean;
   scored_captions: number;
   mean_agreement?: number | null;
+  histogram: { lo: number; hi: number; count: number }[];
+  min_agreement?: number | null;
+  max_agreement?: number | null;
 }
 
 export interface AttributeLabel {

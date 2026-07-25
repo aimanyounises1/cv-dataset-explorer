@@ -212,25 +212,73 @@ select:hover { border-color: var(--border-strong); }
   .axis-name { grid-column: 1 / -1; }
 }
 
-/* Axis badges on a card: how much attention this sample is asking for. */
-.axis-badges {
-  display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px;
+/* Difficulty on a card: one sparkline plus the single axis worth naming.
+   Four numbers were individually precise and collectively unreadable; the
+   profile is what you actually scan a grid for. */
+.axis-row { display: flex; align-items: flex-end; gap: 7px; margin-top: 7px; }
+.axis-spark { display: block; flex-shrink: 0; }
+.axis-lead {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-}
-.axis-badge {
   font-size: 9.5px; padding: 1px 5px; border-radius: 3px;
-  border: 1px solid transparent; letter-spacing: 0.02em;
+  border: 1px solid transparent; letter-spacing: 0.02em; white-space: nowrap;
 }
-.axis-badge b { font-weight: 700; }
-.axis-badge.cool { color: var(--text-faint); background: var(--bg-inset); }
-.axis-badge.mid { color: var(--text-dim); background: var(--bg-hover); }
-.axis-badge.warm {
+.axis-lead.cool { color: var(--text-faint); background: var(--bg-inset); }
+.axis-lead.mid { color: var(--text-dim); background: var(--bg-hover); }
+.axis-lead.warm {
   color: var(--amber); background: rgba(240, 180, 41, 0.1);
   border-color: rgba(240, 180, 41, 0.25);
 }
-.axis-badge.hot {
+.axis-lead.hot {
   color: #ff9d9d; background: rgba(255, 122, 122, 0.12);
   border-color: rgba(255, 122, 122, 0.3);
+}
+
+/* Map colour-by control and its legend. */
+.map-toolbar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.map-legend { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.legend-ramp {
+  display: flex; height: 9px; width: 128px; border-radius: 2px; overflow: hidden;
+  border: 1px solid var(--border);
+}
+.legend-ramp span { flex: 1; }
+.legend-ends {
+  display: flex; justify-content: space-between; width: 128px;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint);
+}
+.legend-swatches { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.legend-swatch {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+}
+.legend-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+
+/* Quality: brushable agreement distribution. */
+.dist-panel {
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px;
+}
+.dist-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
+}
+.dist-bars {
+  display: flex; align-items: flex-end; gap: 2px; height: 88px;
+  border-bottom: 1px solid var(--border); padding-bottom: 1px;
+}
+.dist-bar { flex: 1; min-width: 2px; border-radius: 1px 1px 0 0; transition: opacity 0.12s; }
+.dist-bar.out { opacity: 0.22; }
+.dist-axis {
+  display: flex; justify-content: space-between; margin-top: 5px;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint);
+}
+.dist-control { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.dist-control input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+.dist-readout {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 11.5px; color: var(--accent); white-space: nowrap;
 }
 
 /* What makes this sample hard, in words. Set in the prose face, not the mono

@@ -15,14 +15,38 @@ from .deps import build_filters, get_conn, row_to_card
 router = APIRouter()
 
 
+HIST_BINS = 40
+
+
 @router.get("/qa/summary", response_model=QASummary)
 def qa_summary(conn: sqlite3.Connection = Depends(get_conn)):
     row = conn.execute(
-        "SELECT COUNT(*) AS n, AVG(agreement) AS mean FROM captions "
-        "WHERE agreement IS NOT NULL").fetchone()
+        "SELECT COUNT(*) AS n, AVG(agreement) AS mean, MIN(agreement) AS lo, "
+        "MAX(agreement) AS hi FROM captions WHERE agreement IS NOT NULL").fetchone()
+    if not row["n"]:
+        return QASummary(available=False, scored_captions=0)
+
+    lo, hi = row["lo"], row["hi"]
+    span = (hi - lo) or 1.0
+    # Binned in SQL rather than by streaming 40,000 floats to Python: the width
+    # is derived from the observed range so the bars describe this dataset.
+    width = span / HIST_BINS
+    counts = {r["b"]: r["n"] for r in conn.execute(
+        "SELECT CAST((agreement - ?) / ? AS INTEGER) AS b, COUNT(*) AS n "
+        "FROM captions WHERE agreement IS NOT NULL GROUP BY b", (lo, width))}
+    histogram = [
+        {"lo": round(lo + i * width, 4),
+         "hi": round(lo + (i + 1) * width, 4),
+         # The topmost value lands in bin HIST_BINS by integer truncation; fold
+         # it into the last real bin rather than emitting an off-by-one tail.
+         "count": counts.get(i, 0) + (counts.get(HIST_BINS, 0) if i == HIST_BINS - 1 else 0)}
+        for i in range(HIST_BINS)
+    ]
     return QASummary(
-        available=row["n"] > 0, scored_captions=row["n"],
-        mean_agreement=round(row["mean"], 4) if row["mean"] is not None else None,
+        available=True, scored_captions=row["n"],
+        mean_agreement=round(row["mean"], 4),
+        histogram=histogram,
+        min_agreement=round(lo, 4), max_agreement=round(hi, 4),
     )
 
 
@@ -31,15 +55,21 @@ def suspect_captions(
     limit: int = Query(50, ge=1, le=200),
     order: str = Query("asc", pattern="^(asc|desc)$"),
     split: Optional[str] = None,
+    max_agreement: Optional[float] = Query(
+        None, description="Only captions at or below this agreement — the review threshold"),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Captions ranked by image-caption agreement (asc = most suspect first)."""
     where, params = build_filters(split, None, None)
     and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
+    threshold = ""
+    if max_agreement is not None:
+        threshold = " AND c.agreement <= ?"
+        params = params + [max_agreement]
     rows = conn.execute(
         "SELECT c.id AS cid, c.text, c.agreement, c.sample_id, s.* "
         "FROM captions c JOIN samples s ON s.id = c.sample_id "
-        f"WHERE c.agreement IS NOT NULL{and_where} "
+        f"WHERE c.agreement IS NOT NULL{and_where}{threshold} "
         f"ORDER BY c.agreement {'ASC' if order == 'asc' else 'DESC'} LIMIT ?",
         params + [limit],
     ).fetchall()
