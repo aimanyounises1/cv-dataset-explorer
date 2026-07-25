@@ -61,6 +61,8 @@ export interface SearchResponse {
   score_basis?: string | null; // "cosine" | "rrf" | null
   rrf_k?: number | null;
   term_stats: TermStat[];
+  offset: number;
+  has_more: boolean;
 }
 
 export interface StatsOverview {
