@@ -233,6 +233,22 @@ select:hover { border-color: var(--border-strong); }
   border-color: rgba(255, 122, 122, 0.3);
 }
 
+/* What makes this sample hard, in words. Set in the prose face, not the mono
+   one: it is a description, not a figure the tool is asserting. */
+.axis-why {
+  margin-top: 5px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-faint);
+  font-style: italic;
+  /* Two lines at most: four axes can each contribute a phrase, and an
+     unbounded reason line would make card heights ragged across the grid. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* Collapsible honesty panels: caveats a user can open, not modal noise. */
 .caveat {
   background: var(--bg-raised); border: 1px solid var(--border);

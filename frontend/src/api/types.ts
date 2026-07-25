@@ -12,7 +12,10 @@ export interface AxisScores {
   rarity?: number | null;
   difficulty?: number | null;
   clutter?: number | null;
-  detail: Record<string, Record<string, number>>;
+  /** Per axis: the raw component values, plus a "why" string naming the
+   * components that are themselves in the hard tail. Templated server-side
+   * from measured percentiles — never model-generated. */
+  detail: Record<string, Record<string, number | string>>;
 }
 
 export interface MatchPath {

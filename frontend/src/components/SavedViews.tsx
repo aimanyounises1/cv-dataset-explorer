@@ -121,8 +121,14 @@ export default function SavedViews({ current, onRestore }: Props) {
   if (!available) return null;
 
   return (
-    <section className="saved-views">
-      <h3 className="saved-views-title">Saved views</h3>
+    // Collapsed until it holds something: the filter column already stacks
+    // chips, the id list and four axis sliders above the results, and an
+    // expanded empty state costs ~110px of vertical space for no information.
+    <details className="saved-views" open={views.length > 0}>
+      <summary className="saved-views-title">
+        Saved views
+        {views.length > 0 && <span className="saved-views-count">{views.length}</span>}
+      </summary>
 
       {error && <div className="error saved-views-error">{error}</div>}
 
@@ -170,6 +176,6 @@ export default function SavedViews({ current, onRestore }: Props) {
           Save
         </button>
       </form>
-    </section>
+    </details>
   );
 }

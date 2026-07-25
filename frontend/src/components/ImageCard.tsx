@@ -37,6 +37,19 @@ interface Props {
 export default function ImageCard({ sample, scoreBasis }: Props) {
   const caption = sample.match_caption ?? sample.caption ?? sample.filename;
   const basis = scoreBasis ?? undefined;
+
+  /** Reasons worth showing: only for axes actually scoring hard, deduplicated,
+   * because the same phrase can be earned on two axes at once. */
+  const reasons: string[] = [];
+  for (const axis of AXES) {
+    const v = sample.axes?.[axis];
+    const why = sample.axes?.detail?.[axis]?.why;
+    if (v != null && v >= 7 && typeof why === "string") {
+      for (const phrase of why.split(", ")) {
+        if (!reasons.includes(phrase)) reasons.push(phrase);
+      }
+    }
+  }
   return (
     <Link className="card" to={`/samples/${sample.id}`}>
       <div className="card-media">
@@ -74,13 +87,27 @@ export default function ImageCard({ sample, scoreBasis }: Props) {
               const v = sample.axes?.[axis];
               if (v == null) return null;
               const meta = AXIS_META[axis];
+              const comps = sample.axes?.detail?.[axis] ?? {};
+              // Raw values in the tooltip: the score is a rank, and a rank you
+              // cannot trace back to a measurement is just an assertion.
+              const measured = Object.entries(comps)
+                .filter(([k]) => k !== "why")
+                .map(([k, val]) => `${k} ${val}`)
+                .join(", ");
               return (
                 <span key={axis} className={`axis-badge ${heat(v)}`}
-                      title={`${meta.label} ${v}/10 — ${meta.low} → ${meta.high}. ${meta.hint}`}>
+                      title={`${meta.label} ${v}/10 — ${meta.low} → ${meta.high}. ${meta.hint}`
+                             + (measured ? `\nMeasured: ${measured}` : "")}>
                   {AXIS_ABBR[axis]} <b>{v}</b>
                 </span>
               );
             })}
+          </div>
+        )}
+        {/* One templated line naming what actually makes this sample hard. */}
+        {reasons.length > 0 && (
+          <div className="axis-why" title="Templated from the measured components, not generated">
+            {reasons.join(" · ")}
           </div>
         )}
       </div>

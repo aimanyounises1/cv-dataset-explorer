@@ -281,6 +281,17 @@ def compute_axes(conn) -> None:
     def pct(values: dict[int, float], invert: bool = False) -> dict[int, float]:
         return {sid: b / 10.0 for sid, b in _percentile_buckets(values, invert).items()}
 
+    # Phrase per component, used only when that component is itself in the hard
+    # tail. Templated from measured percentiles — never generated — so a reason
+    # on a card is always something the numbers beside it support.
+    REASONS = {
+        "blur": "blurred", "luma": "dark",
+        "word_rarity": "rare wording", "isolation": "unlike its neighbours",
+        "agreement": "weak caption match", "consistency": "captions disagree",
+        "vocab": "many things named", "length_sd": "uneven captions",
+    }
+    NOTABLE = 0.7          # a component only earns a mention in its own top 30%
+
     def combine(name: str, parts: list[dict[int, float]]) -> dict[int, int]:
         merged: dict[int, float] = {}
         for sid in ids:
@@ -290,16 +301,24 @@ def compute_axes(conn) -> None:
         logger.info("Axis '%s' scored for %d/%d samples.", name, len(merged), len(ids))
         return _percentile_buckets(merged)
 
+    # Per-component percentiles, oriented so 1.0 always means "harder". Kept so
+    # a score can say which component drove it.
+    comp_pct = {
+        "legibility": {"blur": pct(blur, invert=True), "luma": pct(luma, invert=True)},
+        "rarity": {"word_rarity": pct(word_rarity), "isolation": pct(isolation)},
+        "difficulty": {"agreement": pct(agreement, invert=True),
+                       "consistency": pct(consistency, invert=True)},
+        "clutter": {"vocab": pct(vocab_spread), "length_sd": pct(length_spread)},
+    }
     axes = {
         # Low sharpness and low luminance both reduce legibility, so the axis
         # runs Clear(0) -> Blind(10) with both components inverted.
-        "legibility": combine("legibility", [pct(blur, invert=True), pct(luma, invert=True)]),
-        "rarity": combine("rarity", [pct(word_rarity), pct(isolation)]),
+        "legibility": combine("legibility", list(comp_pct["legibility"].values())),
+        "rarity": combine("rarity", list(comp_pct["rarity"].values())),
         # Where the model's own understanding is weakest: it agrees least with
         # the caption, and the five human captions agree least with each other.
-        "difficulty": combine("difficulty", [pct(agreement, invert=True),
-                                             pct(consistency, invert=True)]),
-        "clutter": combine("clutter", [pct(vocab_spread), pct(length_spread)]),
+        "difficulty": combine("difficulty", list(comp_pct["difficulty"].values())),
+        "clutter": combine("clutter", list(comp_pct["clutter"].values())),
     }
 
     raw = {
@@ -310,10 +329,21 @@ def compute_axes(conn) -> None:
     }
     updates = []
     for sid in ids:
-        detail = {
+        # Values are numbers plus one "why" string per axis, so the annotation
+        # has to admit both.
+        detail: dict[str, dict[str, object]] = {
             axis: {k: round(v[sid], 4) for k, v in comps.items() if sid in v}
             for axis, comps in raw.items()
         }
+        # "why": the components in their own hard tail, in descending order, so
+        # a 9 on legibility can say whether it is dark, blurred, or both.
+        for axis, comps in comp_pct.items():
+            if axis not in detail:
+                continue
+            hits = sorted(((p[sid], k) for k, p in comps.items()
+                           if sid in p and p[sid] >= NOTABLE), reverse=True)
+            if hits:
+                detail[axis]["why"] = ", ".join(REASONS[k] for _p, k in hits)
         updates.append((
             axes["legibility"].get(sid), axes["rarity"].get(sid),
             axes["difficulty"].get(sid), axes["clutter"].get(sid),
