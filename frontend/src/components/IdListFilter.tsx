@@ -27,11 +27,20 @@ export default function IdListFilter({ value, onChange, resolved }: Props) {
   const overCap = unique > MAX_ID_LIST;
   const dirty = draft !== value;
 
+  // 60,000 entries of "train_001722.jpg" is well under 2 MB, so anything much
+  // larger is the wrong file. Checked before reading rather than after, because
+  // File.text() on a multi-gigabyte pick would hang the tab before it failed.
+  const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
   const readFile = async (file: File) => {
     setReadError(null);
+    if (file.size > MAX_FILE_BYTES) {
+      setReadError(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB — the limit `
+                   + `is ${MAX_FILE_BYTES / 1048576} MB. An id list should be far smaller.`);
+      return;
+    }
     try {
-      const text = await file.text();
-      setDraft(text);
+      setDraft(await file.text());
     } catch {
       setReadError(`Could not read ${file.name}.`);
     }

@@ -20,6 +20,7 @@ from .deps import (
     image_url,
     order_by_axis,
     row_to_card,
+    stage_id_list,
     thumb_url,
 )
 
@@ -39,7 +40,8 @@ def list_samples(
     ids: list = Depends(id_list),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
+    staged = stage_id_list(conn, ids) if ids else False
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged)
     total = conn.execute(f"SELECT COUNT(*) FROM samples s{where}", params).fetchone()[0]
     # Sorting is over the whole filtered set, in SQL — never over the page.
     order = order_by_axis(sort) or " ORDER BY s.id"
@@ -138,7 +140,8 @@ def export_subset(
         rows = [rows_by_id[i] for i in ids if i in rows_by_id]  # ranked order
         ids = [r["id"] for r in rows]
     else:
-        where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
+        staged = stage_id_list(conn, ids) if ids else False
+        where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged)
         rows = conn.execute(
             f"SELECT s.* FROM samples s{where} ORDER BY s.id", params).fetchall()
         ids = [r["id"] for r in rows]
