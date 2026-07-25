@@ -15,6 +15,11 @@ interface SearchMeta {
 
 const PER_PAGE = 60;
 const MODES: SearchMode[] = ["hybrid", "semantic", "keyword"];
+
+/** Frame width per density. Scanning thousands of thumbnails for one anomaly
+ * and reading a handful of captions closely are different jobs. */
+const DENSITY: Record<string, string> = { S: "128px", M: "190px", L: "280px" };
+const DENSITY_KEY = "cvde-density";
 const SUGGESTIONS = [
   "a dog jumping into water",
   "children playing soccer",
@@ -45,6 +50,13 @@ export default function GalleryPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<SearchMeta>({ terms: [] });
+  const [hasMore, setHasMore] = useState(false);
+  const [density, setDensity] = useState<string>(
+    () => localStorage.getItem(DENSITY_KEY) ?? "M");
+
+  useEffect(() => {
+    try { localStorage.setItem(DENSITY_KEY, density); } catch { /* non-essential */ }
+  }, [density]);
 
   // Lets the fetch effect see the current list without depending on it.
   const itemsRef = useRef<SampleCard[]>([]);
@@ -81,34 +93,46 @@ export default function GalleryPage() {
     const run = async () => {
       setLoading(true);
       setError(null);
-      try {
+      // One page of whichever ranking is active. Search pages by offset into a
+      // fusion held at a fixed depth, so pages partition one stable ranking.
+      const fetchPage = async (p: number) => {
         if (query) {
-          const res = await api.search(query, mode, { ...filters, top_k: 60 }, ctrl.signal);
-          setItems(res.items);
-          setTotal(res.items.length);
+          const res = await api.search(
+            query, mode,
+            { ...filters, top_k: PER_PAGE, offset: (p - 1) * PER_PAGE }, ctrl.signal);
           setNotice(res.degraded ? res.message ?? null : null);
           setMeta({ basis: res.score_basis, rrfK: res.rrf_k, terms: res.term_stats ?? [] });
-        } else if (page > 1 && itemsRef.current.length === (page - 1) * PER_PAGE) {
+          return { items: res.items, total: null as number | null, more: res.has_more };
+        }
+        const res = await api.listSamples(
+          { page: p, per_page: PER_PAGE, ...filters }, ctrl.signal);
+        setNotice(null);
+        setMeta({ terms: [] });
+        return { items: res.items, total: res.total, more: p * PER_PAGE < res.total };
+      };
+
+      try {
+        if (page > 1 && itemsRef.current.length === (page - 1) * PER_PAGE) {
           // "Load more": append just the next page.
-          const res = await api.listSamples({ page, per_page: PER_PAGE, ...filters }, ctrl.signal);
+          const res = await fetchPage(page);
           setItems((prev) => [...prev, ...res.items]);
-          setTotal(res.total);
-          setNotice(null);
-          setMeta({ terms: [] });
+          if (res.total != null) setTotal(res.total);
+          setHasMore(res.more);
         } else {
           // Fresh mount (possibly at ?page=N after back-navigation): load 1..N.
           let all: SampleCard[] = [];
-          let count = 0;
+          let count: number | null = null;
+          let more = false;
           for (let p = 1; p <= page; p++) {
-            const res = await api.listSamples({ page: p, per_page: PER_PAGE, ...filters }, ctrl.signal);
+            const res = await fetchPage(p);
             all = all.concat(res.items);
             count = res.total;
+            more = res.more;
             if (res.items.length < PER_PAGE) break;
           }
           setItems(all);
-          setTotal(count);
-          setNotice(null);
-          setMeta({ terms: [] });
+          setTotal(count ?? all.length);
+          setHasMore(more);
         }
         setLoading(false);
       } catch (e) {
@@ -130,6 +154,16 @@ export default function GalleryPage() {
   // words is common. Without this the empty page looks like a broken search.
   const conjunctionFailed =
     items.length === 0 && meta.terms.length > 1 && missing.length === 0 && !hasFilters;
+
+  /** Export whatever the current URL describes: the export route takes the same
+   * parameters as search, so the link is the view's own state. */
+  const exportHref = (format: "csv" | "jsonl" | "json") => {
+    const p = new URLSearchParams();
+    if (query) { p.set("q", query); p.set("mode", mode); p.set("top_k", "500"); }
+    for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
+    p.set("format", format);
+    return `/api/export?${p.toString()}`;
+  };
 
   return (
     <div>
@@ -165,6 +199,16 @@ export default function GalleryPage() {
             split: f.split, tag: f.tag, vlm_tag: f.vlm_tag, attr: f.attr, page: "",
           })}
         />
+        <div className="density">
+          <span className="density-label">Size</span>
+          <div className="density-group" role="group" aria-label="Thumbnail size">
+            {Object.keys(DENSITY).map((d) => (
+              <button key={d} className={density === d ? "active" : ""}
+                      aria-pressed={density === d}
+                      onClick={() => setDensity(d)}>{d}</button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {!query && (
@@ -201,15 +245,31 @@ export default function GalleryPage() {
         </div>
       )}
 
-      <div className="meta-line" aria-live="polite">
-        {query
-          ? `${items.length} result${items.length === 1 ? "" : "s"} for “${query}” (${mode})`
-          : `${total.toLocaleString()} samples`}
-        {query && meta.basis === "rrf" && meta.rrfK != null &&
-          ` · fused by reciprocal rank, k=${meta.rrfK}`}
+      <div className="result-bar">
+        <div className="meta-line" aria-live="polite" style={{ marginBottom: 0 }}>
+          {query
+            ? `${items.length}${hasMore ? "+" : ""} result${items.length === 1 ? "" : "s"} for “${query}” (${mode})`
+            : `${total.toLocaleString()} samples`}
+          {query && meta.basis === "rrf" && meta.rrfK != null &&
+            ` · fused by reciprocal rank, k=${meta.rrfK}`}
+        </div>
+        {items.length > 0 && (
+          // Exports exactly what is on screen — the same query, through the
+          // same ranking — so a curated slice can leave the tool.
+          <div className="export-row">
+            <span className="export-label">Export slice</span>
+            {(["csv", "jsonl", "json"] as const).map((f) => (
+              <a key={f} className="pill export-pill" href={exportHref(f)}
+                 title={`Download these ${items.length} samples as ${f.toUpperCase()}, with the query recorded in the manifest`}>
+                {f}
+              </a>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="grid">
+      <div className="grid"
+           style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
         {items.map((s) => <ImageCard key={s.id} sample={s} scoreBasis={meta.basis} />)}
       </div>
 
@@ -232,11 +292,13 @@ export default function GalleryPage() {
         </div>
       )}
 
-      {!query && items.length < total && (
+      {hasMore && (
         <div className="load-more">
           <button className="primary" onClick={() => setParams({ page: String(page + 1) })}
                   disabled={loading}>
-            Load more ({items.length.toLocaleString()} / {total.toLocaleString()})
+            {loading ? "Loading…" : query
+              ? `Load more results (${items.length.toLocaleString()} so far)`
+              : `Load more (${items.length.toLocaleString()} / ${total.toLocaleString()})`}
           </button>
         </div>
       )}
