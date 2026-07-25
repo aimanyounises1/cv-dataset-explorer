@@ -1,21 +1,14 @@
 import { Link } from "react-router-dom";
-import { AXES, SampleCard } from "../api/types";
+import { AXES, Axis, SampleCard } from "../api/types";
+import { heatBand } from "../lib/viz";
+import AxisSparkline from "./AxisSparkline";
 import { AXIS_META } from "./AxisFilters";
 import Highlight from "./Highlight";
 
-/** Short labels, so four axes fit under a thumbnail without wrapping. */
+/** Short labels, so an axis name fits under a thumbnail without wrapping. */
 const AXIS_ABBR: Record<string, string> = {
   legibility: "leg", rarity: "rar", difficulty: "dif", clutter: "clt",
 };
-
-/** Colour by how much attention the score is asking for. Every axis runs
- * easy→hard, so one scale serves all four. */
-function heat(v: number): string {
-  if (v >= 9) return "hot";
-  if (v >= 7) return "warm";
-  if (v >= 4) return "mid";
-  return "cool";
-}
 
 /** A score is only interpretable next to what produced it: a text-image cosine
  * and an RRF sum live on different scales and must never be read against each
@@ -37,6 +30,15 @@ interface Props {
 export default function ImageCard({ sample, scoreBasis }: Props) {
   const caption = sample.match_caption ?? sample.caption ?? sample.filename;
   const basis = scoreBasis ?? undefined;
+
+  /** The one axis worth naming in text. The sparkline shows all four; spelling
+   * out the highest gives the eye somewhere to land without reading the chart. */
+  let hardest: { axis: Axis; v: number } | null = null;
+  for (const axis of AXES) {
+    const v = sample.axes?.[axis];
+    if (v != null && (hardest === null || v > hardest.v)) hardest = { axis, v };
+  }
+  if (hardest !== null && hardest.v < 7) hardest = null;   // nothing notable to lead with
 
   /** Reasons worth showing: only for axes actually scoring hard, deduplicated,
    * because the same phrase can be earned on two axes at once. */
@@ -80,28 +82,20 @@ export default function ImageCard({ sample, scoreBasis }: Props) {
           )}
         </div>
         {/* Difficulty axes. The strip above answers "why did the search return
-            this?"; this row answers "why is this one worth my time?" */}
+            this?"; this row answers "why is this one worth my time?"
+            One sparkline instead of four numbers: the profile is the signal, and
+            exact values live in the tooltip and on the detail page. */}
         {sample.axes && (
-          <div className="axis-badges">
-            {AXES.map((axis) => {
-              const v = sample.axes?.[axis];
-              if (v == null) return null;
-              const meta = AXIS_META[axis];
-              const comps = sample.axes?.detail?.[axis] ?? {};
-              // Raw values in the tooltip: the score is a rank, and a rank you
-              // cannot trace back to a measurement is just an assertion.
-              const measured = Object.entries(comps)
-                .filter(([k]) => k !== "why")
-                .map(([k, val]) => `${k} ${val}`)
-                .join(", ");
-              return (
-                <span key={axis} className={`axis-badge ${heat(v)}`}
-                      title={`${meta.label} ${v}/10 — ${meta.low} → ${meta.high}. ${meta.hint}`
-                             + (measured ? `\nMeasured: ${measured}` : "")}>
-                  {AXIS_ABBR[axis]} <b>{v}</b>
-                </span>
-              );
-            })}
+          <div className="axis-row">
+            <AxisSparkline axes={sample.axes} />
+            {hardest && (
+              <span className={`axis-lead ${heatBand(hardest.v)}`}
+                    title={`Highest axis: ${AXIS_META[hardest.axis].label} ${hardest.v}/10 `
+                           + `(${AXIS_META[hardest.axis].low} → ${AXIS_META[hardest.axis].high}). `
+                           + AXIS_META[hardest.axis].hint}>
+                {AXIS_ABBR[hardest.axis]} {hardest.v}
+              </span>
+            )}
           </div>
         )}
         {/* One templated line naming what actually makes this sample hard. */}

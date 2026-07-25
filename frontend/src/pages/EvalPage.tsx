@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { EvalResponse } from "../api/types";
-import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../components/chartTheme";
+import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../lib/viz";
 
 const MODE_COLORS: Record<string, string> = {
   semantic: SERIES.blue,

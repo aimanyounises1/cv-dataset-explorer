@@ -140,11 +140,22 @@ class DuplicatePair(BaseModel):
 
 
 class MapPoint(BaseModel):
+    """One image in the projection, with the dimensions worth colouring by.
+
+    Sent flat rather than nested: this is 8,000 rows, and a nested object per
+    point roughly doubles the payload for no gain.
+    """
     id: int
     x: float
     y: float
     cluster: int
     thumb_url: str
+    split: str
+    agreement: Optional[float] = None     # mean image-caption agreement
+    legibility: Optional[int] = None
+    rarity: Optional[int] = None
+    difficulty: Optional[int] = None
+    clutter: Optional[int] = None
 
 
 class TagInfo(BaseModel):
@@ -163,6 +174,13 @@ class QASummary(BaseModel):
     available: bool
     scored_captions: int
     mean_agreement: Optional[float] = None
+    # The distribution, so a reviewer can see where a sensible cutoff sits
+    # instead of trusting a fixed top-50. Bins are over the observed range,
+    # because agreement is a cosine that occupies a narrow slice of [0,1] and
+    # binning across the full interval would put every caption in one bar.
+    histogram: list[dict] = []           # [{lo, hi, count}]
+    min_agreement: Optional[float] = None
+    max_agreement: Optional[float] = None
 
 
 class AttributeLabel(BaseModel):

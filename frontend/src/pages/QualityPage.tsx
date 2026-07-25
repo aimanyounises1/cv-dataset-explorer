@@ -1,7 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { QASummary, SuspectCaption } from "../api/types";
+import { SURFACE, sequential } from "../lib/viz";
+
+/** Where to put the review threshold before the user touches it.
+ *
+ * A fixed top-50 answered "show me some bad captions"; a threshold answers
+ * "show me everything below this line", which is the question that scales. The
+ * default is the value below which ~1% of captions fall — chosen from the
+ * distribution rather than hard-coded, so it means the same thing on a corpus
+ * with a different agreement spread. */
+function defaultThreshold(summary: QASummary): number {
+  const total = summary.histogram.reduce((n, b) => n + b.count, 0);
+  if (!total) return summary.max_agreement ?? 1;
+  let seen = 0;
+  for (const b of summary.histogram) {
+    seen += b.count;
+    if (seen / total >= 0.01) return b.hi;
+  }
+  return summary.max_agreement ?? 1;
+}
 
 function SuspectRow({ item, scoreLabel }: { item: SuspectCaption; scoreLabel: string }) {
   return (
@@ -31,16 +50,42 @@ export default function QualityPage() {
   const [inconsistent, setInconsistent] = useState<SuspectCaption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sectionErrors, setSectionErrors] = useState<string[]>([]);
+  const [threshold, setThreshold] = useState<number | null>(null);
+  const [listLoading, setListLoading] = useState(false);
 
   useEffect(() => {
     // On a QA page, a swallowed error rendering as "no problems found" is the
     // worst failure mode — failed sections must announce themselves.
     const fail = (what: string) => () =>
       setSectionErrors((prev) => [...prev, what]);
-    api.qaSummary().then(setSummary).catch((e) => setError(String(e)));
-    api.suspectCaptions({ limit: 50 }).then(setSuspects).catch(fail("suspect captions"));
+    api.qaSummary()
+      .then((s) => { setSummary(s); if (s.available) setThreshold(defaultThreshold(s)); })
+      .catch((e) => setError(String(e)));
     api.inconsistentSamples().then(setInconsistent).catch(fail("consistency ranking"));
   }, []);
+
+  // The list follows the threshold. Debounced because the control is a slider
+  // and every intermediate value would otherwise be a request.
+  useEffect(() => {
+    if (threshold == null) return;
+    setListLoading(true);
+    const t = setTimeout(() => {
+      api.suspectCaptions({ limit: 100, max_agreement: threshold })
+        .then(setSuspects)
+        .catch(() => setSectionErrors((p) =>
+          p.includes("suspect captions") ? p : [...p, "suspect captions"]))
+        .finally(() => setListLoading(false));
+    }, 220);
+    return () => clearTimeout(t);
+  }, [threshold]);
+
+  const hist = summary?.histogram ?? [];
+  const peak = useMemo(() => Math.max(1, ...hist.map((b) => b.count)), [hist]);
+  const belowCount = useMemo(
+    () => (threshold == null ? 0
+      : hist.filter((b) => b.hi <= threshold).reduce((n, b) => n + b.count, 0)),
+    [hist, threshold]);
+  const totalScored = summary?.scored_captions ?? 0;
 
   if (error) return <div className="error">{error}</div>;
   if (!summary) return <div className="loading">Loading QA…</div>;
@@ -70,6 +115,71 @@ export default function QualityPage() {
 
       {sectionErrors.length > 0 && (
         <div className="error">Could not load: {sectionErrors.join(", ")}.</div>
+      )}
+
+      {/* The distribution, and a line you can move through it. A fixed top-50
+          hid the one thing a reviewer needs to judge: whether the cutoff is in
+          the tail or well inside the bulk. */}
+      {hist.length > 0 && threshold != null && (
+        <div className="dist-panel">
+          <div className="dist-head">
+            <div>
+              <div className="eyebrow">Agreement distribution</div>
+              <div className="meta-line" style={{ marginBottom: 0, marginTop: 4 }}>
+                {totalScored.toLocaleString()} scored captions · mean{" "}
+                {summary.mean_agreement?.toFixed(3)}
+              </div>
+            </div>
+            <div className="dist-readout">
+              ≤ {threshold.toFixed(3)} · {belowCount.toLocaleString()} captions (
+              {((belowCount / Math.max(1, totalScored)) * 100).toFixed(1)}%)
+            </div>
+          </div>
+
+          <div className="dist-bars" role="img"
+               aria-label={`Agreement histogram; threshold at ${threshold.toFixed(3)} selects `
+                           + `${belowCount} of ${totalScored} captions`}>
+            {hist.map((b) => {
+              const inRange = b.hi <= threshold;
+              return (
+                <div
+                  key={b.lo}
+                  className={`dist-bar ${inRange ? "" : "out"}`}
+                  style={{
+                    height: `${Math.max(2, (b.count / peak) * 100)}%`,
+                    // Colour by position on the scale, not by selection state —
+                    // opacity carries selection, so the two do not compete.
+                    background: sequential(
+                      (b.lo - (summary.min_agreement ?? 0)) /
+                      Math.max(1e-6, (summary.max_agreement ?? 1) - (summary.min_agreement ?? 0))),
+                  }}
+                  title={`${b.lo.toFixed(3)}–${b.hi.toFixed(3)}: ${b.count.toLocaleString()} captions`}
+                />
+              );
+            })}
+          </div>
+          <div className="dist-axis">
+            <span>{summary.min_agreement?.toFixed(3)}</span>
+            <span>worse ← agreement → better</span>
+            <span>{summary.max_agreement?.toFixed(3)}</span>
+          </div>
+
+          <div className="dist-control">
+            <label className="eyebrow" htmlFor="qa-threshold">Review below</label>
+            <input
+              id="qa-threshold"
+              type="range"
+              min={summary.min_agreement ?? 0}
+              max={summary.max_agreement ?? 1}
+              step={0.001}
+              value={threshold}
+              onChange={(e) => setThreshold(Number(e.target.value))}
+            />
+            <span className="dist-readout" style={{ color: SURFACE.textDim }}>
+              {listLoading ? "updating…" : `${suspects.length} shown`}
+            </span>
+          </div>
+        </div>
       )}
 
       <div className="section-title">Most suspect captions</div>

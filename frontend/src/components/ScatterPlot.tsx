@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MapPoint } from "../api/types";
 
-const PALETTE = [
-  "#4f9cff", "#3ecf8e", "#ff7a7a", "#ffbe50", "#c792ea", "#4dd0e1",
-  "#f48fb1", "#aed581", "#ffb74d", "#90a4ae", "#7986cb", "#e57373",
-];
-
 interface Props {
   points: MapPoint[];
   onSelect: (id: number) => void;
   onSelectBox?: (ids: number[]) => void;
   selectedIds?: Set<number>;
+  /** Colour per point, from lib/mapColor. Passed in rather than computed here so
+   * the same scale drives the canvas and the legend beside it. */
+  colorOf: (p: MapPoint) => string;
 }
 
 interface View { scale: number; tx: number; ty: number; }
@@ -18,7 +16,7 @@ interface Box { x0: number; y0: number; x1: number; y1: number; }
 
 /** Canvas scatter of the embedding space. Scroll = zoom, drag = pan,
  * click = open sample, Shift+drag = box-select for bulk actions. */
-export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds }: Props) {
+export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds, colorOf }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewRef = useRef<View>({ scale: 1, tx: 0, ty: 0 });
   const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
@@ -52,7 +50,7 @@ export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds
       const { sx, sy } = toScreen(p, w, h);
       if (sx < -5 || sy < -5 || sx > w + 5 || sy > h + 5) continue;
       const selected = selectedIds?.has(p.id);
-      ctx.fillStyle = selected ? "#ffffff" : PALETTE[p.cluster % PALETTE.length];
+      ctx.fillStyle = selected ? "#ffffff" : colorOf(p);
       ctx.globalAlpha = selected ? 1 : 0.85;
       ctx.beginPath();
       ctx.arc(sx, sy, selected ? r + 1 : r, 0, Math.PI * 2);
@@ -69,7 +67,7 @@ export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds
       ctx.fillRect(x, y, bw, bh);
       ctx.strokeRect(x, y, bw, bh);
     }
-  }, [points, toScreen, selectedIds]);
+  }, [points, toScreen, selectedIds, colorOf]);
 
   // Native non-passive wheel listener: zoom without scrolling the page.
   useEffect(() => {
@@ -203,8 +201,10 @@ export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds
           <img src={hover.point.thumb_url} alt="" />
         </div>
       )}
+      {/* Deliberately does not say what the colours mean — the legend above the
+          canvas does, and it changes with the selected dimension. */}
       <div className="map-hint">
-        Each dot is one image, positioned by UMAP over SigLIP embeddings and colored by cluster.
+        Each dot is one image, positioned by UMAP over SigLIP embeddings.
         Scroll to zoom, drag to pan, click a point to open the sample,
         <strong> Shift+drag to select a region</strong> for bulk tagging.
       </div>
