@@ -126,6 +126,8 @@ export interface EvalModeResult {
   recall_at: Record<string, number>;
   mrr: number;
   median_rank?: number | null;
+  mean_candidates: number;
+  empty_query_rate: number;
 }
 
 export interface EvalResponse {
@@ -134,6 +136,7 @@ export interface EvalResponse {
   sample_size: number;
   pool_size: number;
   depth: number;
+  mean_query_words: number;
   results: EvalModeResult[];
 }
 

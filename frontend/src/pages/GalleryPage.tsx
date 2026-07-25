@@ -125,6 +125,11 @@ export default function GalleryPage() {
   const common = meta.terms.filter((t) => t.common);
   const missing = meta.terms.filter((t) => t.images === 0);
   const hasFilters = Boolean(filters.split || filters.tag || filters.vlm_tag || filters.attr);
+  // Every term matches something, yet the query returns nothing: the lexical
+  // index ANDs terms, so a long query can be unsatisfiable while each of its
+  // words is common. Without this the empty page looks like a broken search.
+  const conjunctionFailed =
+    items.length === 0 && meta.terms.length > 1 && missing.length === 0 && !hasFilters;
 
   return (
     <div>
@@ -214,9 +219,16 @@ export default function GalleryPage() {
           No samples found.
           {missing.length > 0
             ? ` No caption contains ${missing.map((t) => `“${t.term}”`).join(", ")}.`
-            : hasFilters
-              ? " Try clearing a filter — every active filter is applied before ranking."
-              : ""}
+            : conjunctionFailed
+              ? ` Keyword search requires every term in the same caption, and no
+                  single caption contains all ${meta.terms.length} of them — even
+                  though each one matches on its own (${meta.terms
+                    .map((t) => `“${t.term}” ${t.images.toLocaleString()}`)
+                    .join(", ")}). Drop a term, or switch to semantic search,
+                  which matches meaning rather than words.`
+              : hasFilters
+                ? " Try clearing a filter — every active filter is applied before ranking."
+                : ""}
         </div>
       )}
 

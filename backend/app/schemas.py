@@ -135,14 +135,19 @@ class EvalModeResult(BaseModel):
     recall_at: dict[str, float]         # {"1": .., "5": .., "10": ..}
     mrr: float = 0.0                    # mean reciprocal rank within the depth
     median_rank: Optional[float] = None  # None when the median falls past depth
+    # What this mode actually got to rank. A recall figure is only about
+    # ranking quality if there was something to rank.
+    mean_candidates: float = 0.0
+    empty_query_rate: float = 0.0       # fraction of queries with no candidates
 
 
 class EvalResponse(BaseModel):
     available: bool
     message: Optional[str] = None
     sample_size: int = 0                # number of caption queries run
-    pool_size: int = 0                  # candidate images each query ranks against
+    pool_size: int = 0                  # corpus size (the semantic candidate pool)
     depth: int = 0                      # rank depth MRR/median are computed to
+    mean_query_words: float = 0.0       # queries are whole captions, not phrases
     results: list[EvalModeResult] = []
 
 
