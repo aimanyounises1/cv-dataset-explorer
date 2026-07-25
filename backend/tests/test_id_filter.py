@@ -134,6 +134,47 @@ def test_search_reports_how_many_entries_resolved(client):
     assert body["ids_resolved"] == 1
 
 
+def test_a_list_too_large_for_host_parameters_still_works(client):
+    """SQLite binds each IN (?) entry as a host parameter and the default
+    SQLITE_LIMIT_VARIABLE_NUMBER is 32766, so the 60,000-entry cap this API
+    advertises was unreachable: ~40,000 ids raised "too many SQL variables".
+    Past ID_PARAM_LIMIT the entries go to a temp table instead, costing zero
+    parameters. This asserts the large path both runs and stays correct.
+    """
+    from app import db
+    from app.api.deps import ID_PARAM_LIMIT, build_filters, stage_id_list
+
+    conn = db.connect()
+    try:
+        real = [r["filename"] for r in conn.execute(
+            "SELECT filename FROM samples WHERE filename LIKE 'idf_%' ORDER BY filename")]
+        assert len(real) == 3
+        # Well past the parameter ceiling, and past the cap's old failure point.
+        entries = real + [str(i) for i in range(500_000, 500_000 + 40_000)]
+        staged = stage_id_list(conn, entries)
+        assert staged, "a list this size must take the temp-table path"
+        where, params = build_filters(None, None, None, None, None, entries, staged)
+        assert params == [], "the staged path must bind no host parameters"
+        n = conn.execute(f"SELECT COUNT(*) FROM samples s{where}", params).fetchone()[0]
+        assert n == 3, "only the three real filenames should match"
+        # And the small path is unchanged.
+        assert not stage_id_list(conn, ["1", "2"])
+        _w, small = build_filters(None, None, None, None, None, ["1", "2"], False)
+        assert small == [1, 2]
+        assert ID_PARAM_LIMIT < 32766
+    finally:
+        conn.close()
+
+
+def test_non_ascii_numerals_are_treated_as_filenames_not_ids(client):
+    """`"٣".isdigit()` is True and `int("٣")` is 3, so an Arabic-Indic numeral
+    would otherwise be silently coerced into a different sample's id."""
+    from app.api.deps import id_list_clause
+
+    where, params = id_list_clause(["٣", "7"])
+    assert params == [7, "٣"], "the non-ASCII numeral must go to the filename side"
+
+
 def test_over_the_cap_is_a_clear_error(client):
     too_many = ",".join(str(i) for i in range(MAX_ID_LIST + 2))
     r = client.post("/api/search", json={"q": "kayak", "ids": too_many})

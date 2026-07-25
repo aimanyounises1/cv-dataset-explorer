@@ -36,6 +36,7 @@ from .deps import (
     id_list_clause,
     parse_id_list,
     row_to_card,
+    stage_id_list,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,13 +47,14 @@ router = APIRouter()
 def _keyword_ranking(
     conn, q: str, top_k: int,
     split=None, tag=None, vlm_tag=None, attr=None, axes=None, ids=None,
+    ids_staged=False,
 ) -> tuple[list[int], dict[int, str]]:
     """Ranked sample ids + the best-matching caption per sample.
     Filters — including axis ranges — are part of the SQL, applied before LIMIT."""
     match = db.fts_escape(q)
     if not match:
         return [], {}
-    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged)
     and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
     rows = conn.execute(
         "SELECT c.sample_id AS sid, MIN(rank) AS best, c.text AS caption_text "
@@ -176,13 +178,16 @@ def run_search(
     past it, depth grows with the window and that guarantee weakens.
     """
     depth = max(config.SEARCH_DEPTH, offset + top_k)
-    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes, ids)
+    # Staged once per request, before any filter builds SQL: past ~10k entries an
+    # IN (...) list would exceed SQLite's host-parameter ceiling.
+    ids_staged = stage_id_list(conn, ids) if ids else False
+    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes, ids, ids_staged)
     # How many pasted entries actually exist here. Reported rather than enforced:
     # a list carried over from a bigger corpus is a normal thing to paste, and
     # the useful response is "412 of your 500 are in this dataset", not an error.
     ids_resolved = None
     if ids:
-        clause, id_params = id_list_clause(ids)
+        clause, id_params = id_list_clause(ids, staged=ids_staged)
         ids_resolved = conn.execute(
             f"SELECT COUNT(*) FROM samples s WHERE {clause}", id_params
         ).fetchone()[0] if clause else 0
@@ -215,12 +220,12 @@ def run_search(
         record("semantic", ranked)
     elif mode == "keyword":
         ranked, match_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr, axes, ids)
+            conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged)
         record("keyword", ranked)
         matched_terms = [t for t in q.split() if t.strip()]
     else:  # hybrid: reciprocal-rank fusion
         keyword, kw_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr, axes, ids)
+            conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged)
         rrf_k = config.RRF_K
         fused: dict[int, float] = {}
         for rank, (sid, _s) in enumerate(semantic):

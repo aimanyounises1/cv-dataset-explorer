@@ -42,6 +42,15 @@ def row_to_card(row: sqlite3.Row, caption: Optional[str] = None,
 # output. The cap is generous because the list is machine-produced.
 MAX_ID_LIST = 60_000
 
+# SQLite binds each `IN (?, ?, ...)` entry as a host parameter, and the default
+# SQLITE_LIMIT_VARIABLE_NUMBER is 32766 — so a list anywhere near the cap above
+# would fail with "too many SQL variables" rather than working. Past this
+# threshold the entries go into a temp table instead, which costs no host
+# parameters at all; the threshold leaves headroom for the other filters'
+# parameters in the same statement.
+ID_PARAM_LIMIT = 10_000
+ID_STAGE_TABLE = "_id_filter"
+
 
 def parse_id_list(text: Optional[str]) -> list[str]:
     """Split a pasted list into entries.
@@ -61,7 +70,24 @@ def parse_id_list(text: Optional[str]) -> list[str]:
     return out
 
 
-def id_list_clause(entries: list[str]) -> tuple[str, list]:
+def stage_id_list(conn, entries: list[str]) -> bool:
+    """Put a large id list in a temp table; return True if it was staged.
+
+    Temp tables are per-connection and `get_conn` hands out a fresh connection
+    per request, so this lives exactly as long as the request that made it and
+    cannot leak into another one.
+    """
+    if len(entries) <= ID_PARAM_LIMIT:
+        return False
+    conn.execute(f"DROP TABLE IF EXISTS temp.{ID_STAGE_TABLE}")
+    conn.execute(f"CREATE TEMP TABLE {ID_STAGE_TABLE} (entry TEXT PRIMARY KEY)")
+    conn.executemany(
+        f"INSERT OR IGNORE INTO {ID_STAGE_TABLE}(entry) VALUES (?)",
+        [(e,) for e in entries])
+    return True
+
+
+def id_list_clause(entries: list[str], staged: bool = False) -> tuple[str, list]:
     """SQL predicate matching either a sample id or a filename.
 
     Both are accepted in one list because both are things a researcher already
@@ -70,8 +96,20 @@ def id_list_clause(entries: list[str]) -> tuple[str, list]:
     than rejected — a list pasted from a larger corpus is a normal thing to do,
     and failing the whole query over one stale line would be hostile.
     """
-    numeric = [int(e) for e in entries if e.lstrip("-").isdigit()]
-    names = [e for e in entries if not e.lstrip("-").isdigit()]
+    if not entries:
+        return "", []
+    if staged:
+        # Zero host parameters: the entries are already rows. Matching on the
+        # text column for both cases keeps one table doing both jobs, and the
+        # id side is compared as text so no CAST of untrusted input is needed.
+        return (f"(CAST(s.id AS TEXT) IN (SELECT entry FROM {ID_STAGE_TABLE})"
+                f" OR s.filename IN (SELECT entry FROM {ID_STAGE_TABLE}))"), []
+    # `isdigit()` is true for non-ASCII digits ('٣') that int() also accepts, so
+    # the split below is deliberately str.isascii()-guarded: a non-ASCII numeral
+    # is treated as a filename, where it simply matches nothing.
+    numeric = [int(e) for e in entries if e.lstrip("-").isascii() and e.lstrip("-").isdigit()]
+    names = [e for e in entries
+             if not (e.lstrip("-").isascii() and e.lstrip("-").isdigit())]
     parts, params = [], []
     if numeric:
         parts.append(f"s.id IN ({','.join('?' * len(numeric))})")
@@ -123,7 +161,7 @@ def axis_bounds(
 def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[str],
                   attr: Optional[str] = None,
                   axes: Optional[dict[str, tuple[Optional[int], Optional[int]]]] = None,
-                  ids: Optional[list[str]] = None):
+                  ids: Optional[list[str]] = None, ids_staged: bool = False):
     """Compose WHERE clauses + params for common sample filters.
 
     `attr` is a zero-shot attribute facet encoded as "group:label"; `axes` maps
@@ -157,7 +195,7 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
             clauses.append(f"s.{axis} <= ?")
             params.append(hi)
     if ids:
-        clause, id_params = id_list_clause(ids)
+        clause, id_params = id_list_clause(ids, staged=ids_staged)
         if clause:
             clauses.append(clause)
             params.extend(id_params)
@@ -166,11 +204,11 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
 
 
 def filtered_id_set(conn, split, tag, vlm_tag, attr=None, axes=None,
-                    ids=None) -> Optional[set[int]]:
+                    ids=None, ids_staged=False) -> Optional[set[int]]:
     """Set of sample ids matching filters, or None when unfiltered."""
     if not (split or tag or vlm_tag or attr or axes or ids):
         return None
-    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged)
     rows = conn.execute(f"SELECT s.id FROM samples s{where}", params)
     return {r["id"] for r in rows}
 
