@@ -28,40 +28,70 @@ KS = (1, 5, 10)
 TOP = 10
 # Bumped whenever the protocol or reported metrics change, so a cached result
 # from an older definition is never served as if it were current.
-PROTOCOL_VERSION = 2
+PROTOCOL_VERSION = 3
 
 
 def _cache_path(sample_size: int):
+    """Key on everything the result actually depends on.
+
+    The embeddings drive the semantic path, but the captions table and FTS
+    index drive the lexical and fused paths, and RRF_K changes the fusion — so
+    a key over embedding mtimes alone will happily serve a result computed
+    against different data or a different constant. (Bumping PROTOCOL_VERSION
+    by hand is not invalidation; it only covers changes a human remembered.)
+    """
     stamp = 0.0
-    for _ids, embs in (("sample_ids.npy", "image_embeddings.npy"),
-                       ("caption_ids.npy", "caption_embeddings.npy")):
+    for embs in ("image_embeddings.npy", "caption_embeddings.npy"):
         p = config.EMB_DIR / embs
         if p.exists():
             stamp = max(stamp, p.stat().st_mtime)
-    return config.CACHE_DIR / f"eval_v{PROTOCOL_VERSION}_{sample_size}_{int(stamp)}.json"
+    if config.DB_PATH.exists():
+        stamp = max(stamp, config.DB_PATH.stat().st_mtime)
+    return (config.CACHE_DIR /
+            f"eval_v{PROTOCOL_VERSION}_{sample_size}_k{config.RRF_K}_{int(stamp)}.json")
+
+
+def lexical_candidates(conn, text: str, own_caption_id: int, limit: int = TOP):
+    """Ranked sample ids for one caption query, with the query caption's own
+    row excluded (FR-EV-2).
+
+    Single definition on purpose: both the lexical path and the fused path need
+    this exclusion, and the earlier duplicated SQL meant a test could pin one
+    copy while the other silently regressed.
+    """
+    match = db.fts_escape(text)
+    if not match:
+        return []
+    return conn.execute(
+        "SELECT c.sample_id AS sid, MIN(rank) AS best FROM captions_fts f "
+        "JOIN captions c ON c.id = f.rowid WHERE captions_fts MATCH ? "
+        "AND c.id != ? GROUP BY c.sample_id ORDER BY best LIMIT ?",
+        (match, own_caption_id, limit)).fetchall()
 
 
 def _keyword_ranks(conn, texts: list[str], target_ids: list[int],
-                   query_caption_ids: list[int]) -> np.ndarray:
-    """Rank of each caption's own image under BM25, with the query caption
-    itself excluded from the index (FR-EV-2) — otherwise every query retrieves
-    its own row at rank 0 and the benchmark measures nothing."""
+                   query_caption_ids: list[int]):
+    """Rank of each caption's own image under BM25, plus how much the lexical
+    path actually had to work with.
+
+    The second return value matters more than it looks. `fts_escape` builds an
+    implicit AND, and these queries are whole captions (~12 words), so for most
+    of them the conjunction is satisfied by no other caption in the corpus and
+    the candidate list comes back empty. A recall number computed over mostly
+    empty candidate lists says nothing about BM25's ranking; reporting it
+    without that context is how a benchmark misleads.
+    """
     ranks = np.full(len(texts), TOP + 1, dtype=np.int32)
+    n_candidates = np.zeros(len(texts), dtype=np.int32)
     for i, (text, target, own) in enumerate(
             zip(texts, target_ids, query_caption_ids, strict=True)):
-        match = db.fts_escape(text)
-        if not match:
-            continue
-        rows = conn.execute(
-            "SELECT c.sample_id AS sid, MIN(rank) AS best FROM captions_fts f "
-            "JOIN captions c ON c.id = f.rowid WHERE captions_fts MATCH ? "
-            "AND c.id != ? GROUP BY c.sample_id ORDER BY best LIMIT ?",
-            (match, own, TOP)).fetchall()
+        rows = lexical_candidates(conn, text, own)
+        n_candidates[i] = len(rows)
         for r_i, row in enumerate(rows):
             if row["sid"] == target:
                 ranks[i] = r_i
                 break
-    return ranks
+    return ranks, n_candidates
 
 
 def _metrics(ranks: np.ndarray, exact: bool) -> tuple[dict[str, float], float, float | None]:
@@ -117,43 +147,48 @@ def retrieval_benchmark(
     row_order = np.take_along_axis(scores, top_cols, axis=1).argsort(axis=1)[:, ::-1]
     top_cols = np.take_along_axis(top_cols, row_order, axis=1)
 
-    kw_ranks = _keyword_ranks(conn, [r["text"] for r in picked],
-                              [r["sample_id"] for r in picked],
-                              [r["id"] for r in picked])
+    kw_ranks, kw_candidates = _keyword_ranks(
+        conn, [r["text"] for r in picked],
+        [r["sample_id"] for r in picked], [r["id"] for r in picked])
 
     # Hybrid: RRF of the two top-10 lists, rank of the target in the fusion.
-    # Same held-out-caption exclusion as the lexical path above.
+    # Reuses lexical_candidates() so the exclusion has exactly one definition.
     k_rrf = config.RRF_K
     hy_ranks = np.full(len(picked), TOP + 1, dtype=np.int32)
     for i, r in enumerate(picked):
         fused: dict[int, float] = {}
         for rank, col in enumerate(top_cols[i]):
             fused[int(img.ids[col])] = fused.get(int(img.ids[col]), 0.0) + 1 / (k_rrf + rank + 1)
-        match = db.fts_escape(r["text"])
-        if match:
-            for rank, row in enumerate(conn.execute(
-                "SELECT c.sample_id AS sid, MIN(rank) AS best FROM captions_fts f "
-                "JOIN captions c ON c.id = f.rowid WHERE captions_fts MATCH ? "
-                "AND c.id != ? GROUP BY c.sample_id ORDER BY best LIMIT ?",
-                    (match, r["id"], TOP))):
-                fused[row["sid"]] = fused.get(row["sid"], 0.0) + 1 / (k_rrf + rank + 1)
+        for rank, row in enumerate(lexical_candidates(conn, r["text"], r["id"])):
+            fused[row["sid"]] = fused.get(row["sid"], 0.0) + 1 / (k_rrf + rank + 1)
         ordered = sorted(fused, key=lambda sid: -fused[sid])[:TOP]
         if r["sample_id"] in ordered:
             hy_ranks[i] = ordered.index(r["sample_id"])
 
-    def result(mode: str, ranks: np.ndarray, exact: bool) -> EvalModeResult:
+    # How much each path actually got to rank. The semantic path always scores
+    # the whole corpus; the lexical path is limited to whatever the conjunctive
+    # query matched, which for full-caption queries is usually nothing.
+    lexical_mean = round(float(kw_candidates.mean()), 3)
+    lexical_empty = round(float((kw_candidates == 0).mean()), 4)
+    full_pool = float(img.embeddings.shape[0])
+
+    def result(mode: str, ranks: np.ndarray, exact: bool,
+               mean_candidates: float, empty_rate: float) -> EvalModeResult:
         recall, mrr, median = _metrics(ranks, exact)
-        return EvalModeResult(mode=mode, recall_at=recall, mrr=mrr, median_rank=median)
+        return EvalModeResult(mode=mode, recall_at=recall, mrr=mrr, median_rank=median,
+                              mean_candidates=mean_candidates, empty_query_rate=empty_rate)
 
     resp = EvalResponse(
         available=True, sample_size=len(picked),
-        pool_size=int(img.embeddings.shape[0]), depth=TOP,
+        pool_size=int(full_pool), depth=TOP,
+        mean_query_words=round(float(np.mean([len(r["text"].split()) for r in picked])), 1),
         results=[
             # Semantic ranks come from a full score matrix, so they are exact at
             # any depth; the other two are only computed TOP deep.
-            result("semantic", sem_ranks, exact=True),
-            result("keyword", kw_ranks, exact=False),
-            result("hybrid", hy_ranks, exact=False),
+            result("semantic", sem_ranks, True, full_pool, 0.0),
+            result("keyword", kw_ranks, False, lexical_mean, lexical_empty),
+            # Fusion sees the semantic list plus whatever lexical contributed.
+            result("hybrid", hy_ranks, False, full_pool + lexical_mean, 0.0),
         ])
     config.ensure_dirs()
     cache.write_text(resp.model_dump_json())

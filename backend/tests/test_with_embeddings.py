@@ -159,6 +159,45 @@ def test_benchmark_excludes_the_held_out_caption(client):
     assert modes["keyword"]["median_rank"] is None  # never found within depth
 
 
+def test_lexical_candidates_always_excludes_the_query_caption(client):
+    """FR-EV-2 at the seam rather than through a metric.
+
+    The lexical and fused paths share one helper precisely so this invariant
+    has a single definition: an earlier version duplicated the SQL, and a
+    mutation removing the exclusion from the fused copy left the whole suite
+    green because the fixture's semantic path already ranked the target first.
+    """
+    from app import db
+    from app.api.eval import lexical_candidates
+
+    conn = db.connect()
+    try:
+        row = conn.execute(
+            "SELECT id, sample_id, text FROM captions ORDER BY id LIMIT 1").fetchone()
+        with_own = conn.execute(
+            "SELECT DISTINCT c.sample_id FROM captions_fts f JOIN captions c "
+            "ON c.id = f.rowid WHERE captions_fts MATCH ?",
+            (db.fts_escape(row["text"]),)).fetchall()
+        assert row["sample_id"] in [r["sample_id"] for r in with_own]  # it is findable
+        got = lexical_candidates(conn, row["text"], row["id"])
+        assert row["sample_id"] not in [r["sid"] for r in got]
+    finally:
+        conn.close()
+
+
+def test_benchmark_reports_candidate_pool_per_mode(client):
+    """A recall number is only about ranking if there was something to rank."""
+    body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+    modes = {r["mode"]: r for r in body["results"]}
+    # Semantic always ranks the whole corpus; the lexical path ranks only what
+    # its conjunctive query matched, which for whole-caption queries is little.
+    assert modes["semantic"]["mean_candidates"] == 4.0
+    assert modes["semantic"]["empty_query_rate"] == 0.0
+    assert modes["keyword"]["empty_query_rate"] == 1.0  # one caption each, excluded
+    assert modes["keyword"]["mean_candidates"] == 0.0
+    assert body["mean_query_words"] > 0
+
+
 def test_benchmark_reports_pool_size_and_rank_metrics(client):
     """FR-EV-4: a recall number without its candidate pool is not comparable."""
     body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
