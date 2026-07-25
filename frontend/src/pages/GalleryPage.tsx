@@ -16,6 +16,8 @@ interface SearchMeta {
   rrfK?: number | null;
   terms: TermStat[];
   idsResolved?: number | null;
+  depthLimit?: number;
+  depthReached?: boolean;
 }
 
 const PER_PAGE = 60;
@@ -139,7 +141,8 @@ export default function GalleryPage() {
               top_k: PER_PAGE, offset: (p - 1) * PER_PAGE }, ctrl.signal);
           setNotice(res.degraded ? res.message ?? null : null);
           setMeta({ basis: res.score_basis, rrfK: res.rrf_k, terms: res.term_stats ?? [],
-                    idsResolved: res.ids_resolved });
+                    idsResolved: res.ids_resolved, depthLimit: res.depth_limit,
+                    depthReached: res.depth_reached });
           return { items: res.items, total: null as number | null, more: res.has_more };
         }
         const res = await api.listSamples(
@@ -405,6 +408,16 @@ export default function GalleryPage() {
               : hasFilters
                 ? " Try clearing a filter — every active filter is applied before ranking."
                 : ""}
+        </div>
+      )}
+
+      {/* Paging stops where the fusion stopped ranking. Saying so beats a
+          "Load more" button that silently disappears with matches left over. */}
+      {!hasMore && query && meta.depthReached && (
+        <div className="meta-line" style={{ textAlign: "center", marginTop: 18 }}>
+          End of the ranked results — this query ranked its top{" "}
+          {meta.depthLimit?.toLocaleString()}. More images match; narrow the query
+          or add a filter to bring them into range.
         </div>
       )}
 

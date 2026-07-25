@@ -165,6 +165,37 @@ def test_stopwords_are_not_reported_as_common_terms(client):
     assert [s["term"] for s in stats] == ["dog"]
 
 
+def test_paging_stops_at_the_ranking_horizon_instead_of_repeating(client, monkeypatch):
+    """Regression: paging past SEARCH_DEPTH used to return duplicate images.
+
+    The depth was previously widened to `offset + top_k` so a caller could page
+    further, but that recomputes the fusion against a larger candidate pool, and
+    the tail re-ranks — measured on the real corpus, adjacent pages either side
+    of row 300 shared 4 images. A ranking is only defined as deep as it was
+    computed, so the horizon is now hard and `has_more` tells the truth about it.
+    """
+    from app import config
+    monkeypatch.setattr(config, "SEARCH_DEPTH", 2)
+
+    first = client.get("/api/search", params={
+        "q": "a", "mode": "keyword", "top_k": 1, "offset": 0}).json()
+    assert len(first["items"]) == 1
+    assert first["depth_limit"] == 2 and first["has_more"] is True
+
+    second = client.get("/api/search", params={
+        "q": "a", "mode": "keyword", "top_k": 1, "offset": 1}).json()
+    assert len(second["items"]) == 1
+    # Row 2 is the horizon: more matches exist, but none were ranked.
+    assert second["has_more"] is False and second["depth_reached"] is True
+
+    beyond = client.get("/api/search", params={
+        "q": "a", "mode": "keyword", "top_k": 1, "offset": 2}).json()
+    assert beyond["items"] == [] and beyond["has_more"] is False
+
+    ids = [i["id"] for i in first["items"] + second["items"]]
+    assert len(ids) == len(set(ids)), "no image may appear on two pages"
+
+
 def test_axis_range_filter_on_browse(client):
     # Three samples with difficulty 2, 5, 9.
     assert client.get("/api/samples").json()["total"] == 3
