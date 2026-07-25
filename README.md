@@ -24,7 +24,12 @@ local embeddings, no cloud services or paid APIs.
 - **Quality (annotation QA)** — CLIPScore-style ranking of captions least supported by their image (likely annotation errors), plus samples whose 5 captions disagree most with each other.
 - **Benchmark** — the tool measures its own search quality: standard Flickr8k text→image retrieval recall@1/5/10 for all three modes, using the dataset's captions as ground truth.
 - **Assistant (optional)** — a chat interface backed by a **Fugu-style multi-agent orchestration** (LangGraph over local Ollama): an orchestrator routes requests to retrieval and insights specialist agents, and a synthesizer quality-gates the answer. Agents use the same service functions as the REST API and can search, inspect, analyze coverage, audit captions, and tag samples. The UI shows the agent/tool trace for every answer.
-- **Curation workflow** — tag samples (manually, in bulk from the map, or via the assistant), filter by tag, and export any filtered subset as a JSON manifest (`GET /api/export`).
+- **Curation workflow, closing both ways** — the point of a search tool over a dataset is composing a training set, so a slice has to be able to leave and come back:
+  - **Out:** export the current view — filters *or* a ranked search result — as JSON, JSONL or CSV. The manifest records the query, the axis bounds and the embedding model, because a slice you cannot regenerate is not curation.
+  - **In:** paste or upload a list of ids or filenames (the **Id list** panel). Both are accepted because both are things you already have — this tool's own export, or anything that touched the images on disk. It composes with every other filter rather than replacing them, and reports how many entries exist here, so a list carried over from a larger corpus tells you "412 of your 500" instead of failing.
+  - Tag samples manually, in bulk by lassoing a region of the map, or via the assistant; filter by tag.
+- **Named views** — save the current filter set under a name and restore it later. Stored as the URL query string, opaquely, so a view keeps working when the UI grows a filter the backend has no column for.
+- **Legible filter state** — every active constraint appears as a removable chip above the results, so you never reach an empty page wondering which of five filters emptied it.
 - **Optional VLM enrichment** — tag every image with a local vision-language model via [Ollama](https://ollama.com).
 
 **Design intent — layers, not a monolith.** Browsing, keyword search, and stats
@@ -61,6 +66,22 @@ is no honest analogue in Flickr8k: these are still photographs, with no motion,
 no agents and no rules to violate. Inventing one to round the count to five
 would have made the panel look more complete and the data less true, so the
 axis is absent and this paragraph is the reason.
+
+### Two limits worth knowing before you rely on them
+
+**Ranked results stop at 300 per query.** Reciprocal-rank fusion is computed over
+the retrieved candidate lists, so its output depends on how deep those lists go:
+row 300 of a 300-deep fusion is a different image from row 300 of a 350-deep one.
+Widening the pool to let a user page further therefore re-ranks the tail and
+repeats images across adjacent pages — measured, before this was fixed, at 4
+duplicates either side of the boundary. The depth is now a hard horizon: paging
+stops there and the gallery says so, rather than offering a "Load more" that
+quietly runs out. Raise `CVDE_SEARCH_DEPTH` to see further, or narrow the query.
+
+**A pasted id list is capped at 60,000 entries.** Past 10,000 the entries go into
+a temporary table rather than an `IN (...)` clause, because SQLite binds each
+entry as a host parameter and its default ceiling is 32,766 — a list of ~40,000
+would otherwise fail with "too many SQL variables" rather than working.
 
 ## Scale: where the exact search stops being the right choice
 
