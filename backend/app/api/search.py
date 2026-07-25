@@ -131,9 +131,19 @@ def run_search(
     conn: sqlite3.Connection, q: str, mode: str = "hybrid", top_k: int = 60,
     split: Optional[str] = None, tag: Optional[str] = None,
     vlm_tag: Optional[str] = None, attr: Optional[str] = None,
+    offset: int = 0,
 ) -> SearchResponse:
-    """Core search service — used by the API endpoint and by the assistant's
-    agent tools (same code path, same behavior)."""
+    """Core search service — used by the API endpoint, the export route, and the
+    assistant's agent tools (same code path, same behavior).
+
+    Paging contract: both rankings are taken to a fixed `config.SEARCH_DEPTH`
+    (widened only if a caller pages past it) and fused once, then the requested
+    window is sliced out. Fusing to the depth of the current page instead would
+    change every page's ranking as the user pages, which shows up as duplicates
+    and gaps. Pages are therefore stable for any window within SEARCH_DEPTH;
+    past it, depth grows with the window and that guarantee weakens.
+    """
+    depth = max(config.SEARCH_DEPTH, offset + top_k)
     allowed = filtered_id_set(conn, split, tag, vlm_tag, attr)
     degraded, message = False, None
     scores: dict[int, float] = {}
@@ -145,59 +155,67 @@ def run_search(
 
     semantic, qvec = (None, None)
     if mode in ("semantic", "hybrid"):
-        semantic, qvec = _semantic_ranking(q, allowed, top_k)
+        semantic, qvec = _semantic_ranking(q, allowed, depth)
         if semantic is None:
             degraded, mode = True, "keyword"
             message = ("Semantic search unavailable (embeddings not computed) — "
                        "using keyword search.")
 
     def record(path: str, ids) -> None:
+        """Ranks are absolute within the full ranking, not within the page, so
+        a card on page 3 still reports the rank the user would count to."""
         for rank, sid in enumerate(ids):
             paths.setdefault(sid, []).append(MatchPath(path=path, rank=rank + 1))
 
     if mode == "semantic":
-        ordered = [sid for sid, _ in semantic]
+        ranked = [sid for sid, _ in semantic]
         scores = dict(semantic)
         score_basis = "cosine"
-        record("semantic", ordered)
-        match_captions = _best_captions_for(conn, ordered, qvec)
+        record("semantic", ranked)
     elif mode == "keyword":
-        ordered, match_captions = _keyword_ranking(
-            conn, q, top_k, split, tag, vlm_tag, attr)
-        record("keyword", ordered)
+        ranked, match_captions = _keyword_ranking(
+            conn, q, depth, split, tag, vlm_tag, attr)
+        record("keyword", ranked)
         matched_terms = [t for t in q.split() if t.strip()]
     else:  # hybrid: reciprocal-rank fusion
         keyword, kw_captions = _keyword_ranking(
-            conn, q, top_k, split, tag, vlm_tag, attr)
+            conn, q, depth, split, tag, vlm_tag, attr)
         rrf_k = config.RRF_K
         fused: dict[int, float] = {}
         for rank, (sid, _s) in enumerate(semantic):
             fused[sid] = fused.get(sid, 0.0) + 1.0 / (rrf_k + rank + 1)
         for rank, sid in enumerate(keyword):
             fused[sid] = fused.get(sid, 0.0) + 1.0 / (rrf_k + rank + 1)
-        ordered = sorted(fused, key=lambda sid: -fused[sid])[:top_k]
+        ranked = sorted(fused, key=lambda sid: -fused[sid])
         scores = fused
         score_basis = "rrf"
         record("semantic", [sid for sid, _ in semantic])
         record("keyword", keyword)
+        match_captions = dict(kw_captions)
+        matched_terms = [t for t in q.split() if t.strip()]
         logger.debug("Fused %d semantic + %d keyword results with RRF k=%d",
                      len(semantic), len(keyword), rrf_k)
-        match_captions = {**_best_captions_for(conn, ordered, qvec), **kw_captions}
-        matched_terms = [t for t in q.split() if t.strip()]
 
     term_stats = _term_stats(conn, q) if mode in ("keyword", "hybrid") else []
+    window = ranked[offset : offset + top_k]
+    has_more = len(ranked) > offset + top_k
 
-    if not ordered:
+    # Caption lookups are per-page, not per-ranking: only the window is shown.
+    if mode in ("semantic", "hybrid"):
+        match_captions = {**_best_captions_for(conn, window, qvec), **match_captions}
+
+    if not window:
         return SearchResponse(items=[], mode_used=mode, degraded=degraded,
                               message=message, score_basis=score_basis,
-                              rrf_k=rrf_k, term_stats=term_stats)
+                              rrf_k=rrf_k, term_stats=term_stats,
+                              offset=offset, has_more=False)
 
-    qmarks = ",".join("?" * len(ordered))
+    qmarks = ",".join("?" * len(window))
     rows = {r["id"]: r for r in conn.execute(
-        f"SELECT * FROM samples WHERE id IN ({qmarks})", ordered)}
-    captions = first_captions(conn, ordered)
+        f"SELECT * FROM samples WHERE id IN ({qmarks})", window)}
+    captions = first_captions(conn, window)
     items = []
-    for sid in ordered:
+    for sid in window:
         if sid not in rows:
             continue
         card = row_to_card(rows[sid], caption=captions.get(sid), score=scores.get(sid))
@@ -207,7 +225,7 @@ def run_search(
         items.append(card)
     return SearchResponse(items=items, mode_used=mode, degraded=degraded,
                           message=message, score_basis=score_basis, rrf_k=rrf_k,
-                          term_stats=term_stats)
+                          term_stats=term_stats, offset=offset, has_more=has_more)
 
 
 @router.get("/search", response_model=SearchResponse)
@@ -215,6 +233,7 @@ def search(
     q: str = Query(..., min_length=1),
     mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid)$"),
     top_k: int = Query(60, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=5000),
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
@@ -222,4 +241,4 @@ def search(
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     return run_search(conn, q, mode=mode, top_k=top_k, split=split, tag=tag,
-                      vlm_tag=vlm_tag, attr=attr)
+                      vlm_tag=vlm_tag, attr=attr, offset=offset)

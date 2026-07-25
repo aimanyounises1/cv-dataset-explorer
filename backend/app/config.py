@@ -29,6 +29,12 @@ CHAT_MODEL = os.environ.get("CVDE_CHAT_MODEL", "qwen3:8b")  # needs tool calling
 # this corpus, so it is configurable and logged with every fused search.
 RRF_K = int(os.environ.get("CVDE_RRF_K", "60"))
 
+# Ranking depth held constant across pages of the same query. RRF ranks depend
+# on how deep the candidate lists go, so fusing to `offset + page_size` would
+# re-rank on every page and let items shift between them. Fusing to a fixed
+# depth instead makes paging stable for any page within it.
+SEARCH_DEPTH = int(os.environ.get("CVDE_SEARCH_DEPTH", "300"))
+
 # A query term matching this fraction of images or more is too common for
 # keyword ranking to discriminate, and the UI says so. Calibrated on Flickr8k,
 # where the most common content word ("dog") matches 22.6% of images and no

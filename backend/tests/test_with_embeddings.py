@@ -159,6 +159,52 @@ def test_benchmark_excludes_the_held_out_caption(client):
     assert modes["keyword"]["median_rank"] is None  # never found within depth
 
 
+def test_search_pages_partition_the_ranking(client):
+    """Paging must split one ranking, not re-rank per page.
+
+    RRF scores depend on how deep the candidate lists go, so fusing to the
+    depth of the current page would shuffle items between pages — the user
+    sees duplicates and gaps. Fusing to a fixed depth makes the pages a true
+    partition, which is what this asserts.
+    """
+    def ids(**kw):
+        return [it["id"] for it in client.get("/api/search", params={
+            "q": "dog", "mode": "hybrid", **kw}).json()["items"]]
+
+    whole = ids(top_k=4)
+    first, second = ids(top_k=2), ids(top_k=2, offset=2)
+    assert first + second == whole
+    assert not set(first) & set(second)
+
+
+def test_search_reports_whether_more_results_exist(client):
+    # Sized from the ranking itself: this module shares its temp database with
+    # the smoke fixture, so the lexical side sees more captions than the four
+    # embedded samples and a hard-coded total would be wrong.
+    def page(**kw):
+        return client.get("/api/search",
+                          params={"q": "dog", "mode": "hybrid", **kw}).json()
+
+    total = len(page(top_k=50)["items"])
+    assert total >= 2
+
+    first = page(top_k=1)
+    assert first["offset"] == 0 and first["has_more"] is True
+
+    final = page(top_k=1, offset=total - 1)
+    assert final["offset"] == total - 1 and final["has_more"] is False
+
+
+def test_export_of_a_query_matches_the_search_it_came_from(client):
+    """An exported slice is only useful if it is the slice you were looking at."""
+    params = {"q": "dog", "mode": "hybrid", "top_k": 3}
+    searched = [it["id"] for it in client.get("/api/search", params=params).json()["items"]]
+    exported = client.get("/api/export", params=params).json()
+    assert [s["id"] for s in exported["samples"]] == searched      # same order
+    assert exported["filters"]["q"] == "dog"
+    assert exported["filters"]["embed_model"]                       # reproducible
+
+
 def test_lexical_candidates_always_excludes_the_query_caption(client):
     """FR-EV-2 at the seam rather than through a metric.
 

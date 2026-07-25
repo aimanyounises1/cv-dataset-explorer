@@ -4,6 +4,8 @@ Data-dir isolation happens in conftest.py, before any `app` import.
 
     cd backend && pytest
 """
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -191,3 +193,19 @@ def test_export_manifest(client):
     body = r.json()
     assert body["count"] == 1
     assert body["samples"][0]["captions"]
+    assert body["filters"]["embed_model"]  # the slice records how to regenerate it
+
+
+def test_export_csv_and_jsonl(client):
+    csv_resp = client.get("/api/export", params={"split": "test", "format": "csv"})
+    assert csv_resp.status_code == 200
+    assert "text/csv" in csv_resp.headers["content-type"]
+    assert "attachment" in csv_resp.headers["content-disposition"]
+    lines = csv_resp.text.strip().splitlines()
+    assert lines[0] == "id,filename,split,captions,tags"
+    assert len(lines) == 2  # header + the one test-split row
+
+    jsonl = client.get("/api/export", params={"split": "test", "format": "jsonl"})
+    records = [json.loads(ln) for ln in jsonl.text.strip().splitlines()]
+    assert records[0]["_manifest"]["split"] == "test"  # provenance first
+    assert records[1]["captions"]

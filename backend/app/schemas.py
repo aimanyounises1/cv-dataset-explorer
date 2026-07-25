@@ -70,6 +70,8 @@ class SearchResponse(BaseModel):
     score_basis: Optional[str] = None   # what `score` means: cosine | rrf | None
     rrf_k: Optional[int] = None         # fusion constant, when fusion ran
     term_stats: list[TermStat] = []     # per-term document frequency (lexical modes)
+    offset: int = 0                     # window start within the full ranking
+    has_more: bool = False              # a further page exists
 
 
 class StatsOverview(BaseModel):
