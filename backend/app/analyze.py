@@ -107,12 +107,24 @@ def compute_attributes(conn) -> None:
         probs = np.exp(logits)
         probs /= probs.sum(axis=1, keepdims=True)
         best = probs.argmax(axis=1)
+        # Abstain where the winner is not clearly ahead of the runner-up. A
+        # forced argmax labels a sky-less indoor shot "day" at 0.34 and then
+        # counts it beside a clear night street, which is exactly the kind of
+        # quiet fabrication that makes a coverage chart untrustworthy.
+        if probs.shape[1] > 1:
+            top2 = np.partition(probs, -2, axis=1)
+            margin = top2[:, -1] - top2[:, -2]
+        else:
+            margin = np.ones(len(probs))
+        keep = margin >= config.ATTR_MIN_MARGIN
         conn.executemany(
             "INSERT INTO attributes(sample_id, grp, label, confidence) VALUES (?,?,?,?)",
             [(int(img.ids[i]), grp, names[best[i]], float(probs[i, best[i]]))
-             for i in range(len(img.ids))],
+             for i in range(len(img.ids)) if keep[i]],
         )
-        logger.info("Attributed group '%s' (%d labels).", grp, len(names))
+        logger.info("Attributed group '%s' (%d labels): %d labelled, %d abstained "
+                    "(%.1f%%, margin < %.2f).", grp, len(names), int(keep.sum()),
+                    int((~keep).sum()), 100 * float((~keep).mean()), config.ATTR_MIN_MARGIN)
     conn.commit()
 
 

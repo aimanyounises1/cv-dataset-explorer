@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db
-from .api import admin, attributes, chat, qa, samples, search, stats, tags
+from .api import admin, attributes, chat, qa, samples, search, stats, tags, views
 from .api import eval as eval_api
 from .api import map as map_api
 
@@ -36,7 +36,8 @@ app.add_middleware(
 
 for router in (samples.router, search.router, stats.router, map_api.router,
                tags.router, qa.router, attributes.router, eval_api.router,
-               admin.router, chat.router):
+               admin.router, chat.router,
+               views.router):
     app.include_router(router, prefix="/api")
 
 # Local image/thumbnail serving.

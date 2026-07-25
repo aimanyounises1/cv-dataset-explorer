@@ -89,6 +89,28 @@ class SearchResponse(BaseModel):
     offset: int = 0                     # window start within the full ranking
     has_more: bool = False              # a further page exists
     sort: Optional[str] = None          # axis sort in force; None = relevance order
+    # How many pasted id-list entries exist in this dataset. Reported, not
+    # enforced: a list carried over from a larger corpus is normal.
+    ids_resolved: Optional[int] = None
+
+
+class SearchRequest(BaseModel):
+    """POST body for search, carrying what a URL cannot.
+
+    Mirrors the GET parameters exactly; it exists only because an id list of the
+    size this tool accepts does not fit in a query string.
+    """
+    q: str
+    mode: str = "hybrid"
+    top_k: int = 60
+    offset: int = 0
+    split: Optional[str] = None
+    tag: Optional[str] = None
+    vlm_tag: Optional[str] = None
+    attr: Optional[str] = None
+    sort: Optional[str] = None
+    ids: Optional[str] = None            # raw pasted text, parsed server-side
+    axes: dict[str, dict[str, Optional[int]]] = {}   # {"difficulty": {"min": 8}}
 
 
 class StatsOverview(BaseModel):
@@ -147,6 +169,12 @@ class AttributeLabel(BaseModel):
 class AttributeGroup(BaseModel):
     grp: str
     labels: list[AttributeLabel]
+    # Label fractions are of the whole corpus, so they sum to less than 1 and the
+    # shortfall is exactly the abstention rate. Renormalising over labelled
+    # samples would make every group look like full coverage.
+    labelled: int = 0
+    abstained: int = 0                    # below the decisiveness margin
+    mean_confidence: Optional[float] = None
 
 
 class EvalModeResult(BaseModel):
@@ -168,6 +196,23 @@ class EvalResponse(BaseModel):
     depth: int = 0                      # rank depth MRR/median are computed to
     mean_query_words: float = 0.0       # queries are whole captions, not phrases
     results: list[EvalModeResult] = []
+
+
+class SavedView(BaseModel):
+    """A named filter set, held as the URL query string that produced it.
+
+    `query_string` is opaque to the server: storing the URL rather than a parsed
+    filter object means a view survives the UI gaining filters the API has no
+    column for, at the cost of not being able to validate or migrate one.
+    """
+    name: str
+    query_string: str
+    created_at: str                      # ISO-8601, UTC
+
+
+class SavedViewCreate(BaseModel):
+    name: str
+    query_string: str
 
 
 class ChatMessage(BaseModel):

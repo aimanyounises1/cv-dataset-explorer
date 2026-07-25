@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS vlm_tags (
     PRIMARY KEY (sample_id, tag)
 );
 CREATE INDEX IF NOT EXISTS idx_vlm_tags_tag ON vlm_tags(tag);
+
+-- Named URL query strings. Stored opaquely — the server never parses one, so a
+-- view keeps working when the UI grows a filter the backend knows nothing about.
+CREATE TABLE IF NOT EXISTS saved_views (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    query_string TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 

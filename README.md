@@ -20,6 +20,7 @@ local embeddings, no cloud services or paid APIs.
 - **Sample inspector** — full image, all 5 captions **with image-caption agreement scores**, zero-shot attributes, metadata, editable curation tags, and "similar images" via embedding nearest neighbors.
 - **Embedding map** — interactive UMAP scatter of the whole dataset (zoom/pan/hover thumbnails, click-through). **Shift+drag selects a region for bulk tagging** — lasso a visual cluster, name it, filter the gallery by it.
 - **Statistics** — split sizes, caption length/vocabulary distributions, **zero-shot attribute coverage** (click a bar to open that slice in the gallery — small slices are the long tail), and **near-duplicate detection**.
+- **Difficulty axes** — every sample is scored 0–10 on four axes describing how *hard* it is, not what is in it: **legibility** (blur and darkness), **rarity** (rare caption vocabulary, and isolation in embedding space), **difficulty** (where image–caption agreement and inter-caption agreement are weakest), and **clutter** (how much the captions name, and how much their lengths vary). Each is a range filter, a badge on every result card, and a sort key — so "show me the hardest 300 samples in the validation split" is a query the tool can answer. See [Reading the difficulty axes](#reading-the-difficulty-axes).
 - **Quality (annotation QA)** — CLIPScore-style ranking of captions least supported by their image (likely annotation errors), plus samples whose 5 captions disagree most with each other.
 - **Benchmark** — the tool measures its own search quality: standard Flickr8k text→image retrieval recall@1/5/10 for all three modes, using the dataset's captions as ground truth.
 - **Assistant (optional)** — a chat interface backed by a **Fugu-style multi-agent orchestration** (LangGraph over local Ollama): an orchestrator routes requests to retrieval and insights specialist agents, and a synthesizer quality-gates the answer. Agents use the same service functions as the REST API and can search, inspect, analyze coverage, audit captions, and tag samples. The UI shows the agent/tool trace for every answer.
@@ -32,6 +33,52 @@ search, map, QA, benchmark, assistant) is an optional layer that reports its
 own availability and degrades gracefully when its prerequisites are missing —
 without embeddings you still get browsing/keyword search/stats, and without
 the agent stack the assistant tab explains exactly how to enable it.
+
+## Reading the difficulty axes
+
+Computed once by `python -m app.analyze --only axes` and stored on each sample.
+Three things about them are worth knowing before you trust a number.
+
+**They are percentile ranks, not measurements.** A Laplacian variance, a cosine
+distance and an inverse document frequency live on entirely different scales
+with distributions you cannot guess in advance, so a range filter over the raw
+values behaves erratically — "blur ≥ 40" means something different on every
+dataset and nothing at all to a person. Each axis is therefore ranked across the
+dataset and bucketed 0–10, which makes `rarity ≥ 7` and `difficulty ≥ 7` both
+mean "roughly the top 30% of this corpus" and lets four sliders be used
+together. The cost: the scores are **dataset-relative**. A 7 here is not a 7 on
+COCO, the buckets are near-uniformly populated by construction, and ingesting
+more images can move a sample's bucket without its pixels changing.
+
+**Every score carries its components.** `axis_detail` stores the raw values
+behind each axis (blur, luminance, agreement, and so on), so the interface can
+explain a score in place rather than asking you to trust it. Nothing here is
+model-generated prose — the explanations are templated from measured numbers.
+
+**There is no fifth axis, on purpose.** Systems of this kind usually carry a
+*dynamic complexity* axis — how badly the agents in a scene are behaving. There
+is no honest analogue in Flickr8k: these are still photographs, with no motion,
+no agents and no rules to violate. Inventing one to round the count to five
+would have made the panel look more complete and the data less true, so the
+axis is absent and this paragraph is the reason.
+
+## Scale: where the exact search stops being the right choice
+
+Retrieval is exact brute-force cosine in NumPy — no approximate-nearest-neighbour
+index. At 8,000 × 768 the embedding matrix is ~25 MB and a full scan takes well
+under a millisecond, which is under 1% of query latency; the text encode
+dominates by two orders of magnitude. An ANN index here would optimise the
+fastest stage of the pipeline while adding a dependency, a build step and recall
+loss, so `EmbeddingIndex` stays exact and remains the single seam where that
+would change.
+
+It stops being the right choice somewhere around **100k–500k vectors**, or
+whenever the scan exceeds ~10% of end-to-end query latency, whichever comes
+first. At that point the substitution is local and does not change the API:
+`EmbeddingIndex.search` already takes an `allowed_ids` candidate mask, so a
+FAISS `IndexIVFFlat`, `hnswlib`, or `sqlite-vec` can be dropped in behind it.
+Hosted vector databases are excluded by design — everything here runs on one
+machine.
 
 ## Data provenance and licensing
 

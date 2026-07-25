@@ -16,6 +16,7 @@ from .deps import (
     build_filters,
     first_captions,
     get_conn,
+    id_list,
     image_url,
     order_by_axis,
     row_to_card,
@@ -35,9 +36,10 @@ def list_samples(
     attr: Optional[str] = None,
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
     axes: dict = Depends(axis_bounds),
+    ids: list = Depends(id_list),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    where, params = build_filters(split, tag, vlm_tag, attr, axes)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
     total = conn.execute(f"SELECT COUNT(*) FROM samples s{where}", params).fetchone()[0]
     # Sorting is over the whole filtered set, in SQL — never over the page.
     order = order_by_axis(sort) or " ORDER BY s.id"
@@ -109,6 +111,7 @@ def export_subset(
     attr: Optional[str] = None,
     fmt: str = Query("json", alias="format", pattern="^(json|jsonl|csv)$"),
     axes: dict = Depends(axis_bounds),
+    ids: list = Depends(id_list),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Manifest of the current subset — filters *or* a search result set — for
@@ -125,7 +128,7 @@ def export_subset(
         from .search import run_search
 
         result = run_search(conn, q, mode=mode, top_k=top_k, split=split,
-                            tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes)
+                            tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes, ids=ids)
         ids = [it.id for it in result.items]
         rows_by_id = {}
         if ids:
@@ -135,7 +138,7 @@ def export_subset(
         rows = [rows_by_id[i] for i in ids if i in rows_by_id]  # ranked order
         ids = [r["id"] for r in rows]
     else:
-        where, params = build_filters(split, tag, vlm_tag, attr, axes)
+        where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
         rows = conn.execute(
             f"SELECT s.* FROM samples s{where} ORDER BY s.id", params).fetchall()
         ids = [r["id"] for r in rows]

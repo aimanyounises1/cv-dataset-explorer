@@ -3,7 +3,7 @@ import json
 import sqlite3
 from typing import Iterator, Optional
 
-from fastapi import Query
+from fastapi import HTTPException, Query
 
 from .. import db
 from ..db import AXES
@@ -37,6 +37,65 @@ def row_to_card(row: sqlite3.Row, caption: Optional[str] = None,
     )
 
 
+# A pasted list is how a researcher brings back a set computed somewhere else —
+# worst-loss samples from a training run, a regression list, another team's
+# output. The cap is generous because the list is machine-produced.
+MAX_ID_LIST = 60_000
+
+
+def parse_id_list(text: Optional[str]) -> list[str]:
+    """Split a pasted list into entries.
+
+    Accepts commas or newlines (real pastes contain both), tolerates blank
+    entries and stray whitespace, and preserves order while removing repeats so
+    a duplicated line cannot weight a sample twice.
+    """
+    if not text:
+        return []
+    seen, out = set(), []
+    for raw in text.replace(",", "\n").splitlines():
+        entry = raw.strip()
+        if entry and entry not in seen:
+            seen.add(entry)
+            out.append(entry)
+    return out
+
+
+def id_list_clause(entries: list[str]) -> tuple[str, list]:
+    """SQL predicate matching either a sample id or a filename.
+
+    Both are accepted in one list because both are things a researcher already
+    has: ids come out of this tool's own export, filenames out of anything that
+    touched the images on disk. Entries that match nothing are ignored rather
+    than rejected — a list pasted from a larger corpus is a normal thing to do,
+    and failing the whole query over one stale line would be hostile.
+    """
+    numeric = [int(e) for e in entries if e.lstrip("-").isdigit()]
+    names = [e for e in entries if not e.lstrip("-").isdigit()]
+    parts, params = [], []
+    if numeric:
+        parts.append(f"s.id IN ({','.join('?' * len(numeric))})")
+        params.extend(numeric)
+    if names:
+        parts.append(f"s.filename IN ({','.join('?' * len(names))})")
+        params.extend(names)
+    if not parts:
+        return "", []
+    return "(" + " OR ".join(parts) + ")", params
+
+
+def id_list(ids: Optional[str] = Query(
+        None, description=f"Sample ids or filenames, comma/newline separated "
+                          f"(max {MAX_ID_LIST}). Large lists need POST /api/search: "
+                          f"a URL cannot carry tens of thousands of entries.")
+) -> list[str]:
+    entries = parse_id_list(ids)
+    if len(entries) > MAX_ID_LIST:
+        raise HTTPException(
+            400, f"Too many entries: {len(entries)}. The limit is {MAX_ID_LIST}.")
+    return entries
+
+
 def axis_bounds(
     legibility_min: Optional[int] = Query(None, ge=0, le=10),
     legibility_max: Optional[int] = Query(None, ge=0, le=10),
@@ -63,7 +122,8 @@ def axis_bounds(
 
 def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[str],
                   attr: Optional[str] = None,
-                  axes: Optional[dict[str, tuple[Optional[int], Optional[int]]]] = None):
+                  axes: Optional[dict[str, tuple[Optional[int], Optional[int]]]] = None,
+                  ids: Optional[list[str]] = None):
     """Compose WHERE clauses + params for common sample filters.
 
     `attr` is a zero-shot attribute facet encoded as "group:label"; `axes` maps
@@ -96,15 +156,21 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
         if hi is not None:
             clauses.append(f"s.{axis} <= ?")
             params.append(hi)
+    if ids:
+        clause, id_params = id_list_clause(ids)
+        if clause:
+            clauses.append(clause)
+            params.extend(id_params)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
 
-def filtered_id_set(conn, split, tag, vlm_tag, attr=None, axes=None) -> Optional[set[int]]:
+def filtered_id_set(conn, split, tag, vlm_tag, attr=None, axes=None,
+                    ids=None) -> Optional[set[int]]:
     """Set of sample ids matching filters, or None when unfiltered."""
-    if not (split or tag or vlm_tag or attr or axes):
+    if not (split or tag or vlm_tag or attr or axes or ids):
         return None
-    where, params = build_filters(split, tag, vlm_tag, attr, axes)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
     rows = conn.execute(f"SELECT s.id FROM samples s{where}", params)
     return {r["id"] for r in rows}
 

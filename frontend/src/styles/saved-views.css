@@ -1,0 +1,123 @@
+/* Saved views panel. Sits alongside the filter controls, so it borrows the
+   .axis-panel surface treatment rather than inventing a second card style. */
+.saved-views {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.saved-views-title {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.saved-views-error { margin-bottom: 10px; }
+
+.saved-views-empty {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-faint);
+}
+
+.saved-views-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+/* Pill, after the existing .chip: the restore action fills it and the delete
+   sits inside the same border so the pair reads as one object. */
+.saved-view {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  transition: border-color 0.12s;
+}
+.saved-view:hover { border-color: var(--border-strong); }
+
+.saved-view-restore {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  padding: 5px 4px 5px 13px;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+.saved-view-restore:hover { color: var(--accent); }
+
+.saved-view-name {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.saved-view-date {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.saved-view-delete {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 11px 0 6px;
+  transition: color 0.12s;
+}
+.saved-view-delete:hover:not(:disabled) { color: var(--red); }
+.saved-view-delete:disabled { opacity: 0.4; cursor: default; }
+
+/* The pill clips its own children, so a focus ring drawn inside would be cut
+   off; move it onto the pill and inset it enough to stay visible. */
+.saved-view-restore:focus-visible,
+.saved-view-delete:focus-visible {
+  outline: none;
+}
+.saved-view:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.saved-views-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 11px;
+}
+.saved-views-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  color: var(--text);
+  outline: none;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+}
+.saved-views-form input::placeholder { color: var(--text-faint); }
+.saved-views-form input:focus { border-color: var(--accent); }
