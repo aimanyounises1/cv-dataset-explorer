@@ -55,3 +55,50 @@ def test_duplicate_pairs(index):
 
 def test_duplicate_pairs_no_false_positives(index):
     assert index.duplicate_pairs(threshold=0.999) == []
+
+
+# -- difficulty axes: percentile bucketing (pure numpy, no model needed) ------
+
+def test_percentile_buckets_span_the_scale_and_preserve_order():
+    from app.analyze import _percentile_buckets
+
+    raw = {i: float(i) for i in range(11)}          # evenly spaced inputs
+    got = _percentile_buckets(raw)
+    assert got[0] == 0 and got[10] == 10
+    assert [got[i] for i in range(11)] == sorted(got[i] for i in range(11))
+
+
+def test_percentile_buckets_are_scale_invariant():
+    """The point of ranking: the bucket depends on order, not on magnitude, so
+    a Laplacian variance and a cosine distance become comparable."""
+    from app.analyze import _percentile_buckets
+
+    small = _percentile_buckets({1: 0.001, 2: 0.002, 3: 0.003})
+    huge = _percentile_buckets({1: 10.0, 2: 5000.0, 3: 900000.0})
+    assert small == huge
+
+
+def test_percentile_buckets_invert_flips_the_scale():
+    from app.analyze import _percentile_buckets
+
+    values = {1: 1.0, 2: 2.0, 3: 3.0}
+    assert _percentile_buckets(values)[3] == 10
+    assert _percentile_buckets(values, invert=True)[3] == 0
+
+
+def test_percentile_buckets_are_deterministic_under_ties():
+    """Ties share the lowest bucket, which is what makes the pass idempotent."""
+    from app.analyze import _percentile_buckets
+
+    values = {1: 5.0, 2: 5.0, 3: 5.0, 4: 9.0}
+    first = _percentile_buckets(values)
+    assert first == _percentile_buckets(values)
+    assert first[1] == first[2] == first[3]
+    assert first[4] > first[1]
+
+
+def test_percentile_buckets_handle_degenerate_input():
+    from app.analyze import _percentile_buckets
+
+    assert _percentile_buckets({}) == {}
+    assert _percentile_buckets({7: 1.0}) == {7: 0}   # one sample has no spread
