@@ -1,3 +1,16 @@
+/** The four difficulty axes, as 0-10 percentile buckets over this dataset.
+ * Ranks, not measurements — a 7 means "harder than ~70% of this corpus". */
+export const AXES = ["legibility", "rarity", "difficulty", "clutter"] as const;
+export type Axis = (typeof AXES)[number];
+
+export interface AxisScores {
+  legibility?: number | null;
+  rarity?: number | null;
+  difficulty?: number | null;
+  clutter?: number | null;
+  detail: Record<string, Record<string, number>>;
+}
+
 export interface MatchPath {
   path: string; // "keyword" | "semantic"
   rank: number; // 1-based rank within that path
@@ -15,6 +28,7 @@ export interface SampleCard {
   match_caption?: string | null;
   matched_terms?: string[] | null;
   match_paths?: MatchPath[] | null;
+  axes?: AxisScores | null;
 }
 
 export interface SampleList {
@@ -44,6 +58,7 @@ export interface SampleDetail {
   attributes: Record<string, string>;
   cluster?: number | null;
   caption_consistency?: number | null;
+  axes?: AxisScores | null;
 }
 
 export interface TermStat {
@@ -63,6 +78,7 @@ export interface SearchResponse {
   term_stats: TermStat[];
   offset: number;
   has_more: boolean;
+  sort?: string | null;
 }
 
 export interface StatsOverview {

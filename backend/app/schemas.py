@@ -4,6 +4,20 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class AxisScores(BaseModel):
+    """Difficulty axes, 0-10 percentile buckets over this dataset.
+
+    Not measurements — ranks. A 7 means "harder than roughly 70% of *this*
+    corpus", so the numbers do not transfer to another dataset. `detail` carries
+    the raw components behind each axis so a score can be explained in place.
+    """
+    legibility: Optional[int] = None    # Clear(0) -> Blind(10)
+    rarity: Optional[int] = None        # Not rare(0) -> Very rare(10)
+    difficulty: Optional[int] = None    # Routine(0) -> Hard(10)
+    clutter: Optional[int] = None       # Simple(0) -> Busy(10)
+    detail: dict = {}
+
+
 class MatchPath(BaseModel):
     """Which retrieval path produced this result, and where it placed."""
     path: str                           # "keyword" | "semantic"
@@ -22,6 +36,7 @@ class SampleCard(BaseModel):
     match_caption: Optional[str] = None  # the caption that explains this match
     matched_terms: Optional[list[str]] = None  # terms to highlight (keyword hits)
     match_paths: Optional[list[MatchPath]] = None  # why this result is here
+    axes: Optional[AxisScores] = None   # why this item is interesting
 
 
 class SampleList(BaseModel):
@@ -51,6 +66,7 @@ class SampleDetail(BaseModel):
     attributes: dict[str, str] = {}
     cluster: Optional[int] = None
     caption_consistency: Optional[float] = None
+    axes: Optional[AxisScores] = None
 
 
 class TermStat(BaseModel):
@@ -72,6 +88,7 @@ class SearchResponse(BaseModel):
     term_stats: list[TermStat] = []     # per-term document frequency (lexical modes)
     offset: int = 0                     # window start within the full ranking
     has_more: bool = False              # a further page exists
+    sort: Optional[str] = None          # axis sort in force; None = relevance order
 
 
 class StatsOverview(BaseModel):

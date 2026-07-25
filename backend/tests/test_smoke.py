@@ -30,6 +30,18 @@ def client():
             "INSERT INTO captions(sample_id, idx, text) VALUES (?, 0, ?)", (sid, caption))
         conn.execute("INSERT INTO captions_fts(rowid, text) VALUES (?, ?)",
                      (ccur.lastrowid, caption))
+    # Distinct axis scores per sample so range filters and sorts are testable
+    # without running the analysis pass (which needs images and embeddings).
+    for filename, (leg, rar, diff, clut) in {
+        "img_0.jpg": (1, 8, 2, 3),
+        "img_1.jpg": (5, 5, 5, 5),
+        "img_2.jpg": (9, 1, 9, 7),
+    }.items():
+        conn.execute(
+            "UPDATE samples SET legibility=?, rarity=?, difficulty=?, clutter=?, "
+            "axis_detail=? WHERE filename=?",
+            (leg, rar, diff, clut,
+             '{"difficulty": {"agreement": 0.11, "consistency": 0.42}}', filename))
     conn.commit()
     conn.close()
     with TestClient(app) as c:
@@ -151,6 +163,84 @@ def test_stopwords_are_not_reported_as_common_terms(client):
     stats = client.get("/api/search",
                        params={"q": "the dog", "mode": "keyword"}).json()["term_stats"]
     assert [s["term"] for s in stats] == ["dog"]
+
+
+def test_axis_range_filter_on_browse(client):
+    # Three samples with difficulty 2, 5, 9.
+    assert client.get("/api/samples").json()["total"] == 3
+    assert client.get("/api/samples", params={"difficulty_min": 5}).json()["total"] == 2
+    assert client.get("/api/samples", params={"difficulty_max": 4}).json()["total"] == 1
+    body = client.get("/api/samples",
+                      params={"difficulty_min": 4, "difficulty_max": 6}).json()
+    assert body["total"] == 1 and body["items"][0]["axes"]["difficulty"] == 5
+
+
+def test_several_axes_constrained_at_once(client):
+    # difficulty>=5 keeps samples 1 and 2; rarity>=5 keeps 0 and 1; both keep 1.
+    body = client.get("/api/samples",
+                      params={"difficulty_min": 5, "rarity_min": 5}).json()
+    assert body["total"] == 1
+    axes = body["items"][0]["axes"]
+    assert (axes["difficulty"], axes["rarity"]) == (5, 5)
+
+
+def test_axis_filter_is_applied_inside_the_ranking_not_after_it(client):
+    """Criterion 2, in the shape of test_keyword_search_respects_filters_in_sql.
+
+    "rides" matches only the sample scored difficulty 9. If the axis predicate
+    were applied to an already-limited page the query would still return that
+    row and then drop it, reporting a total computed over the wrong set; applied
+    inside the ranking, the candidate never enters it.
+    """
+    r = client.get("/api/search", params={"q": "rides", "mode": "keyword"})
+    assert len(r.json()["items"]) == 1
+    r = client.get("/api/search", params={"q": "rides", "mode": "keyword",
+                                          "difficulty_max": 5})
+    assert r.json()["items"] == []
+
+
+def test_axis_sort_orders_the_whole_filtered_set(client):
+    """Criterion 5: sorting is server-side, so page 1 holds the global extreme."""
+    desc = client.get("/api/samples",
+                      params={"sort": "difficulty_desc"}).json()["items"]
+    assert [i["axes"]["difficulty"] for i in desc] == [9, 5, 2]
+    asc = client.get("/api/samples",
+                     params={"sort": "difficulty_asc"}).json()["items"]
+    assert [i["axes"]["difficulty"] for i in asc] == [2, 5, 9]
+    # One item per page: the first page must still be the global maximum.
+    top = client.get("/api/samples",
+                     params={"sort": "difficulty_desc", "per_page": 1}).json()
+    assert top["items"][0]["axes"]["difficulty"] == 9 and top["total"] == 3
+
+
+def test_axis_sort_applies_to_search_results_too(client):
+    items = client.get("/api/search", params={
+        "q": "a", "mode": "keyword", "sort": "difficulty_desc"}).json()
+    scores = [i["axes"]["difficulty"] for i in items["items"]]
+    assert scores == sorted(scores, reverse=True)
+    assert items["sort"] == "difficulty_desc"
+
+
+def test_unknown_sort_key_is_ignored_not_interpolated(client):
+    # The axis name reaches SQL as an identifier, so anything unrecognised must
+    # fall back to the default order rather than being trusted.
+    r = client.get("/api/samples", params={"sort": "difficulty; DROP TABLE samples--"})
+    assert r.status_code == 200
+    assert r.json()["total"] == 3
+    assert client.get("/api/samples").json()["total"] == 3
+
+
+def test_axis_detail_travels_with_the_card(client):
+    # Item 5 depends on this: the components behind a score arrive with the
+    # score, so a card can explain itself without a second request.
+    item = client.get("/api/samples", params={"per_page": 1}).json()["items"][0]
+    assert item["axes"]["detail"]["difficulty"]["agreement"] == 0.11
+
+
+def test_export_composes_with_axis_filters(client):
+    body = client.get("/api/export", params={"difficulty_min": 5}).json()
+    assert body["count"] == 2
+    assert body["filters"]["axes"] == {"difficulty": [5, None]}
 
 
 def test_bulk_tag(client):

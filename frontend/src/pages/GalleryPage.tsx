@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { SampleCard, SearchMode, TermStat } from "../api/types";
+import { AXES, Axis, SampleCard, SearchMode, TermStat } from "../api/types";
+import AxisFilters, { AXIS_META, AxisRange } from "../components/AxisFilters";
 import FilterBar, { Filters } from "../components/FilterBar";
 import ImageCard from "../components/ImageCard";
 import { useDebounce } from "../hooks/useDebounce";
@@ -42,6 +43,32 @@ export default function GalleryPage() {
     vlm_tag: searchParams.get("vlm_tag") ?? "",
     attr: searchParams.get("attr") ?? "",
   }), [searchParams]);
+  const sort = searchParams.get("sort") ?? "";
+
+  // Axis ranges live in the URL like every other filter, so a constrained
+  // slice stays shareable and the back button still works.
+  const axisRanges: AxisRange = useMemo(() => {
+    const out: AxisRange = {};
+    for (const a of AXES) {
+      const lo = searchParams.get(`${a}_min`);
+      const hi = searchParams.get(`${a}_max`);
+      if (lo != null || hi != null) {
+        out[a] = [lo == null ? null : Number(lo), hi == null ? null : Number(hi)];
+      }
+    }
+    return out;
+  }, [searchParams]);
+
+  const axisParams = useMemo(() => {
+    const p: Record<string, number> = {};
+    for (const [axis, range] of Object.entries(axisRanges)) {
+      if (!range) continue;
+      const [lo, hi] = range;
+      if (lo != null) p[`${axis}_min`] = lo;
+      if (hi != null) p[`${axis}_max`] = hi;
+    }
+    return p;
+  }, [axisRanges]);
 
   const [input, setInput] = useState(query);
   const [items, setItems] = useState<SampleCard[]>([]);
@@ -86,7 +113,10 @@ export default function GalleryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInput]);
 
-  const filterKey = `${query}|${mode}|${filters.split}|${filters.tag}|${filters.vlm_tag}|${filters.attr}`;
+  const filterKey = [
+    query, mode, filters.split, filters.tag, filters.vlm_tag, filters.attr,
+    sort, JSON.stringify(axisParams),
+  ].join("|");
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -99,13 +129,15 @@ export default function GalleryPage() {
         if (query) {
           const res = await api.search(
             query, mode,
-            { ...filters, top_k: PER_PAGE, offset: (p - 1) * PER_PAGE }, ctrl.signal);
+            { ...filters, ...axisParams, sort: sort || undefined,
+              top_k: PER_PAGE, offset: (p - 1) * PER_PAGE }, ctrl.signal);
           setNotice(res.degraded ? res.message ?? null : null);
           setMeta({ basis: res.score_basis, rrfK: res.rrf_k, terms: res.term_stats ?? [] });
           return { items: res.items, total: null as number | null, more: res.has_more };
         }
         const res = await api.listSamples(
-          { page: p, per_page: PER_PAGE, ...filters }, ctrl.signal);
+          { page: p, per_page: PER_PAGE, ...filters, ...axisParams,
+            sort: sort || undefined }, ctrl.signal);
         setNotice(null);
         setMeta({ terms: [] });
         return { items: res.items, total: res.total, more: p * PER_PAGE < res.total };
@@ -161,6 +193,7 @@ export default function GalleryPage() {
     const p = new URLSearchParams();
     if (query) { p.set("q", query); p.set("mode", mode); p.set("top_k", "500"); }
     for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
+    for (const [k, v] of Object.entries(axisParams)) p.set(k, String(v));
     p.set("format", format);
     return `/api/export?${p.toString()}`;
   };
@@ -199,6 +232,18 @@ export default function GalleryPage() {
             split: f.split, tag: f.tag, vlm_tag: f.vlm_tag, attr: f.attr, page: "",
           })}
         />
+        <select value={sort} aria-label="Sort results"
+                onChange={(e) => setParams({ sort: e.target.value, page: "" })}>
+          <option value="">Sort: relevance</option>
+          {AXES.map((a) => [
+            <option key={`${a}_desc`} value={`${a}_desc`}>
+              Sort: {AXIS_META[a].label} — hardest first
+            </option>,
+            <option key={`${a}_asc`} value={`${a}_asc`}>
+              Sort: {AXIS_META[a].label} — easiest first
+            </option>,
+          ])}
+        </select>
         <div className="density">
           <span className="density-label">Size</span>
           <div className="density-group" role="group" aria-label="Thumbnail size">
@@ -210,6 +255,19 @@ export default function GalleryPage() {
           </div>
         </div>
       </div>
+
+      <AxisFilters
+        value={axisRanges}
+        onChange={(next) => {
+          const updates: Record<string, string> = { page: "" };
+          for (const a of AXES) {
+            const r = next[a as Axis];
+            updates[`${a}_min`] = r && r[0] != null ? String(r[0]) : "";
+            updates[`${a}_max`] = r && r[1] != null ? String(r[1]) : "";
+          }
+          setParams(updates);
+        }}
+      />
 
       {!query && (
         <div className="chip-row">

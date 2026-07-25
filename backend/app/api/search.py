@@ -24,7 +24,15 @@ from .. import config, db
 from ..ml.embedder import get_embedder
 from ..ml.index import get_caption_index, get_index
 from ..schemas import MatchPath, SearchResponse, TermStat
-from .deps import build_filters, filtered_id_set, first_captions, get_conn, row_to_card
+from .deps import (
+    SORT_KEYS,
+    axis_bounds,
+    build_filters,
+    filtered_id_set,
+    first_captions,
+    get_conn,
+    row_to_card,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,14 +41,14 @@ router = APIRouter()
 
 def _keyword_ranking(
     conn, q: str, top_k: int,
-    split=None, tag=None, vlm_tag=None, attr=None,
+    split=None, tag=None, vlm_tag=None, attr=None, axes=None,
 ) -> tuple[list[int], dict[int, str]]:
     """Ranked sample ids + the best-matching caption per sample.
-    Filters are part of the SQL, applied before LIMIT."""
+    Filters — including axis ranges — are part of the SQL, applied before LIMIT."""
     match = db.fts_escape(q)
     if not match:
         return [], {}
-    where, params = build_filters(split, tag, vlm_tag, attr)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes)
     and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
     rows = conn.execute(
         "SELECT c.sample_id AS sid, MIN(rank) AS best, c.text AS caption_text "
@@ -96,6 +104,25 @@ def _term_stats(conn, q: str) -> list[TermStat]:
     return stats
 
 
+def _sort_by_axis(conn, ids: list[int], sort: str) -> list[int]:
+    """Re-order the entire retrieved set by a difficulty axis, in SQL.
+
+    This replaces relevance order rather than refining it: someone sorting by
+    difficulty wants the hardest items in the matching set, not the hardest
+    among the first page. The response reports the sort so the UI can say what
+    the ordering means, since the per-card scores still describe retrieval.
+    """
+    if sort not in SORT_KEYS or not ids:
+        return ids
+    axis, direction = sort.rsplit("_", 1)
+    qmarks = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"SELECT id FROM samples WHERE id IN ({qmarks}) "
+        f"ORDER BY ({axis} IS NULL), {axis} "
+        f"{'ASC' if direction == 'asc' else 'DESC'}, id", ids).fetchall()
+    return [r["id"] for r in rows]
+
+
 def _semantic_ranking(q: str, allowed: Optional[set[int]], top_k: int):
     """Ranked (sample_id, score), or None if the embedding stack is down."""
     index = get_index()
@@ -131,7 +158,7 @@ def run_search(
     conn: sqlite3.Connection, q: str, mode: str = "hybrid", top_k: int = 60,
     split: Optional[str] = None, tag: Optional[str] = None,
     vlm_tag: Optional[str] = None, attr: Optional[str] = None,
-    offset: int = 0,
+    offset: int = 0, axes: Optional[dict] = None, sort: Optional[str] = None,
 ) -> SearchResponse:
     """Core search service — used by the API endpoint, the export route, and the
     assistant's agent tools (same code path, same behavior).
@@ -144,7 +171,7 @@ def run_search(
     past it, depth grows with the window and that guarantee weakens.
     """
     depth = max(config.SEARCH_DEPTH, offset + top_k)
-    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr)
+    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes)
     degraded, message = False, None
     scores: dict[int, float] = {}
     match_captions: dict[int, str] = {}
@@ -174,12 +201,12 @@ def run_search(
         record("semantic", ranked)
     elif mode == "keyword":
         ranked, match_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr)
+            conn, q, depth, split, tag, vlm_tag, attr, axes)
         record("keyword", ranked)
         matched_terms = [t for t in q.split() if t.strip()]
     else:  # hybrid: reciprocal-rank fusion
         keyword, kw_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr)
+            conn, q, depth, split, tag, vlm_tag, attr, axes)
         rrf_k = config.RRF_K
         fused: dict[int, float] = {}
         for rank, (sid, _s) in enumerate(semantic):
@@ -197,6 +224,8 @@ def run_search(
                      len(semantic), len(keyword), rrf_k)
 
     term_stats = _term_stats(conn, q) if mode in ("keyword", "hybrid") else []
+    if sort:
+        ranked = _sort_by_axis(conn, ranked, sort)
     window = ranked[offset : offset + top_k]
     has_more = len(ranked) > offset + top_k
 
@@ -208,7 +237,7 @@ def run_search(
         return SearchResponse(items=[], mode_used=mode, degraded=degraded,
                               message=message, score_basis=score_basis,
                               rrf_k=rrf_k, term_stats=term_stats,
-                              offset=offset, has_more=False)
+                              offset=offset, has_more=False, sort=sort)
 
     qmarks = ",".join("?" * len(window))
     rows = {r["id"]: r for r in conn.execute(
@@ -225,7 +254,8 @@ def run_search(
         items.append(card)
     return SearchResponse(items=items, mode_used=mode, degraded=degraded,
                           message=message, score_basis=score_basis, rrf_k=rrf_k,
-                          term_stats=term_stats, offset=offset, has_more=has_more)
+                          term_stats=term_stats, offset=offset, has_more=has_more,
+                          sort=sort)
 
 
 @router.get("/search", response_model=SearchResponse)
@@ -234,6 +264,8 @@ def search(
     mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid)$"),
     top_k: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0, le=5000),
+    sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
+    axes: dict = Depends(axis_bounds),
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
@@ -241,4 +273,5 @@ def search(
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     return run_search(conn, q, mode=mode, top_k=top_k, split=split, tag=tag,
-                      vlm_tag=vlm_tag, attr=attr, offset=offset)
+                      vlm_tag=vlm_tag, attr=attr, offset=offset, axes=axes,
+                      sort=sort)

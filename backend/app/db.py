@@ -9,6 +9,12 @@ from typing import Iterator
 
 from . import config
 
+# Difficulty axes, after Mobileye's long-tail filter panel: none of these
+# describe what is *in* a scene, they describe how hard it is to work with.
+# Each is an integer 0-10 percentile bucket over this dataset — see
+# analyze.compute_axes for what that costs.
+AXES = ("legibility", "rarity", "difficulty", "clutter")
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (
     id INTEGER PRIMARY KEY,
@@ -97,6 +103,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE captions ADD COLUMN agreement REAL")
     if "caption_consistency" not in columns("samples"):
         conn.execute("ALTER TABLE samples ADD COLUMN caption_consistency REAL")
+
+    # Difficulty axes: integer 0-10 percentile buckets, plus the raw component
+    # values behind each so the UI can explain a score without a second query.
+    sample_cols = columns("samples")
+    for axis in AXES:
+        if axis not in sample_cols:
+            conn.execute(f"ALTER TABLE samples ADD COLUMN {axis} INTEGER")
+    if "axis_detail" not in sample_cols:
+        conn.execute("ALTER TABLE samples ADD COLUMN axis_detail TEXT")
+    for axis in AXES:
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_samples_{axis} ON samples({axis})")
 
     # Rebuild the FTS index if it predates Porter stemming.
     row = conn.execute(

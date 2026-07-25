@@ -10,7 +10,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from .. import config
 from ..ml.index import get_index
 from ..schemas import CaptionOut, SampleCard, SampleDetail, SampleList
-from .deps import build_filters, first_captions, get_conn, image_url, row_to_card, thumb_url
+from .deps import (
+    axis_bounds,
+    axis_scores,
+    build_filters,
+    first_captions,
+    get_conn,
+    image_url,
+    order_by_axis,
+    row_to_card,
+    thumb_url,
+)
 
 router = APIRouter()
 
@@ -23,12 +33,16 @@ def list_samples(
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
     attr: Optional[str] = None,
+    sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
+    axes: dict = Depends(axis_bounds),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    where, params = build_filters(split, tag, vlm_tag, attr)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes)
     total = conn.execute(f"SELECT COUNT(*) FROM samples s{where}", params).fetchone()[0]
+    # Sorting is over the whole filtered set, in SQL — never over the page.
+    order = order_by_axis(sort) or " ORDER BY s.id"
     rows = conn.execute(
-        f"SELECT s.* FROM samples s{where} ORDER BY s.id LIMIT ? OFFSET ?",
+        f"SELECT s.* FROM samples s{where}{order} LIMIT ? OFFSET ?",
         params + [per_page, (page - 1) * per_page],
     ).fetchall()
     captions = first_captions(conn, [r["id"] for r in rows])
@@ -60,6 +74,7 @@ def get_sample(sample_id: int, conn: sqlite3.Connection = Depends(get_conn)):
         captions=captions, tags=tags, vlm_tags=vlm_tags, attributes=attributes,
         cluster=row["cluster"],
         caption_consistency=round(consistency, 4) if consistency is not None else None,
+        axes=axis_scores(row),
     )
 
 
@@ -93,6 +108,7 @@ def export_subset(
     vlm_tag: Optional[str] = None,
     attr: Optional[str] = None,
     fmt: str = Query("json", alias="format", pattern="^(json|jsonl|csv)$"),
+    axes: dict = Depends(axis_bounds),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """Manifest of the current subset — filters *or* a search result set — for
@@ -109,7 +125,7 @@ def export_subset(
         from .search import run_search
 
         result = run_search(conn, q, mode=mode, top_k=top_k, split=split,
-                            tag=tag, vlm_tag=vlm_tag, attr=attr)
+                            tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes)
         ids = [it.id for it in result.items]
         rows_by_id = {}
         if ids:
@@ -119,7 +135,7 @@ def export_subset(
         rows = [rows_by_id[i] for i in ids if i in rows_by_id]  # ranked order
         ids = [r["id"] for r in rows]
     else:
-        where, params = build_filters(split, tag, vlm_tag, attr)
+        where, params = build_filters(split, tag, vlm_tag, attr, axes)
         rows = conn.execute(
             f"SELECT s.* FROM samples s{where} ORDER BY s.id", params).fetchall()
         ids = [r["id"] for r in rows]
@@ -142,6 +158,7 @@ def export_subset(
     ]
     query = {"q": q, "mode": mode if q else None, "top_k": top_k if q else None,
              "split": split, "tag": tag, "vlm_tag": vlm_tag, "attr": attr,
+             "axes": {a: list(b) for a, b in axes.items()},
              "embed_model": config.EMBED_MODEL}
 
     if fmt == "csv":

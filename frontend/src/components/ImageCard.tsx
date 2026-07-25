@@ -1,6 +1,21 @@
 import { Link } from "react-router-dom";
-import type { SampleCard } from "../api/types";
+import { AXES, SampleCard } from "../api/types";
+import { AXIS_META } from "./AxisFilters";
 import Highlight from "./Highlight";
+
+/** Short labels, so four axes fit under a thumbnail without wrapping. */
+const AXIS_ABBR: Record<string, string> = {
+  legibility: "leg", rarity: "rar", difficulty: "dif", clutter: "clt",
+};
+
+/** Colour by how much attention the score is asking for. Every axis runs
+ * easy→hard, so one scale serves all four. */
+function heat(v: number): string {
+  if (v >= 9) return "hot";
+  if (v >= 7) return "warm";
+  if (v >= 4) return "mid";
+  return "cool";
+}
 
 /** A score is only interpretable next to what produced it: a text-image cosine
  * and an RRF sum live on different scales and must never be read against each
@@ -51,6 +66,23 @@ export default function ImageCard({ sample, scoreBasis }: Props) {
             </span>
           )}
         </div>
+        {/* Difficulty axes. The strip above answers "why did the search return
+            this?"; this row answers "why is this one worth my time?" */}
+        {sample.axes && (
+          <div className="axis-badges">
+            {AXES.map((axis) => {
+              const v = sample.axes?.[axis];
+              if (v == null) return null;
+              const meta = AXIS_META[axis];
+              return (
+                <span key={axis} className={`axis-badge ${heat(v)}`}
+                      title={`${meta.label} ${v}/10 — ${meta.low} → ${meta.high}. ${meta.hint}`}>
+                  {AXIS_ABBR[axis]} <b>{v}</b>
+                </span>
+              );
+            })}
+          </div>
+        )}
       </div>
     </Link>
   );
