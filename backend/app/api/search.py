@@ -170,14 +170,19 @@ def run_search(
     """Core search service — used by the API endpoint, the export route, and the
     assistant's agent tools (same code path, same behavior).
 
-    Paging contract: both rankings are taken to a fixed `config.SEARCH_DEPTH`
-    (widened only if a caller pages past it) and fused once, then the requested
-    window is sliced out. Fusing to the depth of the current page instead would
-    change every page's ranking as the user pages, which shows up as duplicates
-    and gaps. Pages are therefore stable for any window within SEARCH_DEPTH;
-    past it, depth grows with the window and that guarantee weakens.
+    Paging contract: both rankings are taken to exactly `config.SEARCH_DEPTH`
+    and fused once, then the requested window is sliced out. Fusing to the depth
+    of the current page instead would change the ranking as the user pages,
+    which shows up as duplicates and gaps.
+
+    The depth is therefore a hard horizon, not a starting point: paging stops at
+    SEARCH_DEPTH rather than widening to reach further. An earlier version did
+    widen, and it demonstrably returned the same image on two adjacent pages —
+    the ranking past row 300 was being recomputed against a different candidate
+    pool. A ranking is only defined as deep as it was computed, so results
+    beyond that are not offered; raise CVDE_SEARCH_DEPTH to see further.
     """
-    depth = max(config.SEARCH_DEPTH, offset + top_k)
+    depth = config.SEARCH_DEPTH
     # Staged once per request, before any filter builds SQL: past ~10k entries an
     # IN (...) list would exceed SQLite's host-parameter ceiling.
     ids_staged = stage_id_list(conn, ids) if ids else False
@@ -245,8 +250,11 @@ def run_search(
     term_stats = _term_stats(conn, q) if mode in ("keyword", "hybrid") else []
     if sort:
         ranked = _sort_by_axis(conn, ranked, sort)
-    window = ranked[offset : offset + top_k]
-    has_more = len(ranked) > offset + top_k
+    # Clamped to the horizon: never serve, or promise, rows the fusion did not rank.
+    end = min(offset + top_k, depth)
+    window = ranked[offset:end] if offset < depth else []
+    has_more = end < min(len(ranked), depth)
+    depth_reached = not has_more and len(ranked) >= depth
 
     # Caption lookups are per-page, not per-ranking: only the window is shown.
     if mode in ("semantic", "hybrid"):
@@ -257,7 +265,8 @@ def run_search(
                               message=message, score_basis=score_basis,
                               rrf_k=rrf_k, term_stats=term_stats,
                               offset=offset, has_more=False, sort=sort,
-                              ids_resolved=ids_resolved)
+                              ids_resolved=ids_resolved, depth_limit=depth,
+                              depth_reached=offset >= depth)
 
     qmarks = ",".join("?" * len(window))
     rows = {r["id"]: r for r in conn.execute(
@@ -275,7 +284,8 @@ def run_search(
     return SearchResponse(items=items, mode_used=mode, degraded=degraded,
                           message=message, score_basis=score_basis, rrf_k=rrf_k,
                           term_stats=term_stats, offset=offset, has_more=has_more,
-                          sort=sort, ids_resolved=ids_resolved)
+                          sort=sort, ids_resolved=ids_resolved,
+                          depth_limit=depth, depth_reached=depth_reached)
 
 
 @router.get("/search", response_model=SearchResponse)

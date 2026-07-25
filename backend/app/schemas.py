@@ -92,6 +92,11 @@ class SearchResponse(BaseModel):
     # How many pasted id-list entries exist in this dataset. Reported, not
     # enforced: a list carried over from a larger corpus is normal.
     ids_resolved: Optional[int] = None
+    # How deep the fusion ranked, and whether the caller has reached it. Paging
+    # stops here rather than widening, because a widened pool re-ranks the tail
+    # and would repeat images across adjacent pages.
+    depth_limit: int = 0
+    depth_reached: bool = False
 
 
 class SearchRequest(BaseModel):

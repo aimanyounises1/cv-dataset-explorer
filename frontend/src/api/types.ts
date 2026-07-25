@@ -87,6 +87,8 @@ export interface SearchResponse {
   has_more: boolean;
   sort?: string | null;
   ids_resolved?: number | null;
+  depth_limit: number;
+  depth_reached: boolean;
 }
 
 export interface StatsOverview {
