@@ -18,19 +18,23 @@ import logging
 import sqlite3
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import config, db
 from ..ml.embedder import get_embedder
 from ..ml.index import get_caption_index, get_index
-from ..schemas import MatchPath, SearchResponse, TermStat
+from ..schemas import MatchPath, SearchRequest, SearchResponse, TermStat
 from .deps import (
+    MAX_ID_LIST,
     SORT_KEYS,
     axis_bounds,
     build_filters,
     filtered_id_set,
     first_captions,
     get_conn,
+    id_list,
+    id_list_clause,
+    parse_id_list,
     row_to_card,
 )
 
@@ -41,14 +45,14 @@ router = APIRouter()
 
 def _keyword_ranking(
     conn, q: str, top_k: int,
-    split=None, tag=None, vlm_tag=None, attr=None, axes=None,
+    split=None, tag=None, vlm_tag=None, attr=None, axes=None, ids=None,
 ) -> tuple[list[int], dict[int, str]]:
     """Ranked sample ids + the best-matching caption per sample.
     Filters — including axis ranges — are part of the SQL, applied before LIMIT."""
     match = db.fts_escape(q)
     if not match:
         return [], {}
-    where, params = build_filters(split, tag, vlm_tag, attr, axes)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids)
     and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
     rows = conn.execute(
         "SELECT c.sample_id AS sid, MIN(rank) AS best, c.text AS caption_text "
@@ -159,6 +163,7 @@ def run_search(
     split: Optional[str] = None, tag: Optional[str] = None,
     vlm_tag: Optional[str] = None, attr: Optional[str] = None,
     offset: int = 0, axes: Optional[dict] = None, sort: Optional[str] = None,
+    ids: Optional[list[str]] = None,
 ) -> SearchResponse:
     """Core search service — used by the API endpoint, the export route, and the
     assistant's agent tools (same code path, same behavior).
@@ -171,7 +176,16 @@ def run_search(
     past it, depth grows with the window and that guarantee weakens.
     """
     depth = max(config.SEARCH_DEPTH, offset + top_k)
-    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes)
+    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes, ids)
+    # How many pasted entries actually exist here. Reported rather than enforced:
+    # a list carried over from a bigger corpus is a normal thing to paste, and
+    # the useful response is "412 of your 500 are in this dataset", not an error.
+    ids_resolved = None
+    if ids:
+        clause, id_params = id_list_clause(ids)
+        ids_resolved = conn.execute(
+            f"SELECT COUNT(*) FROM samples s WHERE {clause}", id_params
+        ).fetchone()[0] if clause else 0
     degraded, message = False, None
     scores: dict[int, float] = {}
     match_captions: dict[int, str] = {}
@@ -201,12 +215,12 @@ def run_search(
         record("semantic", ranked)
     elif mode == "keyword":
         ranked, match_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr, axes)
+            conn, q, depth, split, tag, vlm_tag, attr, axes, ids)
         record("keyword", ranked)
         matched_terms = [t for t in q.split() if t.strip()]
     else:  # hybrid: reciprocal-rank fusion
         keyword, kw_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr, axes)
+            conn, q, depth, split, tag, vlm_tag, attr, axes, ids)
         rrf_k = config.RRF_K
         fused: dict[int, float] = {}
         for rank, (sid, _s) in enumerate(semantic):
@@ -237,7 +251,8 @@ def run_search(
         return SearchResponse(items=[], mode_used=mode, degraded=degraded,
                               message=message, score_basis=score_basis,
                               rrf_k=rrf_k, term_stats=term_stats,
-                              offset=offset, has_more=False, sort=sort)
+                              offset=offset, has_more=False, sort=sort,
+                              ids_resolved=ids_resolved)
 
     qmarks = ",".join("?" * len(window))
     rows = {r["id"]: r for r in conn.execute(
@@ -255,7 +270,7 @@ def run_search(
     return SearchResponse(items=items, mode_used=mode, degraded=degraded,
                           message=message, score_basis=score_basis, rrf_k=rrf_k,
                           term_stats=term_stats, offset=offset, has_more=has_more,
-                          sort=sort)
+                          sort=sort, ids_resolved=ids_resolved)
 
 
 @router.get("/search", response_model=SearchResponse)
@@ -266,6 +281,7 @@ def search(
     offset: int = Query(0, ge=0, le=5000),
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
     axes: dict = Depends(axis_bounds),
+    ids: list = Depends(id_list),
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
@@ -274,4 +290,24 @@ def search(
 ):
     return run_search(conn, q, mode=mode, top_k=top_k, split=split, tag=tag,
                       vlm_tag=vlm_tag, attr=attr, offset=offset, axes=axes,
-                      sort=sort)
+                      sort=sort, ids=ids)
+
+
+@router.post("/search", response_model=SearchResponse)
+def search_post(body: SearchRequest, conn: sqlite3.Connection = Depends(get_conn)):
+    """Same search, as a body.
+
+    A URL cannot carry an id list of the size this filter is meant for — sixty
+    thousand entries is roughly 400 kB of query string — so a pasted set that
+    large has to arrive as a POST. Identical semantics to the GET otherwise:
+    both call `run_search`, so there is one ranking implementation, not two.
+    """
+    entries = parse_id_list(body.ids)
+    if len(entries) > MAX_ID_LIST:
+        raise HTTPException(
+            400, f"Too many entries: {len(entries)}. The limit is {MAX_ID_LIST}.")
+    axes = {a: (b.get("min"), b.get("max")) for a, b in (body.axes or {}).items()}
+    return run_search(conn, body.q, mode=body.mode, top_k=body.top_k,
+                      split=body.split, tag=body.tag, vlm_tag=body.vlm_tag,
+                      attr=body.attr, offset=body.offset, axes=axes,
+                      sort=body.sort, ids=entries)

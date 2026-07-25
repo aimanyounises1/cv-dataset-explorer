@@ -41,6 +41,16 @@ SEARCH_DEPTH = int(os.environ.get("CVDE_SEARCH_DEPTH", "300"))
 # content word reaches FTS5's 50% IDF clamp — see docs/REQUIREMENTS.md §13.14.
 DF_WARN_FRACTION = float(os.environ.get("CVDE_DF_WARN_FRACTION", "0.20"))
 
+# Zero-shot attributes: how decisive the winning label must be before it is
+# recorded at all. Gated on the top-1 minus top-2 margin rather than on the
+# winner's probability, because probability is not comparable across groups of
+# different sizes — `setting` has two labels, so its argmax is >= 0.5 by
+# construction and no probability floor could ever reject one, while
+# `environment` has seven and a 0.30 winner may be a coin toss. A margin means
+# the same thing in both. Below it, the group is left unlabelled and reported
+# as abstained rather than guessed.
+ATTR_MIN_MARGIN = float(os.environ.get("CVDE_ATTR_MIN_MARGIN", "0.10"))
+
 # Misc -----------------------------------------------------------------------
 THUMB_SIZE = 320
 DUPLICATE_THRESHOLD = float(os.environ.get("CVDE_DUP_THRESHOLD", "0.95"))

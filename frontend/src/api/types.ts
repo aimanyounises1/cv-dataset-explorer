@@ -1,5 +1,9 @@
 /** The four difficulty axes, as 0-10 percentile buckets over this dataset.
  * Ranks, not measurements — a 7 means "harder than ~70% of this corpus". */
+/** Server-side cap on a pasted id list (backend: deps.MAX_ID_LIST). Kept in
+ * sync by hand; the backend rejects anything over it regardless. */
+export const MAX_ID_LIST = 60000;
+
 export const AXES = ["legibility", "rarity", "difficulty", "clutter"] as const;
 export type Axis = (typeof AXES)[number];
 
@@ -79,6 +83,7 @@ export interface SearchResponse {
   offset: number;
   has_more: boolean;
   sort?: string | null;
+  ids_resolved?: number | null;
 }
 
 export interface StatsOverview {
@@ -137,6 +142,9 @@ export interface AttributeLabel {
 export interface AttributeGroup {
   grp: string;
   labels: AttributeLabel[];
+  labelled: number;
+  abstained: number;
+  mean_confidence?: number | null;
 }
 
 export interface EvalModeResult {
