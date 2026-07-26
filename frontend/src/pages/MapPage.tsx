@@ -10,6 +10,14 @@ import { rampStops, sequential } from "../lib/viz";
 
 const COLOR_KEY = "cvde-map-color";
 
+/** Ids a lasso may carry into the gallery through the URL.
+ *
+ * The gallery's id filter accepts far more than this, but only as a POST body —
+ * a link cannot. At ~5 characters per id this stays near 4 kB, comfortably
+ * inside every browser's address-bar limit. Past it the hand-off would silently
+ * truncate, so it says so instead. */
+const HANDOFF_LIMIT = 800;
+
 export default function MapPage() {
   const [points, setPoints] = useState<MapPoint[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +121,21 @@ export default function MapPage() {
         {selected.length > 0 && (
           <form className="selection-bar" onSubmit={(e) => void bulkTag(e)}>
             <span className="pill accent">{selected.length} selected</span>
+            {/* The lasso's real product is a set. Sending it straight to the
+                gallery is the short path; tagging first is for a set you want
+                to keep, not one you want to look at. */}
+            {selected.length <= HANDOFF_LIMIT ? (
+              <Link className="primary button-link"
+                    to={`/?ids=${selected.join(",")}`}
+                    title="Open exactly these images in the gallery, where they can be searched, sorted and exported">
+                Inspect {selected.length} in gallery
+              </Link>
+            ) : (
+              <span className="meta-line" style={{ marginBottom: 0 }}>
+                Too many for a link ({selected.length} &gt; {HANDOFF_LIMIT}) — tag
+                the selection and open the tag instead.
+              </span>
+            )}
             <input
               aria-label="Tag name for selection"
               placeholder="tag name (e.g. night-scenes)"

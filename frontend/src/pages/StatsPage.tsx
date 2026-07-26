@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { AttributeGroup, CaptionStats, DuplicatePair, StatsOverview } from "../api/types";
+import LeakagePanel from "../components/LeakagePanel";
 import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../lib/viz";
 
 export default function StatsPage() {
@@ -195,6 +196,21 @@ export default function StatsPage() {
           </div>
         </>
       )}
+
+      <div className="section-title">Train/test leakage</div>
+
+      <p className="meta-line">
+
+        A held-out image with a near-duplicate in training means reported
+
+        accuracy on it is partly memorisation. Move the threshold and look at
+
+        the pairs — “near-duplicate” is a cut on a cosine, not a fact.
+
+      </p>
+
+      <div className="panel"><LeakagePanel /></div>
+
 
       <div className="section-title">
         Near-duplicate pairs {dups.length > 0 && `(${dups.length})`}

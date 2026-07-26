@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { QASummary, SuspectCaption } from "../api/types";
+import type { QASelection, QASummary, SuspectCaption } from "../api/types";
 import { SURFACE, sequential } from "../lib/viz";
 
 /** Where to put the review threshold before the user touches it.
@@ -52,6 +52,7 @@ export default function QualityPage() {
   const [sectionErrors, setSectionErrors] = useState<string[]>([]);
   const [threshold, setThreshold] = useState<number | null>(null);
   const [listLoading, setListLoading] = useState(false);
+  const [selection, setSelection] = useState<QASelection | null>(null);
 
   useEffect(() => {
     // On a QA page, a swallowed error rendering as "no problems found" is the
@@ -64,27 +65,38 @@ export default function QualityPage() {
     api.inconsistentSamples().then(setInconsistent).catch(fail("consistency ranking"));
   }, []);
 
-  // The list follows the threshold. Debounced because the control is a slider
-  // and every intermediate value would otherwise be a request.
+  // The list and the selection size both follow the threshold. Debounced
+  // because the control is a slider and every intermediate value would
+  // otherwise be a request.
   useEffect(() => {
     if (threshold == null) return;
     setListLoading(true);
+    const ctrl = new AbortController();
     const t = setTimeout(() => {
       api.suspectCaptions({ limit: 100, max_agreement: threshold })
         .then(setSuspects)
         .catch(() => setSectionErrors((p) =>
           p.includes("suspect captions") ? p : [...p, "suspect captions"]))
         .finally(() => setListLoading(false));
+      // Counted in SQL, not from the histogram: bins that straddle the line can
+      // only give a rounded answer, and this number labels a button that hands
+      // the set to another view — so it has to be the number that view shows.
+      api.qaSelection(threshold, ctrl.signal)
+        .then(setSelection)
+        .catch(() => { /* the readout falls back to the binned estimate */ });
     }, 220);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(t); ctrl.abort(); };
   }, [threshold]);
 
   const hist = summary?.histogram ?? [];
   const peak = useMemo(() => Math.max(1, ...hist.map((b) => b.count)), [hist]);
-  const belowCount = useMemo(
+  // Binned estimate, used only until the exact count arrives (and if it fails).
+  const binnedBelow = useMemo(
     () => (threshold == null ? 0
       : hist.filter((b) => b.hi <= threshold).reduce((n, b) => n + b.count, 0)),
     [hist, threshold]);
+  const exact = selection != null && selection.max_agreement === threshold;
+  const belowCount = exact ? selection!.captions : binnedBelow;
   const totalScored = summary?.scored_captions ?? 0;
 
   if (error) return <div className="error">{error}</div>;
@@ -178,6 +190,34 @@ export default function QualityPage() {
             <span className="dist-readout" style={{ color: SURFACE.textDim }}>
               {listLoading ? "updating…" : `${suspects.length} shown`}
             </span>
+          </div>
+
+          {/* A brush that only redraws its own page is a setting, not a
+              selection. These carry the same predicate to the gallery and to
+              export, so the triage set outlives this view. The list below is
+              capped at 100 rows; the set itself is not, which is exactly why
+              the hand-off has to exist. */}
+          <div className="dist-actions">
+            <Link className="primary button-link"
+                  to={`/?max_agreement=${threshold}`}
+                  title="Open these images in the gallery, where the threshold becomes a removable filter">
+              Review {exact ? selection!.samples.toLocaleString() : "these"} images
+              in gallery
+            </Link>
+            <span className="export-label">Export selection</span>
+            {(["csv", "jsonl", "json"] as const).map((f) => (
+              <a key={f} className="pill export-pill"
+                 href={`/api/export?max_agreement=${threshold}&format=${f}`}
+                 title={`Download every image with a caption at or below ${threshold.toFixed(3)} as ${f.toUpperCase()}`}>
+                {f}
+              </a>
+            ))}
+            {exact && selection!.captions !== selection!.samples && (
+              <span className="meta-line" style={{ marginBottom: 0 }}>
+                {selection!.captions.toLocaleString()} captions across{" "}
+                {selection!.samples.toLocaleString()} images
+              </span>
+            )}
           </div>
         </div>
       )}
