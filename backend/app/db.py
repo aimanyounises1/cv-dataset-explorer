@@ -146,16 +146,49 @@ def get_db() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def fts_escape(query: str) -> str:
-    """Turn free text into a safe FTS5 MATCH expression (implicit AND of terms)."""
-    terms = [t.replace('"', '""') for t in query.split() if t.strip()]
-    return " ".join(f'"{t}"' for t in terms)
-
-
-# Function words carry no retrieval signal; they are indexed (the tokenizer does
-# not strip them) but are never worth reporting to the user as "too common".
+# Function words carry no retrieval signal. They are indexed (the tokenizer does
+# not strip them), but they are dropped from the query conjunction, never
+# reported to the user as "too common", and excluded from term statistics.
 STOPWORDS = frozenset(
     "a an and are as at be by for from has he in is it its of on that the to was "
     "were will with his her their this there two three while over under near up "
     "down out off no not they them then than into onto".split()
 )
+
+
+def _bare(token: str) -> str:
+    """The token with punctuation and case stripped, for stopword comparison
+    only. The term that reaches FTS5 is always the original."""
+    return "".join(ch for ch in token.lower() if ch.isalnum())
+
+
+def match_terms(query: str) -> list[str]:
+    """The query terms that actually take part in the conjunction.
+
+    `fts_escape` ANDs every term, so a function word is a hard requirement: a
+    caption that says "man on a bench" cannot match "man on the bench", because
+    of "the". Dropping stopwords from the conjunction is worth, on the 1,000
+    caption benchmark, keyword R@10 3.6% -> 6.4% with the empty-result rate
+    falling 90.6% -> 84.0%; on realistic 3-content-word phrases (which keep
+    their function words) R@10 goes 12.6% -> 16.4% and empty 41.5% -> 26.7%.
+    Fused ranking is unchanged within noise, measured on both the benchmark
+    sample and a disjoint dev split, in both directions (hybrid MRR 0.6313 ->
+    0.6308 on whole captions, 0.3310 -> 0.3363 on four-word phrases).
+
+    This narrows the conjunction; it does not widen it to OR. Widening was
+    measured twice and refuted twice — keyword R@10 rises to 53.8% in isolation
+    while hybrid MRR falls 0.6313 -> 0.5383, because a broad lexical list
+    displaces stronger semantic candidates.
+
+    A query made only of stopwords keeps all of its terms: "the two" should
+    still search for something rather than silently match everything.
+    """
+    terms = [t for t in query.split() if t.strip()]
+    content = [t for t in terms if _bare(t) and _bare(t) not in STOPWORDS]
+    return content or terms
+
+
+def fts_escape(query: str) -> str:
+    """Turn free text into a safe FTS5 MATCH expression (implicit AND of the
+    query's content terms — see `match_terms`)."""
+    return " ".join(f'"{t.replace(chr(34), chr(34) * 2)}"' for t in match_terms(query))
