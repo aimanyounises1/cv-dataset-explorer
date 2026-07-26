@@ -27,3 +27,8 @@ docs/REQUIREMENTS.md
 .jbeval/
 .omc/
 .claude/
+
+# Local working notes, not part of the submission
+.handoff/
+CLAUDE.md
+CLAUDE.local.md

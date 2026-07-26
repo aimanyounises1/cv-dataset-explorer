@@ -39,17 +39,37 @@ LADDER = (0.85, 0.90, 0.92, 0.95, 0.97, 0.99)
 FLOOR = LADDER[0]
 
 # Cached on the pair list, which is the expensive part; every threshold in the
-# ladder is then a filter over it. Keyed by the embedding index identity so a
-# reload invalidates it.
+# ladder is then a filter over it.
+#
+# Keyed on the index *contents*, not `id(index)`. CPython reuses addresses: drop
+# an index and allocate the next one and the new object can land at the address
+# the old one just freed, so `id()` collides and this returns the previous
+# corpus's pairs for the current corpus — a wrong leakage report, silently, and
+# only after a reload. Hashing the id array costs microseconds against the
+# ~0.2 s scan it guards.
 _cache: dict[int, list[tuple[int, int, float]]] = {}
 
 
+def _cache_key(index) -> int:
+    return hash(index.ids.tobytes())
+
+
 def _pairs(index) -> list[tuple[int, int, float]]:
-    key = id(index)
+    key = _cache_key(index)
     if key not in _cache:
         _cache.clear()                    # only ever one index generation is live
         _cache[key] = index.all_pairs_above(FLOOR)
     return _cache[key]
+
+
+def clear_cache() -> None:
+    """Drop the cached pair list. Called by /api/admin/reload.
+
+    Content keying alone would already return the right answer after a reload,
+    but it would keep the superseded corpus's pairs resident — tens of thousands
+    of tuples — for the life of the process.
+    """
+    _cache.clear()
 
 
 @router.get("/stats/leakage", response_model=LeakageReport)

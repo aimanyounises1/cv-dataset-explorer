@@ -34,6 +34,31 @@ ARTIFACT_TYPES = {".png": "image/png", ".pptx": "application/vnd.openxmlformats-
                   ".json": "application/json"}
 
 
+def _check_run_id(run_id: str) -> str:
+    """Reject a run id that is not a plain directory name.
+
+    `run_id` reaches the filesystem as a path segment, so it needs the guard
+    `name` already has. `load_report` happens to regex-validate it, which made
+    `GET /qa/run/{run_id}` safe by accident — but `qa_artifact` falls through to
+    `(QA_DIR / run_id).is_dir()` when the report is missing, and a traversal
+    names a real directory. That reaches `QA_DIR / run_id / name`, and `name`'s
+    own suffix whitelist does not constrain where the read happens.
+
+    The obvious test, `run_id != Path(run_id).name`, is **not** sufficient:
+    `Path("..").name` is `".."`, so `..` compares equal to itself and walks one
+    level up. `Path("").name` is `""` and passes for the same reason. So this
+    reuses the pattern `runner.load_report` already enforces, which is strictly
+    stronger and keeps one definition of "a run id" in the codebase.
+
+    In practice ASGI normalizes `/api/qa/run/../x` before routing, so the hole is
+    not reachable through a well-behaved client — which is exactly why it is
+    worth closing at the parameter rather than trusting every layer in front.
+    """
+    if not runner.RUN_ID_RE.fullmatch(run_id):
+        raise HTTPException(404, f"No QA run {run_id!r}.")
+    return run_id
+
+
 def _public(state: dict) -> dict:
     """The report minus bookkeeping the caller has no use for."""
     return {k: v for k, v in state.items() if k != "heartbeat"}
@@ -75,6 +100,7 @@ def latest_qa_run():
 
 @router.get("/qa/run/{run_id}")
 def get_qa_run(run_id: str):
+    _check_run_id(run_id)
     live = runner.MANAGER.latest()
     if live is not None and live["run_id"] == run_id:
         return _public(live)
@@ -92,6 +118,7 @@ def qa_artifact(run_id: str, name: str):
     /media/qa), which needs a StaticFiles mount; this route serves the same files
     from the router itself, so artifacts are reachable either way.
     """
+    _check_run_id(run_id)
     if runner.load_report(run_id) is None and not (Path(config.QA_DIR) / run_id).is_dir():
         raise HTTPException(404, f"No QA run {run_id!r}.")
     # Reject anything that is not a plain filename: this path is user input.

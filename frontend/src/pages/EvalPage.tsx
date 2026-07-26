@@ -95,6 +95,16 @@ export default function EvalPage() {
             rank against a 1,000-image pool — the full corpus is the harder task.
             MRR and median rank are computed to depth {result.depth}.
           </div>
+          <div className="meta-line">
+            <strong>Read hybrid’s candidates figure as a sum, not a set.</strong> It is
+            the semantic pool plus the mean lexical match count, and every lexical
+            match is already inside the semantic pool — so two overlapping sets are
+            added where they should be unioned, and the honest figure is the pool
+            itself. The overstatement equals the lexical mean: small on this corpus,
+            but a defect in the column rather than a rounding artifact. Stated here
+            rather than silently re-derived, because changing the number would also
+            change what every cached run means.
+          </div>
           {result.results.some((r) => r.mode === "boosted (test)") && (
             <div className="meta-line">
               The two <strong>“(test)”</strong> rows are measured on their own

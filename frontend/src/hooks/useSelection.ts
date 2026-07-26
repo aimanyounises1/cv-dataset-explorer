@@ -13,9 +13,17 @@ import type { ActiveFilterChip } from "../components/ActiveFilters";
  * same object — shareable, bookmarkable, and survivable across a page reload.
  *
  * So this hook is a **read**, not a store. There is deliberately no context, no
- * reducer and no client-side cache: the moment a selection lives in two places
- * the interface can show one thing while the URL says another, and every
- * hand-off in the product stops being trustworthy.
+ * reducer and no client-side cache *for the selection*: the moment a set lives
+ * in two places the interface can show one thing while the URL says another, and
+ * every hand-off in the product stops being trustworthy.
+ *
+ * The rule is about reproducibility, not about banning browser storage. State a
+ * colleague must be able to reproduce from a pasted link lives in the URL;
+ * ephemeral per-session preference deliberately does not, and sits in
+ * session/localStorage instead — the scan order behind `useResultOrder`, the
+ * gallery's card density, the map's colour mode, the assistant transcript. None
+ * of those change which samples you are looking at, and putting them in the URL
+ * would make every shared link carry one person's view settings.
  *
  * It exists because the selection now has a permanent home in the right rail,
  * which renders on every route — so the chip-building and export-link logic that

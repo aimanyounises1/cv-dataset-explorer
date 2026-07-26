@@ -5,7 +5,7 @@ orchestrator's routing menu, the parallel fan-out, and the synthesizer's view of
 which lanes ran. So adding an agent is appending one `Specialist` here, and
 nothing that already works has to be edited to accommodate it.
 
-That property is easy to claim and easy to lose, so `tests/test_agent_registry.py`
+That property is easy to claim and easy to lose, so `tests/test_agent_graph.py`
 asserts it directly: it registers a throwaway specialist and checks the compiled
 graph gained a node and the routing prompt gained a line, with no other change.
 
