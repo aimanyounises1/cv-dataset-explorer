@@ -1,18 +1,30 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import type { Block } from "../api/blocks";
 import type { ChatMessage, ChatStatus, ChatTraceStep, SampleCard } from "../api/types";
+import BlockView from "../components/blocks";
 import ImageCard from "../components/ImageCard";
+import InlineMarkdown from "../components/InlineMarkdown";
 
 interface Turn extends ChatMessage {
   samples?: SampleCard[];
   trace?: ChatTraceStep[];
+  blocks?: Block[];
+  lanes?: string[];
+  lanesFailed?: string[];
+  elapsed?: number | null;
 }
 
+/** Deliberately spread across the four specialists, so the first thing a new
+ * user clicks demonstrates a different lane each time — including the one that
+ * reports on the application itself, which is otherwise undiscoverable. */
 const SUGGESTIONS = [
+  "Plot how the dataset splits into train, validation and test",
+  "Which time of day is hardest? Compare the slices",
   "Show me dogs jumping into water",
-  "What are the rarest slices of this dataset?",
-  "Find the 5 most suspect captions and tag them as needs-review",
-  "How is the dataset split, and is semantic search enabled?",
+  "Generate a dataset report",
+  "How does this platform work architecturally?",
+  "Show me the status of the application",
 ];
 
 const STORAGE_KEY = "cvde-chat-turns";
@@ -65,6 +77,8 @@ export default function ChatPage() {
       const res = await api.chat(history);
       setTurns((t) => [...t, {
         role: "assistant", content: res.reply, samples: res.samples, trace: res.trace,
+        blocks: res.blocks, lanes: res.lanes, lanesFailed: res.lanes_failed,
+        elapsed: res.elapsed_s,
       }]);
     } catch (e) {
       setTurns((t) => [...t, {
@@ -108,12 +122,20 @@ export default function ChatPage() {
         {turns.length === 0 && (
           <div className="chat-empty">
             <div className="section-title" style={{ marginTop: 0 }}>Dataset assistant</div>
-            <p className="meta-line" style={{ maxWidth: 640 }}>
-              An orchestrator routes your request to specialist agents — retrieval
-              (search, similar, inspect, tag) and insights (stats, coverage,
-              caption QA) — then a quality gate verifies the answer. Runs fully
-              locally{status ? ` on ${status.model}` : ""}.
+            <p className="meta-line" style={{ maxWidth: 660 }}>
+              An orchestrator routes your request to specialist agents — up to two
+              at once, in parallel — then a quality gate verifies the answer.
+              Charts and reports come back as live components you can hover, sort
+              and click through to the matching images, not as pictures. Runs
+              fully locally{status ? ` on ${status.model}` : ""}.
             </p>
+            {status?.specialists && status.specialists.length > 0 && (
+              <p className="meta-line" style={{ maxWidth: 660 }}>
+                Specialists available: {status.specialists.join(", ")}. Ask{" "}
+                <em>how does this platform work architecturally?</em> to see the
+                topology drawn from the running registry.
+              </p>
+            )}
             <div className="chip-row">
               {SUGGESTIONS.map((s) => (
                 <button key={s} className="chip" onClick={() => void ask(s)}>{s}</button>
@@ -133,10 +155,37 @@ export default function ChatPage() {
                   ))}
                 </div>
               )}
-              <div className="chat-text">{t.content}</div>
+              {/* A lane that died is stated before the answer, not after it: the
+                  reader needs to know the answer is partial while reading it. */}
+              {t.lanesFailed && t.lanesFailed.length > 0 && (
+                <div className="notice" role="status">
+                  {t.lanesFailed.join(" and ")}{" "}
+                  {t.lanesFailed.length === 1 ? "did not finish" : "did not finish"} —
+                  this answer covers only what the other specialists produced.
+                </div>
+              )}
+              <div className="chat-text">
+                {t.role === "assistant"
+                  ? <InlineMarkdown text={t.content} />
+                  : t.content}
+              </div>
+              {/* The canvas. Blocks render in the order the specialists produced
+                  them, which is the order the request implied. */}
+              {t.blocks && t.blocks.length > 0 && (
+                <div className="chat-blocks">
+                  {t.blocks.map((b, k) => <BlockView key={k} block={b} />)}
+                </div>
+              )}
               {t.samples && t.samples.length > 0 && (
                 <div className="grid chat-grid">
                   {t.samples.map((s) => <ImageCard key={s.id} sample={s} />)}
+                </div>
+              )}
+              {t.role === "assistant" && t.elapsed != null && (
+                <div className="chat-foot">
+                  {t.lanes && t.lanes.length > 0
+                    ? `${t.lanes.join(" ‖ ")} · ${t.elapsed.toFixed(1)}s`
+                    : `${t.elapsed.toFixed(1)}s`}
                 </div>
               )}
             </div>

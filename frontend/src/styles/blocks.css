@@ -1,0 +1,530 @@
+/* Visualization canvas: the frame and controls around an agent's render blocks.
+ *
+ * A block sits inside a chat bubble, so it is styled a step quieter than a page
+ * panel — one surface up from the bubble, no shadow, no accent chrome. The
+ * transcript is the document; a chart is a figure inside it, and figures do not
+ * shout over the prose that introduced them.
+ *
+ * Every colour, radius and type face comes from the custom properties in
+ * index.css, so the canvas inherits any later change to the visual system.
+ * Numbers use the same monospace tabular figures as the rest of the tool, for
+ * the same reason: two values a reader might compare have to line up.
+ */
+
+.vblock {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px 15px 11px;
+  margin: 12px 0;
+}
+.vblock:first-child { margin-top: 0; }
+.vblock:last-child { margin-bottom: 0; }
+
+.vblock-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
+/* Same small capitals as .panel h3, so an agent's figure is titled exactly like
+   one on the stats page. */
+.vblock-title {
+  margin: 0;
+  font-family: var(--font-sans); font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-faint);
+}
+
+/* Provenance. Small and dim, but never absent: a chart that does not say how its
+   numbers were produced is indistinguishable from one the model invented. */
+.vblock-source {
+  margin: 10px 0 0; padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 10.5px; line-height: 1.5; color: var(--text-faint);
+}
+.vblock-source-label {
+  font-family: var(--font-sans); font-size: 9.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); opacity: 0.75;
+}
+.vblock-source em { color: var(--amber); font-style: italic; }
+
+/* A caveat about the numbers — capped series, truncated rows, a threshold that
+   was guessed. Amber because it qualifies the figure above it. */
+.vblock-note {
+  margin: 9px 0 0;
+  font-size: 11.5px; line-height: 1.55; color: #f7d68a;
+  border-left: 2px solid rgba(240, 180, 41, 0.4);
+  padding-left: 9px;
+}
+
+.vblock-hint {
+  margin: 8px 0 0;
+  font-size: 11px; line-height: 1.5; color: var(--text-faint);
+}
+.vblock-hint:empty { display: none; }
+
+.vblock-loading, .vblock-empty {
+  padding: 22px 8px; text-align: center;
+  font-size: 12px; color: var(--text-dim);
+}
+
+/* A kind this build cannot draw. Loud on purpose: the reader can act on
+   "your UI is older than your agent", but not on a blank space. */
+.vblock-unknown {
+  border: 1px dashed rgba(240, 180, 41, 0.45);
+  background: rgba(240, 180, 41, 0.06);
+  border-radius: var(--radius-sm);
+  padding: 11px 13px; font-size: 12px; color: #f7d68a;
+}
+.vblock-unknown p { margin: 0; line-height: 1.55; }
+.vblock-unknown strong { color: #ffe6ad; }
+.vblock-unknown summary {
+  cursor: pointer; margin-top: 9px; color: var(--text-dim); font-size: 11.5px;
+}
+.vblock-unknown pre {
+  margin: 8px 0 0; max-height: 260px; overflow: auto;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 9px 11px;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim);
+}
+
+/* ---- charts ------------------------------------------------------------ */
+
+.vblock-chart { position: relative; }
+/* recharts sets its own inline font on tick text; keep the numbers tabular so
+   an axis reads as a scale rather than as ragged labels. */
+.vblock-chart .recharts-cartesian-axis-tick-value,
+.vblock-chart .recharts-brush-texts {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.vblock-chart .recharts-tooltip-item-name,
+.vblock-chart .recharts-tooltip-label { color: var(--text-dim) !important; }
+.vblock-chart .recharts-tooltip-item-value {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+}
+.vblock-chart .recharts-brush > rect:first-of-type { fill: var(--bg-inset); }
+.vblock-chart .recharts-brush-slide { fill: var(--accent); fill-opacity: 0.1; }
+.vblock-chart .recharts-brush-traveller rect { fill: var(--border-strong); }
+
+/* Series toggles. Real buttons, so a series can be hidden from the keyboard and
+   the pressed state is announced rather than implied by opacity. */
+.vblock-legend {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;
+}
+.vblock-legend-item {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 11px 3px 8px;
+  color: var(--text-dim); font-family: var(--font-sans); font-size: 11.5px;
+  cursor: pointer; transition: color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.vblock-legend-item:hover { color: var(--text); border-color: var(--border-strong); }
+.vblock-legend-item.off { opacity: 0.45; text-decoration: line-through; }
+.vblock-legend-item.off .vblock-swatch { background: var(--text-faint) !important; }
+
+.vblock-swatch {
+  width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0;
+  display: inline-block;
+}
+
+/* The chart as text. Doubles as the accessible alternative to a `role="img"`
+   chart and as the only keyboard route to its drill-downs. */
+.vblock-values { margin-top: 10px; }
+.vblock-values > summary {
+  cursor: pointer; color: var(--text-faint); font-size: 11px;
+  font-family: var(--font-sans); letter-spacing: 0.02em;
+}
+.vblock-values > summary:hover { color: var(--accent); }
+.vblock-values ul {
+  list-style: none; margin: 8px 0 0; padding: 0;
+  display: grid; gap: 2px;
+  max-height: 268px; overflow-y: auto;
+}
+.vblock-value-link, .vblock-value-static {
+  display: flex; align-items: baseline; gap: 9px; width: 100%;
+  padding: 4px 8px; border-radius: var(--radius-sm);
+  border: 1px solid transparent; background: none;
+  font-family: var(--font-sans); font-size: 11.5px; color: var(--text-dim);
+  text-align: left;
+}
+.vblock-value-link { cursor: pointer; transition: background 0.12s, color 0.12s; }
+.vblock-value-link:hover { background: var(--bg-hover); color: var(--text); }
+.vblock-value-link:hover .vblock-value-label { color: var(--accent); }
+.vblock-value-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.vblock-value-num {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--text-faint); white-space: nowrap;
+}
+
+/* ---- pie --------------------------------------------------------------- */
+
+.vblock-pie-body {
+  display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+  gap: 14px; align-items: center;
+}
+@media (max-width: 640px) {
+  .vblock-pie-body { grid-template-columns: 1fr; }
+}
+.vblock-pie-chart { display: flex; justify-content: center; }
+/* The hole carries the total, so a reader never has to add the slices up to
+   know what the percentages are of. */
+.vblock-pie-total {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.vblock-pie-total-value {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 19px; font-weight: 600; color: var(--text);
+}
+.vblock-pie-total-label {
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--text-faint); font-weight: 600;
+}
+.vblock-pie-legend {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 1px;
+  max-height: 232px; overflow-y: auto;
+}
+
+/* ---- table ------------------------------------------------------------- */
+
+.vblock-table-controls {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 9px;
+}
+.vblock-table-filter { display: flex; align-items: center; gap: 7px; }
+.vblock-table-filter-label {
+  font-family: var(--font-sans); font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-faint);
+}
+.vblock-table-filter input {
+  padding: 5px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-inset);
+  color: var(--text); font-family: var(--font-sans); font-size: 12px;
+  outline: none; min-width: 170px;
+}
+.vblock-table-filter input:focus { border-color: var(--accent); }
+.vblock-table-count {
+  margin-left: auto;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 10.5px; color: var(--text-faint);
+}
+
+/* Wide tables scroll inside their own box; the transcript never scrolls
+   sideways. */
+.vblock-table-scroll {
+  overflow: auto; max-height: 440px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.vblock-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.vblock-table th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-hover); border-bottom: 1px solid var(--border-strong);
+  padding: 0; text-align: left; white-space: nowrap;
+}
+.vblock-table th.num, .vblock-table td.num { text-align: right; }
+/* Figures right-aligned and tabular: a column of measurements is only
+   comparable if its digits line up. */
+.vblock-table td.num {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+}
+.vblock-table td {
+  padding: 6px 11px; border-bottom: 1px solid var(--border);
+  color: var(--text-dim); vertical-align: top;
+}
+.vblock-table tbody tr:last-child td { border-bottom: none; }
+.vblock-table tbody tr:hover td { background: var(--bg-hover); color: var(--text); }
+
+.vblock-th-sort {
+  display: inline-flex; align-items: center; gap: 6px; width: 100%;
+  padding: 7px 11px; background: none; border: none;
+  font-family: var(--font-sans); font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-faint); cursor: pointer; transition: color 0.12s;
+}
+.vblock-table th.num .vblock-th-sort { justify-content: flex-end; }
+.vblock-th-sort:hover { color: var(--text); }
+.vblock-th-sort.active { color: var(--accent); }
+.vblock-sort-caret { font-size: 8px; opacity: 0.5; }
+.vblock-th-sort.active .vblock-sort-caret { opacity: 1; }
+
+.vblock-table tr.drillable { cursor: pointer; }
+.vblock-table tr.drillable:hover td { color: var(--accent); }
+/* `<tr>` is not in the global focus-visible list, and a row that navigates has
+   to show where the keyboard is. */
+.vblock-table tr.drillable:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: -2px;
+}
+.vblock-table td.vblock-table-empty {
+  text-align: center; padding: 20px; color: var(--text-faint);
+}
+
+/* ---- stat cards -------------------------------------------------------- */
+
+/* Reuses .stat-card from index.css; this only adds the drill affordance and the
+   hint line, so an agent's headline figure sits at the same weight as the stats
+   page's. */
+.vblock-stats { margin-bottom: 0; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); }
+.vstat-card {
+  position: relative; text-align: left; font-family: var(--font-sans);
+  color: inherit; padding: 12px 13px;
+}
+.vstat-card .value { font-size: 21px; }
+.vstat-hint {
+  margin-top: 6px; font-size: 10.5px; line-height: 1.45; color: var(--text-faint);
+}
+button.vstat-card {
+  cursor: pointer; width: 100%;
+  transition: border-color 0.12s, background 0.12s;
+}
+button.vstat-card:hover { border-color: var(--accent); background: var(--bg-hover); }
+.vstat-go {
+  display: block; margin-top: 7px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+  transition: color 0.12s;
+}
+button.vstat-card:hover .vstat-go { color: var(--accent); }
+
+/* ---- flow -------------------------------------------------------------- */
+
+.vflow-legend {
+  display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 9px;
+}
+.vflow-legend-item {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+}
+/* Natural size in a scroller rather than scaled to fit: a six-stage pipeline
+   squeezed into the bubble width would put its labels under legible size. */
+.vflow-scroll { overflow-x: auto; padding-bottom: 4px; }
+/* `margin: 0 auto` on a block, not flex centring: when the diagram is wider than
+   the bubble an over-constrained auto margin resolves to zero, so the left edge
+   stays reachable. Centred flex content overflows both ways and clips the start
+   of the pipeline where no scrolling can bring it back. */
+.vflow { display: block; margin: 0 auto; }
+.vflow text { font-family: var(--font-sans); }
+.vflow-edge-label text { fill: var(--text-faint); font-family: var(--font-mono); }
+.vflow-node rect { transition: fill-opacity 0.12s, stroke-width 0.12s; }
+.vflow-node.drillable { cursor: pointer; }
+.vflow-node.drillable:hover rect { fill-opacity: 0.3; stroke-width: 2; }
+.vflow-node.drillable:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.vflow-node.drillable:focus-visible rect { fill-opacity: 0.3; }
+
+/* ---- images ------------------------------------------------------------ */
+
+/* Denser than the gallery: the set is evidence for a sentence above it, not the
+   thing being browsed. */
+.vblock-images { grid-template-columns: repeat(auto-fill, minmax(146px, 1fr)); gap: 9px; }
+.vblock-images-more {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px;
+}
+.vblock-images-more .vblock-hint { margin: 0; }
+.vblock-more-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-family: var(--font-sans); font-size: 12px; color: var(--accent);
+}
+.vblock-more-link:hover { text-decoration: underline; }
+
+/* ---- report ------------------------------------------------------------ */
+
+.vreport-downloads { display: flex; gap: 6px; margin-bottom: 10px; }
+.vreport-section {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset); padding: 9px 12px; margin-bottom: 8px;
+}
+.vreport-section:last-child { margin-bottom: 0; }
+.vreport-section > summary {
+  cursor: pointer; list-style: revert;
+  display: flex; align-items: baseline; gap: 10px;
+}
+.vreport-heading { font-size: 13px; font-weight: 650; color: var(--text); }
+.vreport-section > summary:hover .vreport-heading { color: var(--accent); }
+.vreport-count {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+  margin-left: auto;
+}
+.vreport-text { margin: 9px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--text-dim); }
+/* A nested figure drops the outer frame — two boxes around one chart reads as a
+   mistake, and the section it sits in is already the frame. */
+.vreport-section .vblock {
+  background: none; border: none; border-radius: 0;
+  padding: 12px 0 0; margin: 0;
+}
+.vreport-section .vblock + .vblock { border-top: 1px solid var(--border); }
+
+/* ---- QA ---------------------------------------------------------------- */
+
+.vqa-summary {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.vqa-score {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--text-dim);
+}
+.vqa-score strong { color: var(--text); font-size: 14px; }
+.vqa-failed {
+  font-family: var(--font-mono); font-size: 11px; color: var(--red);
+}
+.vqa-run {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
+  margin-left: auto;
+}
+.vqa-downloads { display: flex; gap: 6px; }
+
+/* Status never rides on colour alone — the badge always spells the word. */
+.vqa-badge {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em;
+  text-transform: uppercase; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap;
+}
+.vqa-badge.pass, .vqa-badge.done {
+  color: var(--green); border-color: rgba(62, 207, 142, 0.38);
+  background: rgba(62, 207, 142, 0.08);
+}
+.vqa-badge.fail, .vqa-badge.failed {
+  color: var(--red); border-color: rgba(255, 122, 122, 0.38);
+  background: rgba(255, 122, 122, 0.08);
+}
+.vqa-badge.skip { color: var(--text-faint); background: var(--bg-inset); }
+.vqa-badge.running {
+  color: var(--amber); border-color: rgba(240, 180, 41, 0.38);
+  background: rgba(240, 180, 41, 0.08);
+}
+
+.vqa-progress { margin-bottom: 12px; }
+.vqa-progress-track {
+  height: 5px; border-radius: 999px; background: var(--bg-inset);
+  border: 1px solid var(--border); overflow: hidden;
+}
+.vqa-progress-fill {
+  height: 100%; background: var(--amber); border-radius: 999px;
+  transition: width 0.3s ease;
+}
+/* No total yet: show motion rather than a bar at zero, which would read as
+   "nothing has happened" when the truth is "we do not know how much will". */
+.vqa-progress-fill.indeterminate {
+  width: 34%;
+  animation: vqa-slide 1.3s ease-in-out infinite;
+}
+@keyframes vqa-slide {
+  0% { margin-left: 0; }
+  50% { margin-left: 66%; }
+  100% { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vqa-progress-fill.indeterminate { animation: none; width: 100%; opacity: 0.4; }
+}
+
+.vqa-flows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.vqa-flow {
+  border: 1px solid var(--border); border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--bg-inset); padding: 9px 12px;
+}
+.vqa-flow.pass { border-left-color: var(--green); }
+.vqa-flow.fail { border-left-color: var(--red); }
+.vqa-flow.skip { border-left-color: var(--border-strong); }
+.vqa-flow-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.vqa-flow-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.vqa-flow-time, .vqa-flow-checks {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 10px; color: var(--text-faint);
+}
+.vqa-flow-checks { margin-left: auto; }
+.vqa-flow-detail {
+  margin: 7px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--text-dim);
+}
+
+.vqa-shot {
+  display: block; position: relative; margin-top: 9px; padding: 0;
+  background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  overflow: hidden; cursor: pointer; line-height: 0;
+  transition: border-color 0.12s;
+}
+.vqa-shot:hover { border-color: var(--accent); }
+.vqa-shot img { display: block; width: 240px; max-width: 100%; height: auto; }
+.vqa-shot-zoom {
+  position: absolute; right: 5px; bottom: 5px;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1;
+  color: var(--text); background: rgba(8, 10, 14, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.14); border-radius: var(--radius-sm);
+  padding: 3px 6px; backdrop-filter: blur(4px);
+}
+
+.vqa-checks { margin-top: 8px; }
+.vqa-checks > summary {
+  cursor: pointer; font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--text-faint);
+}
+.vqa-checks > summary:hover { color: var(--accent); }
+.vqa-checks ul { list-style: none; margin: 7px 0 0; padding: 0; display: grid; gap: 3px; }
+.vqa-checks li {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: 11.5px; color: var(--text-dim); line-height: 1.5;
+}
+.vqa-check-mark {
+  font-family: var(--font-mono); font-size: 11px; flex-shrink: 0; width: 11px;
+}
+.vqa-checks li.ok .vqa-check-mark { color: var(--green); }
+.vqa-checks li.bad .vqa-check-mark { color: var(--red); }
+.vqa-checks li.bad .vqa-check-name { color: var(--text); }
+/* The tick is decorative; this is the same fact in words, for a reader who
+   cannot see the mark or tell the two colours apart. */
+.vqa-check-state {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+}
+.vqa-check-name { overflow-wrap: anywhere; }
+.vqa-check-detail {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+  margin-left: auto; text-align: right; overflow-wrap: anywhere;
+}
+
+.vqa-console {
+  margin-top: 10px; padding: 9px 12px;
+  border: 1px solid rgba(255, 122, 122, 0.25);
+  border-left: 3px solid var(--red);
+  background: rgba(255, 122, 122, 0.06); border-radius: var(--radius-sm);
+}
+.vqa-console > summary { cursor: pointer; color: var(--red); font-size: 11.5px; }
+.vqa-console ul {
+  margin: 8px 0 0; padding-left: 17px;
+  max-height: 200px; overflow-y: auto;
+}
+.vqa-console li {
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6;
+  color: #ffbdbd; overflow-wrap: anywhere;
+}
+
+/* Full-size screenshot. A dialog rather than a new tab: the shot is evidence for
+   the row beside it, and losing the transcript makes the comparison harder. */
+.vqa-lightbox {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(4, 6, 9, 0.82); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.vqa-lightbox-inner {
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); padding: 12px;
+  max-width: min(1100px, 94vw); max-height: 92vh; overflow: auto;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+}
+.vqa-lightbox-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; margin-bottom: 10px;
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+}
+.vqa-lightbox-actions { display: flex; align-items: center; gap: 8px; }
+.vqa-lightbox-close {
+  background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-dim); font-family: var(--font-sans); font-size: 12px;
+  padding: 4px 12px; cursor: pointer; transition: color 0.12s, border-color 0.12s;
+}
+.vqa-lightbox-close:hover { color: var(--text); border-color: var(--border-strong); }
+.vqa-lightbox-inner img {
+  display: block; max-width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
