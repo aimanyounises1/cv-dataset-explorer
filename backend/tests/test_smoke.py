@@ -317,14 +317,50 @@ def test_export_manifest(client):
     assert body["filters"]["embed_model"]  # the slice records how to regenerate it
 
 
+ORIGINAL_CSV_HEADER = "id,filename,split,captions,tags"
+
+
 def test_export_csv_and_jsonl(client):
     csv_resp = client.get("/api/export", params={"split": "test", "format": "csv"})
     assert csv_resp.status_code == 200
     assert "text/csv" in csv_resp.headers["content-type"]
     assert "attachment" in csv_resp.headers["content-disposition"]
     lines = csv_resp.text.strip().splitlines()
-    assert lines[0] == "id,filename,split,captions,tags"
+    # Score columns are APPENDED, never interleaved, so a consumer reading the
+    # original five by index is unaffected by their arrival.
+    assert lines[0].startswith(ORIGINAL_CSV_HEADER + ",")
+    assert "difficulty" in lines[0]
     assert len(lines) == 2  # header + the one test-split row
+
+
+def test_export_scores_false_reproduces_the_original_shape(client):
+    """`scores=false` is the escape hatch for anything that parsed the old CSV.
+
+    Asserted rather than assumed, because the whole argument for defaulting the
+    new columns ON is that opting out is exact and costless.
+    """
+    resp = client.get("/api/export",
+                      params={"split": "test", "format": "csv", "scores": "false"})
+    assert resp.status_code == 200
+    assert resp.text.strip().splitlines()[0] == ORIGINAL_CSV_HEADER
+
+    js = client.get("/api/export",
+                    params={"split": "test", "scores": "false"}).json()
+    assert set(js["samples"][0]) == {"id", "filename", "split", "captions", "tags"}
+
+
+def test_export_carries_the_signals_the_tool_computed(client):
+    """Exporting "the hardest images" in a file that cannot say how hard any one
+    of them is forces every consumer to re-derive work already done."""
+    js = client.get("/api/export", params={"split": "test"}).json()
+    assert js["filters"]["scores"] is True
+    # The manifest must say what the axis numbers mean; percentile ranks are not
+    # comparable across corpora and a bare 0-10 column invites treating them as if
+    # they were.
+    assert "percentile" in js["filters"]["axis_semantics"]
+    sample = js["samples"][0]
+    assert "axes" in sample and sample["axes"], sample
+    assert set(sample["axes"]) <= set(db.AXES)
 
     jsonl = client.get("/api/export", params={"split": "test", "format": "jsonl"})
     records = [json.loads(ln) for ln in jsonl.text.strip().splitlines()]
