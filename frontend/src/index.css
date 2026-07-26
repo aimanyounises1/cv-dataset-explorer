@@ -9,24 +9,35 @@
  * No web fonts by design — the app must run with no network (see README).
  */
 :root {
-  /* Surfaces: four steps, spaced far enough apart to read as a hierarchy. */
-  --bg: #0b0e13;
-  --bg-raised: #141922;
-  --bg-hover: #1c232e;
-  --bg-inset: #080a0e;
-  --border: #242c39;
-  --border-strong: #35404f;
+  /* Surfaces: four steps, spaced far enough apart to read as a hierarchy, and
+     carrying real chroma rather than a token amount of it. A first pass rotated
+     the hue onto the brand while holding the lightness ladder exactly, which was
+     arithmetically a Mobileye palette and perceptually nothing: the page
+     background moved dE 1.78, below the threshold of noticing, so 97% of the
+     pixels looked unchanged. Saturation is what makes a hue visible at 7%
+     lightness, so these carry 44-62% of it and the background now moves dE 8.5. */
+  --bg: #070a1c;
+  --bg-raised: #111534;
+  --bg-hover: #191f48;
+  --bg-inset: #040613;
+  --border: #242a5c;
+  --border-strong: #363d78;
 
   /* Ink: three tiers, so micro-labels can recede without vanishing. */
-  --text: #e9ecf2;
-  --text-dim: #939eae;
-  --text-faint: #64707f;
+  --text: #eceefa;
+  --text-dim: #a2a6c8;
+  --text-faint: #6f739a;
 
-  --accent: #5b9dff;
-  --accent-soft: rgba(91, 157, 255, 0.14);
-  --green: #3ecf8e;
-  --amber: #f0b429;
-  --red: #ff7a7a;
+  /* Mobileye's blue. The core #1637be is too dark to serve as an accent on a
+     near-black surface, so --accent is that same hue at the lightness this
+     design was already tuned for, and --accent-deep keeps the brand value
+     itself for solid fills that carry white text. */
+  --accent: #6f80ff;
+  --accent-deep: #1637be;
+  --accent-soft: rgba(111, 128, 255, 0.20);
+  --green: #3fcf9a;
+  --amber: #f0b428;
+  --red: #ff7f7a;
 
   --radius: 8px;
   --radius-sm: 5px;
@@ -124,8 +135,11 @@ body {
 /* The active marker is a left edge, not an underline: in a vertical list the
    edge reads as "you are here on this branch" rather than as a divider. */
 .rail-link.active {
-  color: var(--text); background: var(--bg-hover);
-  box-shadow: inset 2px 0 0 var(--accent);
+  /* The active state carries the brand rather than a neutral highlight: a
+     grey-on-grey selection would leave the blue nowhere on a page whose whole
+     centre is photographs. */
+  color: var(--text); background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .rail-foot {
@@ -525,8 +539,11 @@ select:hover { border-color: var(--border-strong); }
 /* A set hand-off is a link, not a button — it navigates, and should be
    middle-clickable and copyable like any other link. It shares the primary
    look because it is the primary action wherever it appears. */
+/* The one place the brand blue appears at full strength rather than lifted for
+   legibility: a solid fill carrying white, which is how it is used on Mobileye's
+   own surfaces. 9.0:1 against white, so it earns the weight honestly. */
 button.primary, a.primary.button-link {
-  background: var(--accent); color: #06121f; border: none; padding: 10px 22px;
+  background: var(--accent-deep); color: #ffffff; border: none; padding: 10px 22px;
   border-radius: var(--radius); font-size: 13.5px; font-weight: 650; cursor: pointer;
   font-family: var(--font-sans); transition: filter 0.12s;
 }

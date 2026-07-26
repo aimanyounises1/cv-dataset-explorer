@@ -23,19 +23,19 @@
  * canvas and recharts cannot read CSS variables; index.css remains the source
  * of truth for anything the DOM styles. */
 export const SURFACE = {
-  bg: "#0b0e13",
-  raised: "#141922",
-  hover: "#1c232e",
-  inset: "#080a0e",
-  border: "#242c39",
-  borderStrong: "#35404f",
-  text: "#e9ecf2",
-  textDim: "#939eae",
-  textFaint: "#64707f",
-  accent: "#5b9dff",
-  green: "#3ecf8e",
-  amber: "#f0b429",
-  red: "#ff7a7a",
+  bg: "#070a1c",
+  raised: "#111534",
+  hover: "#191f48",
+  inset: "#040613",
+  border: "#242a5c",
+  borderStrong: "#363d78",
+  text: "#eceefa",
+  textDim: "#a2a6c8",
+  textFaint: "#6f739a",
+  accent: "#6f80ff",
+  green: "#3fcf9a",
+  amber: "#f0b428",
+  red: "#ff7f7a",
 } as const;
 
 // -------------------------------------------------------------- recharts ----
@@ -100,8 +100,8 @@ export function diverging(t: number): string {
 
 /** Categorical palette for nominal values such as cluster id or split. */
 export const CATEGORICAL = [
-  "#5b9dff", "#3ecf8e", "#f0b429", "#c792ea", "#4dd0e1",
-  "#ff9d9d", "#aed581", "#ffb74d", "#90a4ae", "#7986cb",
+  "#6f80ff", "#3fcf9a", "#f0b428", "#c792ea", "#4dd0e1",
+  "#ff9d9d", "#aed581", "#ffb74d", "#90a4ae", "#b39ddb",
   "#f48fb1", "#80cbc4",
 ] as const;
 
