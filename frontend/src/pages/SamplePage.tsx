@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { SampleCard, SampleDetail } from "../api/types";
+import AxisLegend from "../components/AxisLegend";
 import ImageCard from "../components/ImageCard";
 import TagEditor from "../components/TagEditor";
 import { useNeighbours } from "../hooks/useResultOrder";
@@ -142,7 +143,13 @@ export default function SamplePage() {
         </div>
       </div>
 
-      <div className="section-title">Similar images</div>
+      {/* The same four bars appear on these cards, so the same key belongs
+          here. Without it the encoding is unexplained everywhere except the
+          gallery — and a user can reach this page directly from a link. */}
+      <div className="section-title similar-head">
+        Similar images
+        {similar.some((s) => s.axes) && <AxisLegend />}
+      </div>
       {similarError && <div className="notice">{similarError}</div>}
       <div className="grid">
         {similar.map((s) => <ImageCard key={s.id} sample={s} scoreBasis="cosine" />)}

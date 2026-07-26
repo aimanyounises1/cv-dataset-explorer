@@ -1,5 +1,8 @@
 import { Suspense, lazy } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
+import CommandPalette from "./components/CommandPalette";
+import LeftRail from "./components/shell/LeftRail";
+import SelectionRail from "./components/shell/SelectionRail";
 import GalleryPage from "./pages/GalleryPage";
 
 // All non-default routes load on demand, so the gallery ships without
@@ -11,24 +14,24 @@ const QualityPage = lazy(() => import("./pages/QualityPage"));
 const EvalPage = lazy(() => import("./pages/EvalPage"));
 const ChatPage = lazy(() => import("./pages/ChatPage"));
 
+/**
+ * Three columns: inputs on the left, the artifact in the middle, the set on the
+ * right.
+ *
+ * The old shell stacked all three in one vertical column, so on a filtered
+ * gallery you scrolled past 481px of controls before seeing an image — the more
+ * precisely you specified a set, the less of it you could see. Splitting them
+ * onto separate axes means the centre pane starts at the top and stays there
+ * however many filters are active.
+ *
+ * The right rail renders only when something is selected, so browsing the whole
+ * corpus gets the grid columns back.
+ */
 export default function App() {
   return (
     <div className="app">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">◈</span> CV Dataset Explorer
-          <span className="brand-sub">Flickr8k</span>
-        </div>
-        <nav>
-          <NavLink to="/" end>Gallery</NavLink>
-          <NavLink to="/map">Map</NavLink>
-          <NavLink to="/stats">Statistics</NavLink>
-          <NavLink to="/quality">Quality</NavLink>
-          <NavLink to="/eval">Benchmark</NavLink>
-          <NavLink to="/chat">Assistant</NavLink>
-        </nav>
-      </header>
-      <main>
+      <LeftRail />
+      <main className="pane">
         <Suspense fallback={<div className="loading">Loading…</div>}>
           <Routes>
             <Route path="/" element={<GalleryPage />} />
@@ -41,6 +44,10 @@ export default function App() {
           </Routes>
         </Suspense>
       </main>
+      <SelectionRail />
+      {/* Outside the panes and outside Suspense: available on every route,
+          including while a lazy route is still loading. */}
+      <CommandPalette />
     </div>
   );
 }

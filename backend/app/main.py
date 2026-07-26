@@ -10,7 +10,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import config, db
-from .api import admin, attributes, chat, qa, samples, search, stats, tags, views
+from .api import (
+    admin,
+    attributes,
+    chat,
+    describe,
+    leakage,
+    qa,
+    qa_run,
+    samples,
+    search,
+    stats,
+    tags,
+    views,
+)
 from .api import eval as eval_api
 from .api import map as map_api
 
@@ -35,8 +48,9 @@ app.add_middleware(
 )
 
 for router in (samples.router, search.router, stats.router, map_api.router,
-               tags.router, qa.router, attributes.router, eval_api.router,
-               admin.router, chat.router,
+               tags.router, qa.router, qa_run.router, attributes.router,
+               describe.router, leakage.router,
+               eval_api.router, admin.router, chat.router,
                views.router):
     app.include_router(router, prefix="/api")
 
@@ -44,6 +58,11 @@ for router in (samples.router, search.router, stats.router, map_api.router,
 config.ensure_dirs()
 app.mount("/media/images", StaticFiles(directory=config.IMAGES_DIR), name="images")
 app.mount("/media/thumbs", StaticFiles(directory=config.THUMBS_DIR), name="thumbs")
+# QA screenshots and decks. Build artifacts, gitignored, served read-only like
+# the thumbnails so a status report's evidence is viewable in the browser that
+# asked for it. `/api/qa/artifact/...` serves the same files for callers that
+# would rather not depend on a mount.
+app.mount("/media/qa", StaticFiles(directory=config.QA_DIR), name="qa")
 
 
 @app.get("/api/health")
