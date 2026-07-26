@@ -1,11 +1,24 @@
 name: CI
 
+# Runs only what a runner can honestly verify: no dataset download, no model
+# weights, no GPU, no browser, no Ollama. What CI therefore does NOT cover is
+# listed in docs/TESTING.md so a green tick is not read as more than it is.
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a branch supersedes the run in flight on it.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
+    name: backend (ruff + pytest)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -15,13 +28,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # Lightweight install: the test suite runs fully without torch/transformers
-      # (fake embedder + graceful-degradation paths are exercised instead).
-      - run: pip install fastapi httpx pydantic numpy pillow pytest ruff uvicorn
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      # Deliberately lightweight: the suite runs without torch, transformers,
+      # datasets or langgraph. A fake embedder stands in for SigLIP and the
+      # graceful-degradation paths are exercised instead; the tests that do
+      # need torch or langgraph skip themselves. This list is therefore what
+      # the tests import, not what the app needs to serve a request --
+      # backend/requirements.txt remains the canonical runtime manifest.
+      # tqdm is here because app.analyze imports it at module scope.
+      - run: pip install fastapi httpx pydantic numpy pillow pytest ruff tqdm uvicorn
       - run: ruff check app tests
       - run: pytest -q
 
   frontend:
+    name: frontend (tsc + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,4 +55,19 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      # `npm run build` is `tsc && vite build`, so this is the type-check and
+      # the production build in one step. There is no lint or unit tier in the
+      # frontend -- see docs/TESTING.md for why, and what covers it instead.
       - run: npm run build
+
+  docs:
+    name: docs (relative links)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Stdlib only: every relative link and image path in the Markdown must
+      # point at a file that exists. Catches the stale path a reviewer finds.
+      - run: python scripts/check_links.py

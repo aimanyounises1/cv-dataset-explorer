@@ -68,7 +68,7 @@ HUBNESS_AUTOBUILD = os.environ.get("CVDE_HUBNESS_AUTOBUILD", "1") not in ("0", "
 # A query term matching this fraction of images or more is too common for
 # keyword ranking to discriminate, and the UI says so. Calibrated on Flickr8k,
 # where the most common content word ("dog") matches 22.6% of images and no
-# content word reaches FTS5's 50% IDF clamp — see docs/REQUIREMENTS.md §13.14.
+# content word reaches FTS5's 50% IDF clamp.
 DF_WARN_FRACTION = float(os.environ.get("CVDE_DF_WARN_FRACTION", "0.20"))
 
 # Zero-shot attributes: how decisive the winning label must be before it is

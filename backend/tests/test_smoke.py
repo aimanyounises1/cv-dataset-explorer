@@ -86,6 +86,23 @@ def test_hybrid_degrades_without_embeddings(client):
     assert len(body["items"]) == 1
 
 
+def test_boosted_falls_all_the_way_back_to_keyword(client):
+    """Two degradations in one request, on the install a reviewer starts from.
+
+    With no embeddings there is no PRISM model and no semantic path either, so
+    the response has to describe where the ranking ended up rather than where
+    it was asked to go -- and publish no score basis, because BM25 exposes no
+    number. The message is the only thing telling the user what to run.
+    """
+    body = client.get("/api/search",
+                      params={"q": "dog", "mode": "boosted"}).json()
+    assert body["degraded"] is True
+    assert body["mode_used"] == "keyword"
+    assert "keyword search" in (body["message"] or "")
+    assert body["score_basis"] is None
+    assert len(body["items"]) == 1
+
+
 def test_tags_roundtrip(client):
     sid = client.get("/api/samples").json()["items"][0]["id"]
     assert client.post(f"/api/samples/{sid}/tags", json={"name": "Edge-Case"}).status_code == 200
