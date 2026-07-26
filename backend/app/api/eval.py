@@ -51,7 +51,12 @@ ENCODE_BATCH = 128
 #      dedicated test-split query sample — the trained model saw the train split
 #      and was selected on validation, so any other query set would grade it on
 #      its own training text. The cache key carries the artifact stamp.
-PROTOCOL_VERSION = 6
+#   7: the hubness artifact's fingerprint no longer contains the database's
+#      mtime, so the penalty stops being invalidated by ordinary tag edits and
+#      the semantic rows are now measured with the correction actually applied.
+#      Every version-6 row was recorded under whichever state the artifact
+#      happened to be in, so none of them are comparable to these.
+PROTOCOL_VERSION = 7
 
 
 def _cache_path(sample_size: int):
