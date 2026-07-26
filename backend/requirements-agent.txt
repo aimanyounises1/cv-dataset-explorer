@@ -1,6 +1,6 @@
 # Optional: the Fugu-style assistant (LangGraph orchestration over Ollama).
 # The rest of the app is fully functional without these.
-langchain>=0.3
-langchain-core>=0.3
-langchain-ollama>=0.3
-langgraph>=0.4
+langchain>=1.3.14
+langchain-core>=1.5.1
+langchain-ollama>=1.1.0
+langgraph>=1.2.9
