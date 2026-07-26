@@ -138,6 +138,14 @@ caption, so for 85% of them the lexical path has nothing to rank at all. The
 candidates column reports that directly rather than letting the recall figure imply
 a ranking failure.
 
+One caveat on that column, disclosed rather than quietly re-derived: **hybrid's
+figure is a sum, not a set**. It adds the semantic pool to the mean lexical match
+count, but every lexical match is already inside the semantic pool, so two
+overlapping sets are added where they should be unioned and the honest figure is
+the pool itself (8,000). The overstatement equals the lexical mean — 2.1 here.
+Correcting the number would change what every cached run means, so the page says
+what it is instead.
+
 #### The boosted mode gain, honestly
 
 The two bottom rows are the like-for-like comparison — the same test-split queries,
@@ -154,10 +162,10 @@ slightly *behind* on R@5 and R@10. It is a wash, and the page says so.
 That is not the `+2.2 pts R@1` figure in [docs/PRISM.md](docs/PRISM.md), and the
 two are not comparable. That result is from PRISM's own offline harness against a
 **49.4% baseline** (49.4 → 51.6, two seeds, paired bootstrap CI `[+1.28, +3.18]`);
-this page's semantic baseline on test queries is **57.8%**. Baselines eight points
-apart mean different query samples and different candidate pools, so the offline
-delta cannot be quoted as the in-app gain — a reviewer who clicks **Run benchmark**
-gets the table above.
+this page's semantic baseline on test queries is **57.8%**. The two runs use
+different query samples; the candidate pool is identical (8,000 images in both).
+The residual gap is under investigation, so the offline delta cannot be quoted as
+the in-app gain — a reviewer who clicks **Run benchmark** gets the table above.
 
 The offline ablation is worth reading on its own terms: it refuted the per-image
 variance hypothesis it was built to test and kept only the component that survived
@@ -374,9 +382,9 @@ Then ask the assistant *"show me the status of the application"*, or:
 curl -sX POST localhost:8000/api/qa/run -H 'Content-Type: application/json' -d '{}'
 ```
 
-A real Chrome drives all eleven workflows, screenshots each, and compiles a
-pass/fail report plus a 12-slide `.pptx` deck (observed: 63/63 checks, 11/11
-workflows, 47 s — including a degradation flow that injects 500s and asserts the
+A real Chrome drives all fifteen workflows, screenshots each, and compiles a
+pass/fail report plus a `.pptx` deck (observed 2026-07-26: **90/90 checks, 15/15
+workflows, 69 s** — including a degradation flow that injects 500s and asserts the
 UI announces them).
 One sweep runs at a time; a second request attaches to the one in flight.
 Artifacts land in `backend/data/qa/<run_id>/` and are served at `/media/qa/`.
@@ -437,7 +445,8 @@ frontend/  React 18 + TypeScript + Vite
                      CommandPalette (⌘K), AxisSparkline
   src/components/blocks/  One renderer per visualization kind + an exhaustive registry
   src/lib/           viz.ts (the only source of colour/axis tokens) · mapColor.ts
-  (dev server proxies /api and /media to the backend; view state lives in the URL)
+  (dev server proxies /api and /media to the backend; state a colleague must
+   reproduce lives in the URL, ephemeral view preference in session/localStorage)
 
 backend/   FastAPI + SQLite
   app/datasets/   Dataset adapter interface + Flickr8k adapter (pluggable)
@@ -449,7 +458,7 @@ backend/   FastAPI + SQLite
                   blocks.py (the render-block contract) · viz_tools · tools · qa_tools
   app/qa/         Autonomous UI sweep: flows.py (declare a workflow) · runner · deck
   app/api/        samples · search · stats · map · tags · qa · qa_run · attributes ·
-                  eval · admin · chat
+                  describe · leakage · views · eval · admin · chat
   data/           images/ thumbs/ explorer.db embeddings/ qa/ reports/ (gitignored)
 ```
 

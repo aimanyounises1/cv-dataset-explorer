@@ -422,9 +422,16 @@ class RunManager:
 MANAGER = RunManager()
 
 
+# What a run id may look like. Named because two layers enforce it: this module
+# when replaying a report from disk, and the API when a run id arrives as a path
+# segment. A `run_id != Path(run_id).name` test is *not* an equivalent guard --
+# `Path("..").name` is `".."`, so `..` passes it and walks a level up.
+RUN_ID_RE = re.compile(r"[0-9A-Za-z_-]{1,64}")
+
+
 def load_report(run_id: str) -> Optional[dict]:
     """A finished run's report from disk, so history outlives the process."""
-    if not re.fullmatch(r"[0-9A-Za-z_-]{1,64}", run_id):    # never a path fragment
+    if not RUN_ID_RE.fullmatch(run_id):                     # never a path fragment
         return None
     path = Path(config.QA_DIR) / run_id / "report.json"
     if not path.exists():

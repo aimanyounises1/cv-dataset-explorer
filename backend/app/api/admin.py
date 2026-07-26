@@ -69,11 +69,12 @@ def integrity(conn: sqlite3.Connection = Depends(get_conn)):
 
 @router.post("/admin/reload")
 def reload_indexes(conn: sqlite3.Connection = Depends(get_conn)):
-    from . import stats
+    from . import leakage, stats
 
     invalidate_index()
     invalidate_prism()
     stats.clear_caches()
+    leakage.clear_cache()
     checks = index_consistency(conn)
     return {
         "ok": True,

@@ -6,7 +6,11 @@
 
 Steps: download dataset -> store images + thumbnails -> SQLite (captions,
 FTS index) -> SigLIP 2 embeddings -> UMAP projection + clusters.
-Each stage skips work that is already done, so re-running is cheap.
+
+Idempotent in the sense that matters -- rerunning never duplicates a sample --
+but not uniformly cheap: ingestion skips samples that already exist, while
+embeddings, the UMAP projection and the analysis pass recompute. Use
+--skip-embeddings to rerun only the parts that do skip.
 """
 import argparse
 import logging
