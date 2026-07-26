@@ -182,14 +182,46 @@ def tag_samples(sample_ids: list[int], tag: str) -> str:
         tag = tag.strip().lower()
         if not tag or not sample_ids:
             return json.dumps({"error": "need a tag name and at least one sample id"})
+        wanted = sample_ids[:200]
+        # Which of the requested ids actually exist. Checked BEFORE writing,
+        # because an 8B model asked for "test-split images below 0.10 agreement"
+        # was observed inventing round numbers — [1234, 5678, 9012] — and two of
+        # them existed, so two real train-split images were silently tagged as
+        # low-agreement and the tool reported "tagged: 3". A curation database
+        # that records a model's guesses as if they were findings is worse than
+        # one that refuses.
+        qmarks = ",".join("?" * len(wanted))
+        real = {r["id"] for r in conn.execute(
+            f"SELECT id FROM samples WHERE id IN ({qmarks})", wanted)}
+        missing = [i for i in wanted if i not in real]
+        if not real:
+            return json.dumps({
+                "error": f"none of those {len(wanted)} sample ids exist in this "
+                         f"dataset — nothing was tagged",
+                "missing": missing[:20],
+                "hint": "Use ids that came from a tool result in this "
+                        "conversation, never ids you inferred."})
+
         conn.execute("INSERT OR IGNORE INTO tags(name) VALUES (?)", (tag,))
         tag_id = conn.execute("SELECT id FROM tags WHERE name = ?", (tag,)).fetchone()["id"]
         conn.executemany(
             "INSERT OR IGNORE INTO sample_tags(sample_id, tag_id) "
             "SELECT id, ? FROM samples WHERE id = ?",
-            [(tag_id, sid) for sid in sample_ids[:200]])
+            [(tag_id, sid) for sid in wanted])
         conn.commit()
-        return json.dumps({"ok": True, "tag": tag, "tagged": len(sample_ids[:200])})
+        out = {"ok": True, "tag": tag,
+               # Rows that exist and now carry the tag — NOT the number asked
+               # for. The two differ exactly when the caller is wrong, which is
+               # the case worth reporting.
+               "tagged": len(real),
+               "requested": len(wanted)}
+        if missing:
+            out["not_found"] = missing[:20]
+            out["warning"] = (f"{len(missing)} of the {len(wanted)} ids do not "
+                              f"exist and were skipped. If you did not get these "
+                              f"ids from a tool result, say so rather than "
+                              f"reporting a successful tagging.")
+        return json.dumps(out)
     finally:
         conn.close()
 
