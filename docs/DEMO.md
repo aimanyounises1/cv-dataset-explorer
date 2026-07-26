@@ -107,10 +107,12 @@ Send:
 > Show me the status of the application
 
 The `qa` specialist runs alone (it is marked expensive, so it is never chosen
-speculatively alongside another lane). It drives real Chrome over all eleven
-workflows and returns a status block inline:
+speculatively alongside another lane). It drives real Chrome over every registered
+workflow and returns a status block inline:
 
-- a `DONE` badge and **63/63 checks passed · 11/11 workflows**;
+- a `DONE` badge and the pass count — **63/63 checks · 11/11 workflows** on the run
+  this walkthrough was written against, before three further workflows were
+  registered, so expect a different denominator;
 - one row per workflow — Routes, Gallery, Similarity map, Statistics, Quality,
   Benchmark, Sample detail, Assistant, Graceful degradation, Command palette,
   Assistant canvas — with its check tally and duration;
