@@ -5,6 +5,9 @@ penalty that leaks into the image-to-image paths, a stale penalty applied to a
 different index, a self-penalised image, and a displayed score that is no longer
 the cosine the UI labels it.
 """
+import os
+import time
+
 import numpy as np
 import pytest
 
@@ -221,3 +224,49 @@ def test_bank_selection_is_deterministic_across_calls(index, monkeypatch):
     second = hubness.bank_caption_ids(_FakeConn(_rows(4000)), size=500)
     assert first == second == sorted(first)
     assert len(set(first)) == 500
+
+
+# -- the artifact must outlive an ordinary database write ----------------------
+
+def test_fingerprint_ignores_the_database_mtime(tmp_path, monkeypatch):
+    """A tag edit must not invalidate a valid penalty vector.
+
+    `explorer.db` is rewritten by every tag edit, saved view and WAL checkpoint.
+    While its mtime was part of the fingerprint, one tag threw away an artifact
+    whose ids, shape, model, temperature and bank size all still matched — and
+    the correction then silently stopped applying until something rebuilt it.
+    """
+    class _Idx:
+        ids = np.arange(8, dtype=np.int64)
+
+    emb = tmp_path / "embeddings"
+    emb.mkdir()
+    (emb / "image_embeddings.npy").write_bytes(b"x")
+    (emb / "sample_ids.npy").write_bytes(b"x")
+    db = tmp_path / "explorer.db"
+    db.write_bytes(b"x")
+    monkeypatch.setattr(config, "EMB_DIR", emb)
+    monkeypatch.setattr(config, "DB_PATH", db)
+
+    before = hubness._fingerprint(_Idx())
+    os.utime(db, (time.time() + 5_000, time.time() + 5_000))   # a write happened
+    assert hubness._fingerprint(_Idx()) == before, \
+        "a database write still invalidates the hubness artifact"
+
+
+def test_fingerprint_still_tracks_the_embeddings(tmp_path, monkeypatch):
+    """The half that must keep working: re-ingestion invalidates it."""
+    class _Idx:
+        ids = np.arange(8, dtype=np.int64)
+
+    emb = tmp_path / "embeddings"
+    emb.mkdir()
+    for n in ("image_embeddings.npy", "sample_ids.npy"):
+        (emb / n).write_bytes(b"x")
+    monkeypatch.setattr(config, "EMB_DIR", emb)
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "absent.db")
+
+    before = hubness._fingerprint(_Idx())
+    os.utime(emb / "image_embeddings.npy", (time.time() + 5_000, time.time() + 5_000))
+    assert hubness._fingerprint(_Idx()) != before, \
+        "new embeddings no longer invalidate the penalty they are aligned to"
