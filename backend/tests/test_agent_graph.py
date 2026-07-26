@@ -16,16 +16,23 @@ import threading
 import time
 
 import pytest
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
-from pydantic import Field
 
-from app.agent import blocks, registry
-from app.agent.graph import _parse_routes, build_graph
-from app.agent.report_md import report_to_markdown
-
+# Guard first, imports second. langchain_core and langgraph arrive together
+# with requirements-agent.txt, so an environment without the optional agent
+# stack has to SKIP this module -- and the guard was unreachable below the
+# imports it protects: the first langchain_core import raised ModuleNotFound
+# during collection and interrupted the whole suite.
 pytest.importorskip("langgraph")
+pytest.importorskip("langchain_core")
+
+from langchain_core.language_models import BaseChatModel  # noqa: E402
+from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
+from pydantic import Field  # noqa: E402
+
+from app.agent import blocks, registry  # noqa: E402
+from app.agent.graph import _parse_routes, build_graph  # noqa: E402
+from app.agent.report_md import report_to_markdown  # noqa: E402
 
 
 # --------------------------------------------------------------- test doubles
