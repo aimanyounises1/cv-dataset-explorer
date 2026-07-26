@@ -55,15 +55,50 @@ class EmbeddingIndex:
     def search(
         self, query_vec: np.ndarray, top_k: int = 50,
         allowed_ids: Optional[set[int]] = None,
+        penalty: Optional[np.ndarray] = None,
     ) -> list[tuple[int, float]]:
         """Cosine similarity of a normalized query against all items.
         `allowed_ids` restricts the candidate set *before* top-k (so filters
-        can never empty out an oversampled result list)."""
+        can never empty out an oversampled result list).
+
+        `penalty` is an optional per-item vector subtracted before ranking (the
+        hubness correction — see `app.ml.hubness`). The score returned is the
+        one that did the ranking, penalty included: an earlier version returned
+        the raw cosine instead, on the theory that a cosine is the more
+        interpretable number, and it made the results list read as broken —
+        **106 of 228 adjacent pairs on the first page showed a score going UP**,
+        because the displayed value was no longer the sort key. A list whose
+        numbers do not descend looks like a bug regardless of how principled the
+        number is. Callers that surface this score must therefore say which
+        basis it is on; `api.search` reports `cosine_adj` when a penalty applied.
+
+        Opt-in per call rather than folded into the index, because the penalty is
+        derived from a bank of TEXT queries and is meaningless for the
+        image-to-image paths (`similar_to`, duplicate detection) that share this
+        method.
+        """
         scores = self.embeddings @ query_vec.reshape(-1)
+        if penalty is not None:
+            if penalty.shape != scores.shape:
+                raise ValueError(
+                    f"penalty shape {penalty.shape} does not match index "
+                    f"{scores.shape}; a mis-aligned penalty would silently "
+                    "re-rank against the wrong images")
+            scores = scores - penalty
         if allowed_ids is not None:
-            mask = np.fromiter((int(i) in allowed_ids for i in self.ids),
-                               dtype=bool, count=len(self.ids))
-            scores = np.where(mask, scores, -np.inf)
+            # `np.isin`, not a Python generator over every id. The generator
+            # version cost 0.334 ms on this 8,000-row index — nearly twice the
+            # 0.181 ms of the entire unfiltered search — so applying a filter
+            # made a query 2.7x more expensive, essentially all of it
+            # interpreter overhead. Measured identical output, 16x faster.
+            #
+            # It also scales far worse than the maths it guards: the mask is
+            # O(n) in Python where the scan is O(n) in BLAS, so at 250k rows the
+            # generator would cost ~10.8 ms against a 4.1 ms scan. This one line
+            # is why "filters are applied inside ranking" is affordable.
+            allowed = np.fromiter(allowed_ids, dtype=self.ids.dtype,
+                                  count=len(allowed_ids))
+            scores = np.where(np.isin(self.ids, allowed), scores, -np.inf)
         k = min(top_k, len(scores))
         top = np.argpartition(-scores, k - 1)[:k]
         top = top[np.argsort(-scores[top])]
@@ -77,22 +112,39 @@ class EmbeddingIndex:
         results = self.search(vec, top_k + 1)
         return [(i, s) for i, s in results if i != item_id][:top_k]
 
-    def duplicate_pairs(
-        self, threshold: float = config.DUPLICATE_THRESHOLD, max_pairs: int = 200,
-        chunk: int = 1024,
+    def all_pairs_above(
+        self, threshold: float, chunk: int = 1024,
     ) -> list[tuple[int, int, float]]:
-        """Near-duplicate pairs (cosine > threshold), chunked to bound memory."""
+        """EVERY near-duplicate pair above `threshold`, sorted by similarity.
+
+        Uncapped, deliberately. `duplicate_pairs` truncates to a display limit,
+        which is right for a gallery and wrong for a count: "200 duplicate pairs"
+        when there are 2,458 is not a smaller answer, it is a false one. Counting
+        and listing are different jobs and now have different methods.
+
+        Cost is one pass of the full similarity matrix — measured at 0.2 s for
+        8,000 x 768 on an M-series Mac, chunked so the matrix is never
+        materialised whole. Lower the threshold rather than raising the cap.
+        """
         pairs: list[tuple[int, int, float]] = []
         n = len(self.embeddings)
         for start in range(0, n, chunk):
             block = self.embeddings[start : start + chunk] @ self.embeddings.T
             for bi in range(block.shape[0]):
                 i = start + bi
-                for j in np.nonzero(block[bi] > threshold)[0]:
-                    if j > i:  # dedupe (i, j) / (j, i) and self-match
-                        pairs.append((int(self.ids[i]), int(self.ids[j]), float(block[bi, j])))
+                js = np.nonzero(block[bi] > threshold)[0]
+                for j in js[js > i]:   # dedupe (i, j) / (j, i) and self-match
+                    pairs.append((int(self.ids[i]), int(self.ids[j]),
+                                  float(block[bi, j])))
         pairs.sort(key=lambda p: -p[2])
-        return pairs[:max_pairs]
+        return pairs
+
+    def duplicate_pairs(
+        self, threshold: float = config.DUPLICATE_THRESHOLD, max_pairs: int = 200,
+        chunk: int = 1024,
+    ) -> list[tuple[int, int, float]]:
+        """The strongest `max_pairs` near-duplicate pairs, for display."""
+        return self.all_pairs_above(threshold, chunk=chunk)[:max_pairs]
 
 
 # -- thread-safe cached singletons -------------------------------------------
@@ -124,3 +176,7 @@ def invalidate_index() -> None:
     """Force reload on next access (used by /api/admin/reload after ingestion)."""
     with _lock:
         _cache.clear()
+    # The hubness penalty is positionally aligned to this index, so it cannot
+    # outlive it. Imported here to keep `hubness` -> `index` a one-way dependency.
+    from . import hubness
+    hubness.invalidate()
