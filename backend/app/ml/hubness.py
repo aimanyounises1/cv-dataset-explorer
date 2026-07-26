@@ -140,14 +140,29 @@ def compute(
 
 def _fingerprint(index: EmbeddingIndex) -> str:
     """Everything the artifact depends on. A stale penalty vector is worse than
-    none: it is silently mis-aligned with the index it is subtracted from."""
+    none: it is silently mis-aligned with the index it is subtracted from.
+
+    Deliberately **not** the database's mtime. `explorer.db` is rewritten by every
+    tag edit, every saved view and every WAL checkpoint, so including it meant a
+    single tag invalidated a perfectly good penalty vector: the artifact's ids,
+    shape, model, temperature and bank size all still matched the index and it was
+    thrown away anyway. The cost was not a warning — it was the correction
+    silently ceasing to apply until something rebuilt it (~5 s of encoding plus a
+    bank x corpus matmul), which made the benchmark's semantic baseline depend on
+    whether anyone had tagged anything since the last build.
+
+    What the penalty actually depends on is the embedding space and the corpus it
+    was estimated over. Both are covered here by the embedding artifacts' mtimes
+    and the id count, and `load` separately requires the stored id vector to equal
+    the index's element for element — which is the check that really guards
+    alignment. Captions can only change via re-ingestion, which rewrites
+    `image_embeddings.npy` and moves that mtime.
+    """
     stamp = 0.0
     for name in ("image_embeddings.npy", "sample_ids.npy"):
         p = config.EMB_DIR / name
         if p.exists():
             stamp = max(stamp, p.stat().st_mtime)
-    if config.DB_PATH.exists():
-        stamp = max(stamp, config.DB_PATH.stat().st_mtime)
     return (f"{config.EMBED_MODEL}|{config.HUBNESS_TEMPERATURE}|"
             f"{config.HUBNESS_BANK_SIZE}|{len(index.ids)}|{int(stamp)}")
 
