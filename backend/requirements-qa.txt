@@ -1,0 +1,22 @@
+# Developer tools for the autonomous UI sweep (app/qa). Deliberately NOT in
+# requirements.txt: neither is needed to serve the app, and Playwright in
+# particular would add a browser-driver install to every deployment of it.
+#
+# Nothing has to be installed to run a sweep — `uv run --with` keeps both out of
+# the app's environment:
+#
+#   cd backend && uv run --with playwright --with python-pptx \
+#       --python .venv/bin/python python -m app.qa.runner
+#
+# For the in-app endpoint (POST /api/qa/run) the server process itself needs
+# them, so install into the venv the server runs from:
+#
+#   cd backend && .venv/bin/pip install -r requirements-qa.txt
+#
+# Chrome is driven through channel="chrome", i.e. the browser already on this
+# machine, so `playwright install` is not required.
+playwright>=1.44
+
+# Optional even here: without it the sweep still writes its Markdown report and
+# says the deck was skipped.
+python-pptx>=0.6.23

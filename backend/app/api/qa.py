@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from ..schemas import QASummary, SuspectCaption
+from ..schemas import QASelection, QASummary, SuspectCaption
 from .deps import build_filters, get_conn, row_to_card
 
 router = APIRouter()
@@ -48,6 +48,30 @@ def qa_summary(conn: sqlite3.Connection = Depends(get_conn)):
         histogram=histogram,
         min_agreement=round(lo, 4), max_agreement=round(hi, 4),
     )
+
+
+@router.get("/qa/selection", response_model=QASelection)
+def qa_selection(
+    max_agreement: float = Query(..., description="The review threshold"),
+    split: Optional[str] = None,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Size of the set a threshold selects, in both units that matter.
+
+    A threshold is drawn over captions but acted on as images, and the two counts
+    differ because one image can have several weak captions. Reporting both keeps
+    the hand-off button honest: "review 388 images" is what the gallery will show,
+    even when 444 captions are below the line.
+    """
+    where, params = build_filters(split, None, None)
+    and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
+    row = conn.execute(
+        "SELECT COUNT(*) AS captions, COUNT(DISTINCT c.sample_id) AS samples "
+        "FROM captions c JOIN samples s ON s.id = c.sample_id "
+        f"WHERE c.agreement IS NOT NULL AND c.agreement <= ?{and_where}",
+        [max_agreement] + params).fetchone()
+    return QASelection(max_agreement=max_agreement,
+                       captions=row["captions"], samples=row["samples"])
 
 
 @router.get("/qa/captions", response_model=list[SuspectCaption])
