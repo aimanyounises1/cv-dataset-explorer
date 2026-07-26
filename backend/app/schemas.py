@@ -1,5 +1,5 @@
 """API response models."""
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel
 
@@ -81,9 +81,10 @@ class TermStat(BaseModel):
 class SearchResponse(BaseModel):
     items: list[SampleCard]
     mode_used: str                      # actual mode after any fallback
-    degraded: bool = False              # true if semantic search was unavailable
+    degraded: bool = False              # true if the requested ranking fell back
     message: Optional[str] = None
-    score_basis: Optional[str] = None   # what `score` means: cosine | rrf | None
+    # What `score` means: cosine | cosine_adj | rrf | prism_ll | None
+    score_basis: Optional[str] = None
     rrf_k: Optional[int] = None         # fusion constant, when fusion ran
     term_stats: list[TermStat] = []     # per-term document frequency (lexical modes)
     offset: int = 0                     # window start within the full ranking
@@ -112,10 +113,13 @@ class SearchRequest(BaseModel):
     split: Optional[str] = None
     tag: Optional[str] = None
     vlm_tag: Optional[str] = None
-    attr: Optional[str] = None
+    # One facet or several, intersected. A bare string is still accepted so the
+    # POST body stays compatible with clients that only ever sent one.
+    attr: Optional[Union[str, list[str]]] = None
     sort: Optional[str] = None
     ids: Optional[str] = None            # raw pasted text, parsed server-side
     axes: dict[str, dict[str, Optional[int]]] = {}   # {"difficulty": {"min": 8}}
+    max_agreement: Optional[float] = None
 
 
 class StatsOverview(BaseModel):
@@ -183,6 +187,13 @@ class QASummary(BaseModel):
     max_agreement: Optional[float] = None
 
 
+class QASelection(BaseModel):
+    """How large the current review threshold's selection is, in both units."""
+    max_agreement: float
+    captions: int
+    samples: int
+
+
 class AttributeLabel(BaseModel):
     label: str
     count: int
@@ -209,6 +220,11 @@ class EvalModeResult(BaseModel):
     # ranking quality if there was something to rank.
     mean_candidates: float = 0.0
     empty_query_rate: float = 0.0       # fraction of queries with no candidates
+    # Set on rows measured over a different query set than the main sample
+    # (the PRISM rows use test-split queries only). A number without its
+    # sample size and its reason invites a comparison it cannot support.
+    queries: Optional[int] = None
+    note: Optional[str] = None
 
 
 class EvalResponse(BaseModel):
@@ -219,6 +235,88 @@ class EvalResponse(BaseModel):
     depth: int = 0                      # rank depth MRR/median are computed to
     mean_query_words: float = 0.0       # queries are whole captions, not phrases
     results: list[EvalModeResult] = []
+
+
+class LeakagePoint(BaseModel):
+    """One rung of the threshold ladder. Reported as a curve because the answer
+    moves violently with the cut: on this corpus 0.80% of held-out images look
+    contaminated at cosine 0.95 and 12.05% at 0.90."""
+    threshold: float
+    pairs: int
+    cross_split: int
+    contaminated: int
+
+
+class LeakagePair(BaseModel):
+    a_id: int
+    b_id: int
+    score: float
+    a_split: str
+    b_split: str
+    a_thumb: str
+    b_thumb: str
+    cross_split: bool
+
+
+class LeakageReport(BaseModel):
+    threshold: float
+    floor: float
+    pairs: int                           # total near-duplicate pairs, uncapped
+    cross_split_pairs: int
+    by_split_pair: dict[str, int] = {}   # {"test~train": n, ...}
+    # The statistic that matters: distinct held-out images with at least one
+    # training near-duplicate. Reported accuracy on those is partly memorisation.
+    contaminated: int
+    held_out_total: int
+    contaminated_fraction: float
+    curve: list[LeakagePoint] = []
+    examples: list[LeakagePair] = []
+    default_threshold: float
+    caveat: str
+
+
+class FacetLift(BaseModel):
+    """One attribute label, and how over- or under-represented it is in a set.
+
+    `count` travels with `lift` on purpose: a 6x multiplier over three images and
+    a 6x multiplier over three hundred are different findings, and a reader shown
+    only the multiplier cannot tell them apart. `z` is the hypergeometric score
+    the facet had to clear to be reported at all.
+    """
+    group: str
+    label: str
+    count: int
+    set_share: float
+    corpus_share: float
+    lift: float
+    z: float
+    drill: str                           # gallery query string for this facet
+
+
+class SetAxis(BaseModel):
+    axis: str
+    set_mean: float
+    corpus_mean: float
+    delta: float
+
+
+class DescribeResponse(BaseModel):
+    """What characterises a selection, relative to the whole dataset."""
+    set_size: int
+    corpus_size: int
+    filtered: bool
+    message: Optional[str] = None
+    over: list[FacetLift] = []
+    under: list[FacetLift] = []
+    axes: list[SetAxis] = []
+    splits: dict[str, int] = {}
+    clusters: list[dict] = []
+    mean_agreement: Optional[float] = None
+    corpus_mean_agreement: Optional[float] = None
+    # The thresholds a facet had to clear, reported so the absence of a facet is
+    # interpretable rather than mysterious.
+    min_facet_count: int = 0
+    min_abs_z: float = 0.0
 
 
 class SavedView(BaseModel):
@@ -247,9 +345,23 @@ class ChatTraceStep(BaseModel):
     agent: str
     tool: str
     input: str
+    # Wall clock of the specialist lane this step ran in, so the trace shows
+    # where a slow turn went rather than only what it did.
+    lane_seconds: Optional[float] = None
 
 
 class ChatResponse(BaseModel):
     reply: str
     samples: list[SampleCard] = []
     trace: list[ChatTraceStep] = []
+    # Renderable visualizations the tools produced, in the order produced. Typed
+    # as dicts here and validated against `app.agent.blocks.Block` in the chat
+    # endpoint: keeping the discriminated union out of this module means the REST
+    # schemas do not depend on the optional agent package.
+    blocks: list[dict] = []
+    # Which specialists ran and which failed. Surfaced so a partial answer is
+    # visibly partial — the alternative is a reply that silently covered half the
+    # request and reads as though it covered all of it.
+    lanes: list[str] = []
+    lanes_failed: list[str] = []
+    elapsed_s: Optional[float] = None

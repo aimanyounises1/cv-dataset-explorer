@@ -41,8 +41,11 @@ export default function ActiveFilters(props: ActiveFiltersProps): JSX.Element | 
           <button
             type="button"
             className="filter-chip-remove"
-            aria-label={`Remove ${chip.label} filter`}
-            title={`Remove ${chip.label} filter`}
+            // The value belongs in the name because a chip kind can now repeat:
+            // two attribute facets both announced "Remove Attribute filter",
+            // which named neither of them.
+            aria-label={`Remove ${chip.label} filter: ${chip.value}`}
+            title={`Remove ${chip.label} filter: ${chip.value}`}
             onClick={() => onRemove(chip.key)}
           >
             ×

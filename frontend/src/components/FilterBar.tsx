@@ -6,7 +6,9 @@ export interface Filters {
   split: string;
   tag: string;
   vlm_tag: string;
-  attr: string; // "group:label"
+  /** Attribute facets, intersected. Several, because "night" and "indoor" is a
+   * real question and one dropdown value cannot express it. */
+  attrs: string[]; // each "group:label"
 }
 
 interface Props {
@@ -42,19 +44,36 @@ export default function FilterBar({ filters, onChange }: Props) {
         <option value="test">test</option>
       </select>
       {coverage.length > 0 && (
+        // An *add* control, not a current-value control: it resets to the
+        // placeholder after each pick and the selection rail's chips are where
+        // the applied facets live, each removable on its own. A single-value
+        // <select> cannot show "night AND indoor", and pretending otherwise is
+        // what let the address bar and the result count disagree.
         <select
-          value={filters.attr}
-          onChange={(e) => onChange({ ...filters, attr: e.target.value })}
-          aria-label="Filter by attribute"
+          value=""
+          onChange={(e) => {
+            if (e.target.value) {
+              onChange({ ...filters, attrs: [...filters.attrs, e.target.value] });
+            }
+          }}
+          aria-label="Add an attribute filter"
         >
-          <option value="">All attributes</option>
+          <option value="">
+            {filters.attrs.length === 0
+              ? "All attributes"
+              : `${filters.attrs.length} attribute${filters.attrs.length > 1 ? "s" : ""} — add another`}
+          </option>
           {coverage.map((g) => (
             <optgroup key={g.grp} label={g.grp.replace(/_/g, " ")}>
-              {g.labels.map((l) => (
-                <option key={l.label} value={`${g.grp}:${l.label}`}>
-                  {l.label} ({l.count})
-                </option>
-              ))}
+              {g.labels.map((l) => {
+                const value = `${g.grp}:${l.label}`;
+                return (
+                  <option key={l.label} value={value}
+                          disabled={filters.attrs.includes(value)}>
+                    {l.label} ({l.count}){filters.attrs.includes(value) ? " ✓" : ""}
+                  </option>
+                );
+              })}
             </optgroup>
           ))}
         </select>

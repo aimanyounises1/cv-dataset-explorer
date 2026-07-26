@@ -1,5 +1,6 @@
 """Search: semantic (SigLIP text->image), keyword (FTS5 BM25 over captions +
-VLM tags), or hybrid (reciprocal-rank fusion of both).
+VLM tags), hybrid (reciprocal-rank fusion of both), or boosted (semantic
+ranking replaced by the trained PRISM speaker models, when artifacts exist).
 
 Correctness notes:
 - Filters are applied INSIDE each ranking (SQL WHERE for keyword, candidate
@@ -15,14 +16,18 @@ Correctness notes:
   and the UI labels it. Ranks, not scores, are what fusion combines.
 """
 import logging
+import re
 import sqlite3
-from typing import Optional
+from typing import Optional, Union
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import config, db
+from ..ml import hubness
 from ..ml.embedder import get_embedder
 from ..ml.index import get_caption_index, get_index
+from ..ml.prism import get_prism_index
 from ..schemas import MatchPath, SearchRequest, SearchResponse, TermStat
 from .deps import (
     MAX_ID_LIST,
@@ -47,14 +52,15 @@ router = APIRouter()
 def _keyword_ranking(
     conn, q: str, top_k: int,
     split=None, tag=None, vlm_tag=None, attr=None, axes=None, ids=None,
-    ids_staged=False,
+    ids_staged=False, max_agreement=None,
 ) -> tuple[list[int], dict[int, str]]:
     """Ranked sample ids + the best-matching caption per sample.
     Filters — including axis ranges — are part of the SQL, applied before LIMIT."""
     match = db.fts_escape(q)
     if not match:
         return [], {}
-    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged,
+                                  max_agreement)
     and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
     rows = conn.execute(
         "SELECT c.sample_id AS sid, MIN(rank) AS best, c.text AS caption_text "
@@ -129,14 +135,96 @@ def _sort_by_axis(conn, ids: list[int], sort: str) -> list[int]:
     return [r["id"] for r in rows]
 
 
-def _semantic_ranking(q: str, allowed: Optional[set[int]], top_k: int):
-    """Ranked (sample_id, score), or None if the embedding stack is down."""
+_PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
+_SPACES = re.compile(r"\s+")
+
+
+def normalize_query_text(q: str) -> str:
+    """Lowercase and strip punctuation before the text goes to SigLIP.
+
+    SigLIP 2 tokenizes with a *case-sensitive* Gemma SentencePiece vocabulary,
+    and `AutoProcessor` does not apply the model's canonical lowercase+depunctuate
+    preprocessing for you. A leading capital is therefore its own rare token
+    rather than part of the sentence, and it measurably moves the query vector:
+    on the 1,000-caption benchmark, encoding the raw text scores R@1 46.0% and
+    encoding the normalized text scores 53.2% (MRR 0.5672 -> 0.6280). Lowercasing
+    the first character alone recovers 4.6 of those 7.2 points.
+
+    This is query-side only, and it is a no-op on text that is already lowercase
+    with no punctuation — the short phrases users actually type are returned
+    unchanged, so nothing that works today can regress. The corpus-side caption
+    vectors stay as ingested: matching a normalized query against them measured
+    *better* than matching a raw one (caption-retrieval MRR 0.4387 -> 0.4572),
+    so there is no need to re-embed.
+
+    Not applied to the lexical path: FTS5 does its own tokenization, and the
+    conjunctive query is measured against raw text.
+    """
+    out = _SPACES.sub(" ", _PUNCT.sub(" ", q.lower())).strip()
+    # A query that is nothing but punctuation would normalize away entirely;
+    # embedding the original is more useful than embedding "".
+    return out or q
+
+
+def _encode_for_bank(embedder):
+    """The bank encoder handed to `hubness.build`.
+
+    Defined here, next to `normalize_query_text`, so the hubness bank is encoded
+    through exactly the seam a user's query is. A bank built from the stored
+    caption vectors — which encode the RAW caption text — measured no gain at
+    all, so this is not a stylistic preference.
+    """
+    def encode(texts: list[str]):
+        prompts = [normalize_query_text(t) for t in texts]
+        return np.concatenate(
+            [embedder.encode_texts(prompts[i:i + 128])
+             for i in range(0, len(prompts), 128)], axis=0)
+    return encode
+
+
+def _semantic_ranking(conn, q: str, allowed: Optional[set[int]], top_k: int):
+    """Ranked (sample_id, score), the query vector, and the score's basis.
+
+    The basis is returned rather than assumed because the hubness correction
+    changes what the number means: with a penalty applied it is a cosine minus a
+    per-image constant, which is still comparable across results of the same
+    query but is no longer a cosine. Reporting it as one would be a lie the UI
+    then prints.
+    """
     index = get_index()
     embedder = get_embedder() if index is not None else None
     if index is None or embedder is None:
-        return None, None
-    qvec = embedder.encode_texts([q])[0]
-    return index.search(qvec, top_k=top_k, allowed_ids=allowed), qvec
+        return None, None, None
+    qvec = embedder.encode_texts([normalize_query_text(q)])[0]
+    penalty = hubness.get_penalty(conn, _encode_for_bank(embedder))
+    ranked = index.search(qvec, top_k=top_k, allowed_ids=allowed, penalty=penalty)
+    return ranked, qvec, ("cosine" if penalty is None else "cosine_adj")
+
+
+def _boosted_ranking(conn, q: str, allowed: Optional[set[int]], top_k: int):
+    """Ranked (sample_id, score) under the trained PRISM speaker models, or
+    (None, None, None) when the artifacts (or the embedding stack) are absent.
+
+    Deliberately NO hubness penalty on this path. Stacking the Bayes prior on
+    top of the trained mu measured *worse* than the trained mu alone — R@1
+    51.6% -> 50.3%, paired delta -1.3 pts, CI95 [-2.0, -0.5] — because training
+    already absorbs the hub structure the penalty models. One correction ranks;
+    they do not stack. (`data/cache/prism_eval.json`, rows A1 vs A3.)
+
+    The score is a log-likelihood (constant dropped), not a cosine: comparable
+    within one result list, meaningless against any other basis — the response
+    says `prism_ll` so the UI never prints it as a similarity.
+    """
+    index = get_index()
+    embedder = get_embedder() if index is not None else None
+    if index is None or embedder is None:
+        return None, None, None
+    prism = get_prism_index(index)   # id-validated against the live corpus
+    if prism is None:
+        return None, None, None
+    qvec = embedder.encode_texts([normalize_query_text(q)])[0]
+    ranked = prism.search(qvec, top_k=top_k, allowed_ids=allowed)
+    return ranked, qvec, "prism_ll"
 
 
 def _best_captions_for(conn, sample_ids: list[int], qvec) -> dict[int, str]:
@@ -163,9 +251,10 @@ def _best_captions_for(conn, sample_ids: list[int], qvec) -> dict[int, str]:
 def run_search(
     conn: sqlite3.Connection, q: str, mode: str = "hybrid", top_k: int = 60,
     split: Optional[str] = None, tag: Optional[str] = None,
-    vlm_tag: Optional[str] = None, attr: Optional[str] = None,
+    vlm_tag: Optional[str] = None,
+    attr: Optional[Union[str, list[str]]] = None,
     offset: int = 0, axes: Optional[dict] = None, sort: Optional[str] = None,
-    ids: Optional[list[str]] = None,
+    ids: Optional[list[str]] = None, max_agreement: Optional[float] = None,
 ) -> SearchResponse:
     """Core search service — used by the API endpoint, the export route, and the
     assistant's agent tools (same code path, same behavior).
@@ -186,7 +275,8 @@ def run_search(
     # Staged once per request, before any filter builds SQL: past ~10k entries an
     # IN (...) list would exceed SQLite's host-parameter ceiling.
     ids_staged = stage_id_list(conn, ids) if ids else False
-    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes, ids, ids_staged)
+    allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes, ids, ids_staged,
+                              max_agreement)
     # How many pasted entries actually exist here. Reported rather than enforced:
     # a list carried over from a bigger corpus is a normal thing to paste, and
     # the useful response is "412 of your 500 are in this dataset", not an error.
@@ -204,13 +294,27 @@ def run_search(
     score_basis: Optional[str] = None
     rrf_k: Optional[int] = None
 
-    semantic, qvec = (None, None)
+    semantic, qvec, semantic_basis = (None, None, None)
+    boosted, boosted_basis = None, None
+    if mode == "boosted":
+        boosted, qvec, boosted_basis = _boosted_ranking(conn, q, allowed, depth)
+        if boosted is None:
+            degraded, mode = True, "semantic"
+            # Only name the missing artifacts when they are the cause; if the
+            # whole embedding stack is down, the semantic fallback below says so.
+            if get_index() is not None and get_embedder() is not None:
+                message = ("Boosted ranking unavailable (no trained PRISM model "
+                           "for this corpus — run `python -m app.train_prism "
+                           "--no-sigma`) — using semantic search.")
     if mode in ("semantic", "hybrid"):
-        semantic, qvec = _semantic_ranking(q, allowed, depth)
+        semantic, qvec, semantic_basis = _semantic_ranking(conn, q, allowed, depth)
         if semantic is None:
             degraded, mode = True, "keyword"
-            message = ("Semantic search unavailable (embeddings not computed) — "
-                       "using keyword search.")
+            # Appended, not assigned: a boosted request that degraded twice
+            # should say the whole story, not just the last step.
+            message = ((message + " ") if message else "") + (
+                "Semantic search unavailable (embeddings not computed) — "
+                "using keyword search.")
 
     def record(path: str, ids) -> None:
         """Ranks are absolute within the full ranking, not within the page, so
@@ -221,16 +325,25 @@ def run_search(
     if mode == "semantic":
         ranked = [sid for sid, _ in semantic]
         scores = dict(semantic)
-        score_basis = "cosine"
+        score_basis = semantic_basis
         record("semantic", ranked)
+    elif mode == "boosted":
+        ranked = [sid for sid, _ in boosted]
+        scores = dict(boosted)
+        score_basis = boosted_basis
+        record("boosted", ranked)
     elif mode == "keyword":
         ranked, match_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged)
+            conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged,
+            max_agreement)
         record("keyword", ranked)
-        matched_terms = [t for t in q.split() if t.strip()]
+        # The terms that actually constrained the match, so highlighting
+        # marks what was searched for rather than every word typed.
+        matched_terms = db.match_terms(q)
     else:  # hybrid: reciprocal-rank fusion
         keyword, kw_captions = _keyword_ranking(
-            conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged)
+            conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged,
+            max_agreement)
         rrf_k = config.RRF_K
         fused: dict[int, float] = {}
         for rank, (sid, _s) in enumerate(semantic):
@@ -243,7 +356,9 @@ def run_search(
         record("semantic", [sid for sid, _ in semantic])
         record("keyword", keyword)
         match_captions = dict(kw_captions)
-        matched_terms = [t for t in q.split() if t.strip()]
+        # The terms that actually constrained the match, so highlighting
+        # marks what was searched for rather than every word typed.
+        matched_terms = db.match_terms(q)
         logger.debug("Fused %d semantic + %d keyword results with RRF k=%d",
                      len(semantic), len(keyword), rrf_k)
 
@@ -257,7 +372,7 @@ def run_search(
     depth_reached = not has_more and len(ranked) >= depth
 
     # Caption lookups are per-page, not per-ranking: only the window is shown.
-    if mode in ("semantic", "hybrid"):
+    if mode in ("semantic", "hybrid", "boosted"):
         match_captions = {**_best_captions_for(conn, window, qvec), **match_captions}
 
     if not window:
@@ -291,21 +406,25 @@ def run_search(
 @router.get("/search", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1),
-    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid)$"),
+    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid|boosted)$"),
     top_k: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0, le=5000),
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
+    max_agreement: Optional[float] = Query(
+        None, description="Samples with any caption at or below this agreement"),
     axes: dict = Depends(axis_bounds),
     ids: list = Depends(id_list),
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
-    attr: Optional[str] = None,
+    attr: Optional[list[str]] = Query(
+        None, description="Attribute facet 'group:label'. Repeatable: several "
+                          "are intersected."),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     return run_search(conn, q, mode=mode, top_k=top_k, split=split, tag=tag,
                       vlm_tag=vlm_tag, attr=attr, offset=offset, axes=axes,
-                      sort=sort, ids=ids)
+                      sort=sort, ids=ids, max_agreement=max_agreement)
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -325,4 +444,5 @@ def search_post(body: SearchRequest, conn: sqlite3.Connection = Depends(get_conn
     return run_search(conn, body.q, mode=body.mode, top_k=body.top_k,
                       split=body.split, tag=body.tag, vlm_tag=body.vlm_tag,
                       attr=body.attr, offset=body.offset, axes=axes,
-                      sort=body.sort, ids=entries)
+                      sort=body.sort, ids=entries,
+                      max_agreement=body.max_agreement)
