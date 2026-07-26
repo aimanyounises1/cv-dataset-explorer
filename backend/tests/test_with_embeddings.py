@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app import db
 from app.analyze import compute_caption_scores
 from app.api import search as search_module
+from app.api.search import normalize_query_text
 from app.main import app
 from app.ml.index import EmbeddingIndex, invalidate_index
 
@@ -31,11 +32,25 @@ def _vec(concept_weights: dict[int, float]) -> np.ndarray:
 
 
 class FakeEmbedder:
-    """Maps text to the synthetic concept space by keyword lookup."""
+    """Maps text to the synthetic concept space by keyword lookup.
+
+    `EXACT` pins each caption's text to its own sample's image vector. The
+    benchmark encodes its query text through this seam instead of reading a
+    stored caption vector, so the fixture's premise — the caption embedding *is*
+    the image embedding, which is what makes semantic R@1 perfect here — has to
+    survive encoding. Keyed on the normalized form because that is what reaches
+    the encoder. Any other query ("dog") falls through to concept lookup.
+    """
+
+    EXACT: dict[str, np.ndarray] = {}
 
     def encode_texts(self, texts: list[str]) -> np.ndarray:
         out = []
         for t in texts:
+            hit = self.EXACT.get(normalize_query_text(t))
+            if hit is not None:
+                out.append(hit)
+                continue
             weights = {i: 1.0 for i, c in enumerate(CONCEPTS) if c in t.lower()}
             out.append(_vec(weights or {0: 0.5, 1: 0.5, 2: 0.5}))
         return np.stack(out)
@@ -66,6 +81,7 @@ def client():
         caption_ids.append(ccur.lastrowid)
         img_vecs.append(vec)
         cap_vecs.append(vec)  # caption embedding ≈ image embedding
+        FakeEmbedder.EXACT[normalize_query_text(caption)] = vec
     conn.commit()
 
     EmbeddingIndex.save(np.array(sample_ids), np.stack(img_vecs), kind="image")
@@ -81,6 +97,7 @@ def client():
     finally:
         # Restore the world so order-independent degradation tests stay valid.
         search_module.get_embedder = real_get_embedder
+        FakeEmbedder.EXACT.clear()
         from app import config
         for f in config.EMB_DIR.glob("*.npy"):
             f.unlink(missing_ok=True)
@@ -242,6 +259,77 @@ def test_benchmark_reports_candidate_pool_per_mode(client):
     assert modes["keyword"]["empty_query_rate"] == 1.0  # one caption each, excluded
     assert modes["keyword"]["mean_candidates"] == 0.0
     assert body["mean_query_words"] > 0
+
+
+class _Recorder:
+    """Wraps the fake embedder and records exactly what text reached it."""
+
+    def __init__(self):
+        self.seen: list[str] = []
+        self._inner = FakeEmbedder()
+
+    def encode_texts(self, texts):
+        self.seen.extend(texts)
+        return self._inner.encode_texts(texts)
+
+
+def _with_recorder(client, call):
+    rec = _Recorder()
+    previous = search_module.get_embedder
+    search_module.get_embedder = lambda: rec
+    try:
+        call()
+    finally:
+        search_module.get_embedder = previous
+    return rec
+
+
+def test_search_encodes_the_normalized_query(client):
+    """The text handed to SigLIP is the normalized form, not what was typed."""
+    rec = _with_recorder(client, lambda: client.get(
+        "/api/search", params={"q": "A Happy Dog, Running!", "mode": "semantic"}))
+    assert rec.seen == ["a happy dog running"]
+
+
+def test_benchmark_encodes_queries_through_the_search_seam(client):
+    """The benchmark's claim is that it measures what /api/search does.
+
+    That only holds if both reach the model the same way. An earlier version
+    read the stored caption vectors instead — encodings of the raw caption text,
+    which no search request ever produces — so the benchmark could not have
+    noticed a change to how queries are encoded. Substituting the embedder for
+    search must therefore change the benchmark too.
+    """
+    from app import config
+
+    for f in config.CACHE_DIR.glob("eval_*.json"):
+        f.unlink(missing_ok=True)
+    rec = _with_recorder(client, lambda: client.get(
+        "/api/eval/retrieval", params={"sample_size": 50}))
+    assert rec.seen, "the benchmark did not encode anything through the seam"
+    # Every query it encoded was normalized on the way through.
+    assert all(t == normalize_query_text(t) for t in rec.seen)
+    for f in config.CACHE_DIR.glob("eval_*.json"):
+        f.unlink(missing_ok=True)
+
+
+def test_benchmark_says_so_when_it_could_not_encode_the_queries(client):
+    """Degrading to the stored caption vectors is allowed; doing it silently is
+    not, because those vectors are not what the shipped path produces."""
+    from app import config
+
+    for f in config.CACHE_DIR.glob("eval_*.json"):
+        f.unlink(missing_ok=True)
+    previous = search_module.get_embedder
+    search_module.get_embedder = lambda: None
+    try:
+        body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+    finally:
+        search_module.get_embedder = previous
+        for f in config.CACHE_DIR.glob("eval_*.json"):
+            f.unlink(missing_ok=True)
+    assert body["available"] is True
+    assert "unavailable" in (body["message"] or "")
 
 
 def test_benchmark_reports_pool_size_and_rank_metrics(client):

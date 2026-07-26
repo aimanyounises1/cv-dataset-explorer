@@ -17,3 +17,6 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# So `cd backend && pytest` works as the README documents, without the caller
+# having to export PYTHONPATH first.
+pythonpath = ["."]
