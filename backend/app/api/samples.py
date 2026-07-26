@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import config
+from ..db import AXES
 from ..ml.index import get_index
 from ..schemas import CaptionOut, SampleCard, SampleDetail, SampleList
 from .deps import (
@@ -34,14 +35,21 @@ def list_samples(
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
-    attr: Optional[str] = None,
+    attr: Optional[list[str]] = Query(
+        None, description="Attribute facet 'group:label'. Repeatable: several "
+                          "are intersected, so attr=time_of_day:night&"
+                          "attr=setting:indoor is the images that are both."),
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
+    max_agreement: Optional[float] = Query(
+        None, description="Samples with any caption at or below this agreement"),
+    cluster: Optional[int] = Query(None, description="k-means group id"),
     axes: dict = Depends(axis_bounds),
     ids: list = Depends(id_list),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     staged = stage_id_list(conn, ids) if ids else False
-    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged,
+                                  max_agreement, cluster)
     total = conn.execute(f"SELECT COUNT(*) FROM samples s{where}", params).fetchone()[0]
     # Sorting is over the whole filtered set, in SQL — never over the page.
     order = order_by_axis(sort) or " ORDER BY s.id"
@@ -105,13 +113,25 @@ def similar_samples(
 @router.get("/export")
 def export_subset(
     q: Optional[str] = None,
-    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid)$"),
+    # Kept in step with /api/search deliberately: export exists to hand over
+    # *the set on screen*, so a mode the gallery can produce and the export
+    # cannot is a 422 on a button the user can see.
+    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid|boosted)$"),
     top_k: int = Query(500, ge=1, le=5000),
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
-    attr: Optional[str] = None,
+    attr: Optional[list[str]] = Query(
+        None, description="Attribute facet 'group:label'. Repeatable: several "
+                          "are intersected, so attr=time_of_day:night&"
+                          "attr=setting:indoor is the images that are both."),
     fmt: str = Query("json", alias="format", pattern="^(json|jsonl|csv)$"),
+    max_agreement: Optional[float] = Query(
+        None, description="Samples with any caption at or below this agreement"),
+    cluster: Optional[int] = Query(None, description="k-means group id"),
+    scores: bool = Query(
+        True, description="Include the computed per-sample signals "
+                          "(difficulty axes, cluster, caption agreement)"),
     axes: dict = Depends(axis_bounds),
     ids: list = Depends(id_list),
     conn: sqlite3.Connection = Depends(get_conn),
@@ -130,7 +150,8 @@ def export_subset(
         from .search import run_search
 
         result = run_search(conn, q, mode=mode, top_k=top_k, split=split,
-                            tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes, ids=ids)
+                            tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes, ids=ids,
+                            max_agreement=max_agreement)
         ids = [it.id for it in result.items]
         rows_by_id = {}
         if ids:
@@ -141,12 +162,15 @@ def export_subset(
         ids = [r["id"] for r in rows]
     else:
         staged = stage_id_list(conn, ids) if ids else False
-        where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged)
+        where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged,
+                                      max_agreement, cluster)
         rows = conn.execute(
             f"SELECT s.* FROM samples s{where} ORDER BY s.id", params).fetchall()
         ids = [r["id"] for r in rows]
     caps: dict[int, list[str]] = {}
     tag_map: dict[int, list[str]] = {}
+    attr_map: dict[int, dict[str, str]] = {}
+    agree_map: dict[int, float] = {}
     if ids:
         qmarks = ",".join("?" * len(ids))
         for c in conn.execute(
@@ -157,23 +181,72 @@ def export_subset(
             f"SELECT st.sample_id, t.name FROM sample_tags st "
             f"JOIN tags t ON t.id = st.tag_id WHERE st.sample_id IN ({qmarks})", ids):
             tag_map.setdefault(t["sample_id"], []).append(t["name"])
-    samples = [
-        {"id": r["id"], "filename": r["filename"], "split": r["split"],
-         "captions": caps.get(r["id"], []), "tags": tag_map.get(r["id"], [])}
-        for r in rows
-    ]
+        if scores:
+            for a in conn.execute(
+                f"SELECT sample_id, grp, label FROM attributes "
+                f"WHERE sample_id IN ({qmarks})", ids):
+                attr_map.setdefault(a["sample_id"], {})[a["grp"]] = a["label"]
+            for r in conn.execute(
+                f"SELECT sample_id, AVG(agreement) AS m FROM captions "
+                f"WHERE sample_id IN ({qmarks}) AND agreement IS NOT NULL "
+                f"GROUP BY sample_id", ids):
+                agree_map[r["sample_id"]] = r["m"]
+
+    def record(r) -> dict:
+        """One exported row.
+
+        With `scores`, it carries the signals this tool computed rather than only
+        the ones it was given. Exporting "the 866 hardest images" in a file that
+        cannot say how hard any one of them is forces every downstream consumer
+        to re-derive work already done — and curriculum ordering, loss weighting
+        and stratified splits all need exactly these numbers.
+        """
+        out = {"id": r["id"], "filename": r["filename"], "split": r["split"],
+               "captions": caps.get(r["id"], []), "tags": tag_map.get(r["id"], [])}
+        if not scores:
+            return out
+        keys = r.keys()
+        out["axes"] = {a: r[a] for a in AXES if a in keys and r[a] is not None}
+        if "cluster" in keys and r["cluster"] is not None:
+            out["cluster"] = r["cluster"]
+        if "caption_consistency" in keys and r["caption_consistency"] is not None:
+            out["caption_consistency"] = round(r["caption_consistency"], 4)
+        if r["id"] in agree_map:
+            out["mean_agreement"] = round(agree_map[r["id"]], 4)
+        if r["id"] in attr_map:
+            out["attributes"] = attr_map[r["id"]]
+        return out
+
+    samples = [record(r) for r in rows]
     query = {"q": q, "mode": mode if q else None, "top_k": top_k if q else None,
              "split": split, "tag": tag, "vlm_tag": vlm_tag, "attr": attr,
+             "cluster": cluster,
              "axes": {a: list(b) for a, b in axes.items()},
-             "embed_model": config.EMBED_MODEL}
+             "max_agreement": max_agreement, "scores": scores,
+             # Named so a consumer can tell whether two exports are comparable:
+             # the axes are percentile ranks over whatever corpus was loaded.
+             "embed_model": config.EMBED_MODEL,
+             "axis_semantics": "0-10 percentile ranks over this corpus; "
+                               "not comparable across datasets"}
 
     if fmt == "csv":
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["id", "filename", "split", "captions", "tags"])
+        # CSV is positional, so score columns are appended after the original
+        # five rather than interleaved: an existing consumer reading by index
+        # keeps working, and `scores=false` reproduces the old header exactly.
+        head = ["id", "filename", "split", "captions", "tags"]
+        if scores:
+            head += list(AXES) + ["cluster", "caption_consistency", "mean_agreement"]
+        w.writerow(head)
         for s in samples:
-            w.writerow([s["id"], s["filename"], s["split"],
-                        " | ".join(s["captions"]), " ".join(s["tags"])])
+            row = [s["id"], s["filename"], s["split"],
+                   " | ".join(s["captions"]), " ".join(s["tags"])]
+            if scores:
+                row += [s.get("axes", {}).get(a) for a in AXES]
+                row += [s.get("cluster"), s.get("caption_consistency"),
+                        s.get("mean_agreement")]
+            w.writerow(row)
         return _download(buf.getvalue(), "text/csv", "csv")
     if fmt == "jsonl":
         # Query provenance rides as the first record so the file stays valid JSONL.

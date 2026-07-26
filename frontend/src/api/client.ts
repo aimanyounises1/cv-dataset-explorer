@@ -1,16 +1,22 @@
 import type {
   AttributeGroup, CaptionStats, ChatMessage, ChatResponse, ChatStatus,
-  DuplicatePair, EvalResponse, MapPoint, QASummary, SampleCard, SampleDetail,
-  SampleList, SearchMode, SearchResponse, StatsOverview, SuspectCaption, TagInfo,
+  DescribeResponse, LeakageReport,
+  DuplicatePair, EvalResponse, MapPoint, QASelection, QASummary, SampleCard,
+  SampleDetail, SampleList, SearchMode, SearchResponse, StatsOverview,
+  SuspectCaption, TagInfo,
 } from "./types";
 
-type Params = Record<string, string | number | undefined>;
+type Params = Record<string, string | number | string[] | undefined>;
 
 async function get<T>(path: string, params?: Params, signal?: AbortSignal): Promise<T> {
   const url = new URL(`/api${path}`, window.location.origin);
   if (params) {
     for (const [k, v] of Object.entries(params)) {
-      if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
+      if (v === undefined || v === "") continue;
+      // An array becomes repeated occurrences (`?attr=a&attr=b`), which is what
+      // the API intersects. `String(v)` would have sent the single value "a,b".
+      if (Array.isArray(v)) for (const one of v) url.searchParams.append(k, String(one));
+      else url.searchParams.set(k, String(v));
     }
   }
   const res = await fetch(url, { signal });
@@ -50,7 +56,17 @@ export const api = {
   bulkTag: (sample_ids: number[], name: string) =>
     send<{ ok: boolean; tag: string; tagged: number }>("/tags/bulk", "POST", { sample_ids, name }),
 
+  /** The inverse of every other call: given a selection, what is it made of. */
+  describe: (params: Params, signal?: AbortSignal) =>
+    get<DescribeResponse>("/describe", params, signal),
+
+  /** Held-out images that have a near-duplicate in training. */
+  leakage: (threshold: number, signal?: AbortSignal) =>
+    get<LeakageReport>("/stats/leakage", { threshold }, signal),
+
   qaSummary: () => get<QASummary>("/qa/summary"),
+  qaSelection: (maxAgreement: number, signal?: AbortSignal) =>
+    get<QASelection>("/qa/selection", { max_agreement: maxAgreement }, signal),
   suspectCaptions: (params?: Params) => get<SuspectCaption[]>("/qa/captions", params),
   // (params carries limit / split / max_agreement — the review threshold)
   inconsistentSamples: () => get<SuspectCaption[]>("/qa/consistency"),

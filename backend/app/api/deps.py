@@ -1,7 +1,7 @@
 """Shared FastAPI dependencies and row helpers."""
 import json
 import sqlite3
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Union
 
 from fastapi import HTTPException, Query
 
@@ -159,9 +159,11 @@ def axis_bounds(
 
 
 def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[str],
-                  attr: Optional[str] = None,
+                  attr: Optional[Union[str, list[str]]] = None,
                   axes: Optional[dict[str, tuple[Optional[int], Optional[int]]]] = None,
-                  ids: Optional[list[str]] = None, ids_staged: bool = False):
+                  ids: Optional[list[str]] = None, ids_staged: bool = False,
+                  max_agreement: Optional[float] = None,
+                  cluster: Optional[int] = None):
     """Compose WHERE clauses + params for common sample filters.
 
     `attr` is a zero-shot attribute facet encoded as "group:label"; `axes` maps
@@ -181,9 +183,26 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
     if vlm_tag:
         clauses.append("s.id IN (SELECT sample_id FROM vlm_tags WHERE tag = ?)")
         params.append(vlm_tag)
-    if attr and ":" in attr:
-        grp, label = attr.split(":", 1)
-        clauses.append("s.id IN (SELECT sample_id FROM attributes WHERE grp = ? AND label = ?)")
+    if cluster is not None:
+        # k-means group, computed in the full 768-d space and merely drawn on the
+        # map. It was colourable there long before it was filterable anywhere,
+        # which meant the only way to reach a cluster was to lasso it by hand.
+        clauses.append("s.cluster = ?")
+        params.append(cluster)
+    # One attribute facet or several, intersected. `attr` was a bare `str`, so
+    # FastAPI bound only the LAST occurrence: `?attr=time_of_day:night&
+    # attr=environment:indoors` silently returned the 706 indoor images instead
+    # of the 99 that are both, and reversing the order returned 392. No error,
+    # just a different answer than the URL asked for — which also made the
+    # describe panel's drill-through land on a set 6.7x larger than the row it
+    # came from, because a facet could not be added to the selection already in
+    # play.
+    for one in ([attr] if isinstance(attr, str) else (attr or [])):
+        if not one or ":" not in one:
+            continue
+        grp, label = one.split(":", 1)
+        clauses.append(
+            "s.id IN (SELECT sample_id FROM attributes WHERE grp = ? AND label = ?)")
         params.extend([grp, label])
     for axis, (lo, hi) in (axes or {}).items():
         if axis not in AXES:        # never interpolate an unvalidated identifier
@@ -199,16 +218,28 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
         if clause:
             clauses.append(clause)
             params.extend(id_params)
+    if max_agreement is not None:
+        # Samples with *any* caption at or below the threshold. This is what
+        # makes the Quality page's brush a real filter rather than a view-local
+        # setting: the same predicate then works in the gallery and in export,
+        # so a triage selection can leave the page it was made on.
+        clauses.append(
+            "s.id IN (SELECT sample_id FROM captions "
+            "WHERE agreement IS NOT NULL AND agreement <= ?)")
+        params.append(max_agreement)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     return where, params
 
 
 def filtered_id_set(conn, split, tag, vlm_tag, attr=None, axes=None,
-                    ids=None, ids_staged=False) -> Optional[set[int]]:
+                    ids=None, ids_staged=False, max_agreement=None,
+                    cluster=None) -> Optional[set[int]]:
     """Set of sample ids matching filters, or None when unfiltered."""
-    if not (split or tag or vlm_tag or attr or axes or ids):
+    if not (split or tag or vlm_tag or attr or axes or ids
+            or max_agreement is not None or cluster is not None):
         return None
-    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged)
+    where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged,
+                                  max_agreement, cluster)
     rows = conn.execute(f"SELECT s.id FROM samples s{where}", params)
     return {r["id"] for r in rows}
 
