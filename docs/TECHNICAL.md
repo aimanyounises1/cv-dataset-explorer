@@ -564,9 +564,11 @@ The benchmark now also encodes its queries live through the same code path
 `/api/search` uses, rather than reusing the precomputed caption vector as the
 query. That is a stricter test — it measures what a user's query actually goes
 through — and it is why `PROTOCOL_VERSION` moved to 4, so results cached under
-the old method can never be read back as if they were comparable. It is now at
-**5**: holding out the hubness bank changed the evaluated sample, which is exactly
-the kind of change a cached row must not survive.
+the old method can never be read back as if they were comparable. It moved to
+**5** because holding out the hubness bank changed the evaluated sample, which is
+exactly the kind of change a cached row must not survive, and to **6** when the
+paired PRISM rows arrived: those grade a trained model, so they draw a dedicated
+test-split sample and the cache key carries the artifact stamp.
 
 Two things this table is honest about, both of which cost real work to learn:
 
@@ -637,7 +639,8 @@ here is not a 7 on COCO.
 
 ## 6. API layer
 
-FastAPI, Pydantic 2 response models on every route, 32 endpoints. Full schema at
+FastAPI, Pydantic 2 response models on every route, 35 endpoints (the count comes from
+`docs/CAPABILITIES.md`, which is generated from the live schema). Full schema at
 `/docs`; the grouped inventory is in `docs/CAPABILITIES.md`.
 
 Three conventions:
@@ -740,9 +743,13 @@ backend fails `tsc` in the frontend until a renderer exists. See
 
 | Tier | What | Count |
 |---|---|---|
-| `backend/tests/` | API contracts, degraded modes, id-list limits, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **155** |
-| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **63 checks / 11 workflows** |
+| `backend/tests/` | API contracts, degraded modes, id-list limits, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **173 passed, 4 skipped** in CI |
+| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **14 workflows registered**; an observed sweep passed 63/63 checks over the 11 registered at the time |
 | `python scripts/capabilities.py --check` | Fails when the docs drift from the running system | — |
+
+The backend figure is what GitHub Actions reports on the light install described
+in `docs/TESTING.md`: the modules needing `torch` or `langgraph` skip there, so a
+local run with the optional stacks installed executes more than this.
 
 The frontend has no unit tier. That is a deliberate trade: for a UI this size,
 the failures that matter are "the view rendered empty", "the control stopped
@@ -775,7 +782,7 @@ Measured on an M-series Mac:
 | Semantic scan, 8,000 × 768 (24.6 MB) | 0.18 ms |
 | SigLIP text encode (MPS) | 7-8 ms — ~40× the scan, and the real cost of a semantic query |
 | Map frame, 8,000 points | ~0.6 ms |
-| Full UI sweep, 11 workflows | 47 s |
+| Full UI sweep, 11 workflows (the number registered when this was measured) | 47 s |
 
 **Known ceilings, in the order they will be hit:**
 
