@@ -12,6 +12,10 @@ backend/data/
 frontend/node_modules/
 frontend/dist/
 
+# Local configuration. .env.example is the committed reference; a real .env
+# is machine-specific and never a deliverable.
+.env
+
 # Misc
 .DS_Store
 *.log
