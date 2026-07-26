@@ -24,7 +24,7 @@ on MPS/CUDA/CPU.
 
 At 8k × 768 floats (~24 MB), an exact numpy matmul answers a query in ~1 ms.
 A vector database or ANN index would add operational and build complexity for
-zero benefit below ~100k vectors. The `EmbeddingIndex` class is the seam where
+zero benefit below ~400k vectors — measured, see docs/TECHNICAL.md. The `EmbeddingIndex` class is the seam where
 FAISS/sqlite-vec would slot in if the dataset grew.
 
 ### Hybrid search (RRF)
@@ -106,7 +106,7 @@ forward pass per semantic query, keeping the UI responsive.
 ## Deliberately not done (each is a choice, not an omission)
 
 - **No vector database / ANN index** — exact numpy search is correct below
-  ~100k vectors; ANN would add build time and recall loss for nothing. The
+  ~400k vectors; ANN would add build time and recall loss for nothing. The
   upgrade path lives behind `EmbeddingIndex` (see docs/ARCHITECTURE.md).
 - **No repository/unit-of-work pattern over SQLite** — a thin `db.py` plus
   service functions is the right ceremony level here; a repository layer with
