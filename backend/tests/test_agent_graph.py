@@ -34,7 +34,6 @@ from app.agent import blocks, registry  # noqa: E402
 from app.agent.graph import _parse_routes, build_graph  # noqa: E402
 from app.agent.report_md import report_to_markdown  # noqa: E402
 
-
 # --------------------------------------------------------------- test doubles
 
 class StubModel(BaseChatModel):
