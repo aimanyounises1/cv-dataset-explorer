@@ -1,14 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { AXES, Axis, SampleCard, SearchMode, TermStat } from "../api/types";
-import ActiveFilters, { ActiveFilterChip } from "../components/ActiveFilters";
-import AxisFilters, { AXIS_META, AxisRange } from "../components/AxisFilters";
-import FilterBar, { Filters } from "../components/FilterBar";
-import IdListFilter from "../components/IdListFilter";
+import { AXES, SampleCard, SearchMode, TermStat } from "../api/types";
+import { AXIS_META } from "../components/AxisFilters";
+import AxisLegend from "../components/AxisLegend";
 import ImageCard from "../components/ImageCard";
-import SavedViews from "../components/SavedViews";
 import { useDebounce } from "../hooks/useDebounce";
+import { useSelection } from "../hooks/useSelection";
 import { saveResultOrder } from "../hooks/useResultOrder";
 
 interface SearchMeta {
@@ -21,7 +19,7 @@ interface SearchMeta {
 }
 
 const PER_PAGE = 60;
-const MODES: SearchMode[] = ["hybrid", "semantic", "keyword"];
+const MODES: SearchMode[] = ["hybrid", "semantic", "keyword", "boosted"];
 
 /** Frame width per density. Scanning thousands of thumbnails for one anomaly
  * and reading a handful of captions closely are different jobs. */
@@ -43,40 +41,11 @@ export default function GalleryPage() {
   const query = searchParams.get("q") ?? "";
   const mode = (searchParams.get("mode") ?? "hybrid") as SearchMode;
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
-  const filters: Filters = useMemo(() => ({
-    split: searchParams.get("split") ?? "",
-    tag: searchParams.get("tag") ?? "",
-    vlm_tag: searchParams.get("vlm_tag") ?? "",
-    attr: searchParams.get("attr") ?? "",
-  }), [searchParams]);
   const sort = searchParams.get("sort") ?? "";
-  const ids = searchParams.get("ids") ?? "";
-
-  // Axis ranges live in the URL like every other filter, so a constrained
-  // slice stays shareable and the back button still works.
-  const axisRanges: AxisRange = useMemo(() => {
-    const out: AxisRange = {};
-    for (const a of AXES) {
-      const lo = searchParams.get(`${a}_min`);
-      const hi = searchParams.get(`${a}_max`);
-      if (lo != null || hi != null) {
-        out[a] = [lo == null ? null : Number(lo), hi == null ? null : Number(hi)];
-      }
-    }
-    return out;
-  }, [searchParams]);
-
-  const axisParams = useMemo(() => {
-    const p: Record<string, number> = {};
-    for (const [axis, range] of Object.entries(axisRanges)) {
-      if (!range) continue;
-      const [lo, hi] = range;
-      if (lo != null) p[`${axis}_min`] = lo;
-      if (hi != null) p[`${axis}_max`] = hi;
-    }
-    return p;
-  }, [axisRanges]);
-
+  // Every membership constraint — split, tag, attribute, axes, id list, the
+  // quality threshold, the cluster — is now owned by the rail and read back
+  // from the URL. The gallery keeps only what orders or renders the view.
+  const selection = useSelection();
   const [input, setInput] = useState(query);
   const [items, setItems] = useState<SampleCard[]>([]);
   const [total, setTotal] = useState(0);
@@ -120,10 +89,7 @@ export default function GalleryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInput]);
 
-  const filterKey = [
-    query, mode, filters.split, filters.tag, filters.vlm_tag, filters.attr,
-    sort, ids, JSON.stringify(axisParams),
-  ].join("|");
+  const filterKey = [query, mode, sort, JSON.stringify(selection.params)].join("|");
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -136,8 +102,7 @@ export default function GalleryPage() {
         if (query) {
           const res = await api.search(
             query, mode,
-            { ...filters, ...axisParams, sort: sort || undefined,
-              ids: ids || undefined,
+            { ...selection.params, sort: sort || undefined,
               top_k: PER_PAGE, offset: (p - 1) * PER_PAGE }, ctrl.signal);
           setNotice(res.degraded ? res.message ?? null : null);
           setMeta({ basis: res.score_basis, rrfK: res.rrf_k, terms: res.term_stats ?? [],
@@ -146,8 +111,8 @@ export default function GalleryPage() {
           return { items: res.items, total: null as number | null, more: res.has_more };
         }
         const res = await api.listSamples(
-          { page: p, per_page: PER_PAGE, ...filters, ...axisParams,
-            sort: sort || undefined, ids: ids || undefined }, ctrl.signal);
+          { page: p, per_page: PER_PAGE, ...selection.params,
+            sort: sort || undefined }, ctrl.signal);
         setNotice(null);
         setMeta({ terms: [] });
         return { items: res.items, total: res.total, more: p * PER_PAGE < res.total };
@@ -180,6 +145,17 @@ export default function GalleryPage() {
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return; // superseded
         setError(e instanceof Error ? e.message : String(e));
+        // Drop the previous answer. Leaving it on screen was worse than an empty
+        // grid, because the heading and the cards came from different queries: a
+        // failed `boosted` request kept the earlier hybrid results, relabelled
+        // them "60+ results for … (boosted)", and left every card wearing an
+        // `rrf 0.007` badge and a "fused by reciprocal rank, k=60" note that the
+        // boosted path never produces. The error was visible and still the page
+        // read as an answer.
+        setItems([]);
+        setTotal(0);
+        setHasMore(false);
+        setMeta({ terms: [] });
         setLoading(false);
       }
     };
@@ -190,61 +166,13 @@ export default function GalleryPage() {
 
   const common = meta.terms.filter((t) => t.common);
   const missing = meta.terms.filter((t) => t.images === 0);
-  const hasFilters = Boolean(filters.split || filters.tag || filters.vlm_tag || filters.attr);
+  const hasFilters = selection.active;
   // Every term matches something, yet the query returns nothing: the lexical
   // index ANDs terms, so a long query can be unsatisfiable while each of its
   // words is common. Without this the empty page looks like a broken search.
   const conjunctionFailed =
     items.length === 0 && meta.terms.length > 1 && missing.length === 0 && !hasFilters;
 
-  /** Every active constraint as one removable chip. Built here rather than in
-   * the chip component because only this page knows how a constraint maps back
-   * onto URL parameters — which is also what makes removal a one-liner. */
-  const chips: ActiveFilterChip[] = [];
-  if (filters.split) chips.push({ key: "split", label: "Split", value: filters.split });
-  if (filters.tag) chips.push({ key: "tag", label: "Tag", value: filters.tag });
-  if (filters.vlm_tag) chips.push({ key: "vlm_tag", label: "VLM tag", value: filters.vlm_tag });
-  if (filters.attr) chips.push({ key: "attr", label: "Attribute", value: filters.attr });
-  for (const a of AXES) {
-    const r = axisRanges[a as Axis];
-    if (!r) continue;
-    chips.push({
-      key: a, label: AXIS_META[a].label,
-      value: `${r[0] ?? 0}–${r[1] ?? 10}`,
-    });
-  }
-  if (ids) {
-    const n = new Set(ids.replace(/,/g, "\n").split("\n").map((s) => s.trim())
-      .filter(Boolean)).size;
-    chips.push({ key: "ids", label: "Id list", value: `${n}` });
-  }
-
-  const removeChip = (key: string) => {
-    if (AXES.includes(key as Axis)) {
-      setParams({ [`${key}_min`]: "", [`${key}_max`]: "", page: "" });
-    } else {
-      setParams({ [key]: "", page: "" });
-    }
-  };
-
-  const clearAllChips = () => {
-    const updates: Record<string, string> = { page: "" };
-    for (const k of ["split", "tag", "vlm_tag", "attr", "ids"]) updates[k] = "";
-    for (const a of AXES) { updates[`${a}_min`] = ""; updates[`${a}_max`] = ""; }
-    setParams(updates);   // the query and mode survive: those are not filters
-  };
-
-  /** Export whatever the current URL describes: the export route takes the same
-   * parameters as search, so the link is the view's own state. */
-  const exportHref = (format: "csv" | "jsonl" | "json") => {
-    const p = new URLSearchParams();
-    if (query) { p.set("q", query); p.set("mode", mode); p.set("top_k", "500"); }
-    for (const [k, v] of Object.entries(filters)) if (v) p.set(k, v);
-    for (const [k, v] of Object.entries(axisParams)) p.set(k, String(v));
-    if (ids) p.set("ids", ids);
-    p.set("format", format);
-    return `/api/export?${p.toString()}`;
-  };
 
   return (
     <div>
@@ -267,6 +195,8 @@ export default function GalleryPage() {
               title={
                 m === "semantic" ? "SigLIP text-to-image similarity"
                 : m === "keyword" ? "BM25 full-text over captions + VLM tags (Porter-stemmed)"
+                : m === "boosted" ? "Semantic ranking through PRISM speaker models trained on "
+                  + "this corpus (measured +2.2 pts R@1; falls back to semantic if untrained)"
                 : "Reciprocal-rank fusion of semantic + keyword"
               }
             >
@@ -274,12 +204,6 @@ export default function GalleryPage() {
             </button>
           ))}
         </div>
-        <FilterBar
-          filters={filters}
-          onChange={(f) => setParams({
-            split: f.split, tag: f.tag, vlm_tag: f.vlm_tag, attr: f.attr, page: "",
-          })}
-        />
         <select value={sort} aria-label="Sort results"
                 onChange={(e) => setParams({ sort: e.target.value, page: "" })}>
           <option value="">Sort: relevance</option>
@@ -304,33 +228,14 @@ export default function GalleryPage() {
         </div>
       </div>
 
-      <ActiveFilters chips={chips} onRemove={removeChip} onClearAll={clearAllChips} />
 
-      <SavedViews
-        current={searchParams.toString()}
-        onRestore={(qs) => setSearchParams(new URLSearchParams(qs), { replace: false })}
-      />
 
-      <IdListFilter
-        value={ids}
-        onChange={(v) => setParams({ ids: v, page: "" })}
-        resolved={meta.idsResolved}
-      />
 
-      <AxisFilters
-        value={axisRanges}
-        onChange={(next) => {
-          const updates: Record<string, string> = { page: "" };
-          for (const a of AXES) {
-            const r = next[a as Axis];
-            updates[`${a}_min`] = r && r[0] != null ? String(r[0]) : "";
-            updates[`${a}_max`] = r && r[1] != null ? String(r[1]) : "";
-          }
-          setParams(updates);
-        }}
-      />
 
-      {!query && (
+
+      {/* Zero-state only. With a filter applied these are noise between
+          the controls and the results the filter just produced. */}
+      {!query && !selection.active && (
         <div className="chip-row">
           <span className="chip-label">Try:</span>
           {SUGGESTIONS.map((s) => (
@@ -372,19 +277,10 @@ export default function GalleryPage() {
           {query && meta.basis === "rrf" && meta.rrfK != null &&
             ` · fused by reciprocal rank, k=${meta.rrfK}`}
         </div>
-        {items.length > 0 && (
-          // Exports exactly what is on screen — the same query, through the
-          // same ranking — so a curated slice can leave the tool.
-          <div className="export-row">
-            <span className="export-label">Export slice</span>
-            {(["csv", "jsonl", "json"] as const).map((f) => (
-              <a key={f} className="pill export-pill" href={exportHref(f)}
-                 title={`Download these ${items.length} samples as ${f.toUpperCase()}, with the query recorded in the manifest`}>
-                {f}
-              </a>
-            ))}
-          </div>
-        )}
+        {/* The key for the sparkline every card carries. Only shown when the
+            cards actually have axes — a legend for an absent encoding is
+            noise, and axes are absent until `python -m app.analyze` has run. */}
+        {items.some((s) => s.axes) && <AxisLegend />}
       </div>
 
       <div className="grid"
