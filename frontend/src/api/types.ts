@@ -1,3 +1,5 @@
+import type { Block } from "./blocks";
+
 /** The four difficulty axes, as 0-10 percentile buckets over this dataset.
  * Ranks, not measurements — a 7 means "harder than ~70% of this corpus". */
 /** Server-side cap on a pasted id list (backend: deps.MAX_ID_LIST). Kept in
@@ -19,7 +21,7 @@ export interface AxisScores {
 }
 
 export interface MatchPath {
-  path: string; // "keyword" | "semantic"
+  path: string; // "keyword" | "semantic" | "boosted"
   rank: number; // 1-based rank within that path
 }
 
@@ -80,7 +82,7 @@ export interface SearchResponse {
   mode_used: string;
   degraded: boolean;
   message?: string | null;
-  score_basis?: string | null; // "cosine" | "rrf" | null
+  score_basis?: string | null; // "cosine" | "cosine_adj" | "rrf" | "prism_ll" | null
   rrf_k?: number | null;
   term_stats: TermStat[];
   offset: number;
@@ -147,6 +149,84 @@ export interface QASummary {
   max_agreement?: number | null;
 }
 
+/** Exact size of a review threshold's selection, in both units: the histogram
+ * can only give a bin-rounded count, and images ≠ captions because one image
+ * can hold several weak captions. */
+export interface QASelection {
+  max_agreement: number;
+  captions: number;
+  samples: number;
+}
+
+/** One attribute label, and how over- or under-represented it is in a selection.
+ * `count` travels with `lift` deliberately: a 6x multiplier over three images and
+ * over three hundred are different findings. */
+export interface FacetLift {
+  group: string;
+  label: string;
+  count: number;
+  set_share: number;
+  corpus_share: number;
+  lift: number;
+  z: number;
+  drill: string;
+}
+
+export interface SetAxis {
+  axis: Axis;
+  set_mean: number;
+  corpus_mean: number;
+  delta: number;
+}
+
+/** What characterises a selection, relative to the whole dataset. */
+export interface DescribeResponse {
+  set_size: number;
+  corpus_size: number;
+  filtered: boolean;
+  message?: string | null;
+  over: FacetLift[];
+  under: FacetLift[];
+  axes: SetAxis[];
+  splits: Record<string, number>;
+  clusters: { cluster: number; count: number }[];
+  mean_agreement?: number | null;
+  corpus_mean_agreement?: number | null;
+  min_facet_count: number;
+  min_abs_z: number;
+}
+
+export interface LeakagePoint {
+  threshold: number;
+  pairs: number;
+  cross_split: number;
+  contaminated: number;
+}
+
+export interface LeakagePair {
+  a_id: number; b_id: number; score: number;
+  a_split: string; b_split: string;
+  a_thumb: string; b_thumb: string;
+  cross_split: boolean;
+}
+
+/** Held-out images with a training near-duplicate. Reported as a curve, because
+ * "near-duplicate" is a threshold on a cosine and the answer moves with it. */
+export interface LeakageReport {
+  threshold: number;
+  floor: number;
+  pairs: number;
+  cross_split_pairs: number;
+  by_split_pair: Record<string, number>;
+  contaminated: number;
+  held_out_total: number;
+  contaminated_fraction: number;
+  curve: LeakagePoint[];
+  examples: LeakagePair[];
+  default_threshold: number;
+  caveat: string;
+}
+
 export interface AttributeLabel {
   label: string;
   count: number;
@@ -168,6 +248,10 @@ export interface EvalModeResult {
   median_rank?: number | null;
   mean_candidates: number;
   empty_query_rate: number;
+  /** Rows measured on their own query set (the PRISM rows use test-split
+   * queries only) say how many queries, and why, so the table can too. */
+  queries?: number | null;
+  note?: string | null;
 }
 
 export interface EvalResponse {
@@ -189,18 +273,42 @@ export interface ChatTraceStep {
   agent: string;
   tool: string;
   input: string;
+  lane_seconds?: number | null;
 }
 
 export interface ChatResponse {
   reply: string;
   samples: SampleCard[];
   trace: ChatTraceStep[];
+  /** Interactive visualizations the specialists produced, in the order produced. */
+  blocks: Block[];
+  /** Which specialists ran, and which died. A partial answer must look partial. */
+  lanes: string[];
+  lanes_failed: string[];
+  elapsed_s?: number | null;
 }
 
 export interface ChatStatus {
   available: boolean;
   model: string;
   reason?: string;
+  specialists?: string[];
 }
 
-export type SearchMode = "hybrid" | "semantic" | "keyword";
+export interface AgentSpecialist {
+  name: string;
+  summary: string;
+  cost: "cheap" | "expensive";
+  tools: string[];
+}
+
+/** The live agent topology, read from the backend registry rather than drawn by
+ * hand — so what the assistant page claims about itself cannot go stale. */
+export interface AgentTopology {
+  specialists: AgentSpecialist[];
+  max_parallel_lanes: number;
+  model: string;
+  lane_timeout_s: number;
+}
+
+export type SearchMode = "hybrid" | "semantic" | "keyword" | "boosted";

@@ -13,14 +13,31 @@ const AXIS_ABBR: Record<string, string> = {
 /** A score is only interpretable next to what produced it: a text-image cosine
  * and an RRF sum live on different scales and must never be read against each
  * other, so the value always carries its basis. */
-const SCORE_LABEL: Record<string, string> = { cosine: "cos", rrf: "rrf" };
+const SCORE_LABEL: Record<string, string> = {
+  cosine: "cos", rrf: "rrf",
+  // Starred rather than renamed: the number really is a plain cosine — the
+  // hubness correction subtracts its penalty before ranking and the raw
+  // similarity is what comes back — so it stays comparable with every other
+  // `cos` in the app. Only the ordering differs, and the star is what says so.
+  cosine_adj: "cos*",
+  // Not a cosine at all — a log-likelihood under the image's trained speaker
+  // model — so it gets its own label rather than borrowing one it would lie in.
+  prism_ll: "fit",
+};
 
 const SCORE_HELP: Record<string, string> = {
   cosine: "Cosine similarity in the embedding space — comparable with other cosines, and not a probability.",
+  cosine_adj: "Cosine similarity, ranked with the hubness correction. The number is the "
+            + "raw cosine and is comparable with any other; the ordering is not, because "
+            + "each image was scored against how close it sits to queries in general.",
   rrf: "Reciprocal-rank fusion weight — derived from ranks, not a similarity.",
+  prism_ll: "Log-likelihood of the query under this image's trained speaker model "
+          + "(PRISM, boosted mode). Higher is better and the ordering is what was "
+          + "measured; the value is only comparable within this result list — it is "
+          + "not a cosine and not a probability.",
 };
 
-const PATH_LABEL: Record<string, string> = { keyword: "kw", semantic: "sem" };
+const PATH_LABEL: Record<string, string> = { keyword: "kw", semantic: "sem", boosted: "boost" };
 
 interface Props {
   sample: SampleCard;
@@ -86,7 +103,7 @@ export default function ImageCard({ sample, scoreBasis }: Props) {
             One sparkline instead of four numbers: the profile is the signal, and
             exact values live in the tooltip and on the detail page. */}
         {sample.axes && (
-          <div className="axis-row">
+          <div className="card-axis-row">
             <AxisSparkline axes={sample.axes} />
             {hardest && (
               <span className={`axis-lead ${heatBand(hardest.v)}`}
