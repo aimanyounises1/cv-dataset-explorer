@@ -20,8 +20,15 @@ import threading
 import time
 
 import numpy as np
+import pytest
 
-from app.ml.embedder import Embedder
+# The stub weights are torch tensors and `encode_texts` calls into torch, so
+# this module needs torch even though it never loads a model. Skipped, not
+# failed, where the ML stack is absent (light CI): an invariant can only be
+# exercised where the thing it guards can run.
+pytest.importorskip("torch")
+
+from app.ml.embedder import Embedder  # noqa: E402
 
 
 class OverlapDetector:
