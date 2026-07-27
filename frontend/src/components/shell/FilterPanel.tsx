@@ -7,8 +7,12 @@ import { useSelection } from "../../hooks/useSelection";
 
 /** Routes whose content is a filtered view of the corpus. Elsewhere — the
  * benchmark, the assistant — a filter panel would be a control with nothing to
- * control, so the rail simply does not draw one. */
-const FILTERABLE = ["/", "/map"];
+ * control, so the rail simply does not draw one. The map is in that category
+ * too: it always draws all 8,000 points (api.map takes no parameters), so a
+ * panel there was exactly the control with nothing to control — it wrote
+ * chips, shrank the rail's set, and changed nothing on the canvas, while a
+ * lasso happily selected points "outside" the pretend filter. */
+const FILTERABLE = ["/"];
 
 /**
  * Every input that narrows the corpus, in one place on the left.
