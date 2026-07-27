@@ -44,6 +44,11 @@ class FakeEmbedder:
 
     EXACT: dict[str, np.ndarray] = {}
 
+    def encode_images(self, images) -> np.ndarray:
+        # Every uploaded image "looks like" the dog concept — enough to assert
+        # that by-image search ranks through the same index as everything else.
+        return np.stack([_vec({0: 1.0}) for _ in images])
+
     def encode_texts(self, texts: list[str]) -> np.ndarray:
         out = []
         for t in texts:
@@ -361,3 +366,30 @@ def test_benchmark_reports_pool_size_and_rank_metrics(client):
     semantic = next(r for r in body["results"] if r["mode"] == "semantic")
     assert semantic["mrr"] == 1.0
     assert semantic["median_rank"] == 1.0
+
+
+def test_search_by_image_ranks_through_the_same_index(client):
+    """An uploaded image ranks the corpus image-to-image: plain cosines,
+    descending, through the exact index text search uses."""
+    import io as _io
+
+    from PIL import Image as _Image
+
+    buf = _io.BytesIO()
+    _Image.new("RGB", (4, 3), (120, 90, 40)).save(buf, format="PNG")
+    r = client.post("/api/search/by-image?top_k=4", content=buf.getvalue())
+    assert r.status_code == 200
+    cards = r.json()
+    assert len(cards) == 4
+    # The fake embedder maps every image onto the dog concept, so the two dog
+    # samples must lead and every card must carry its cosine, in ranked order.
+    assert all("dog" in c["caption"] for c in cards[:2])
+    scores = [c["score"] for c in cards]
+    assert all(s is not None for s in scores)
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_search_by_image_rejects_non_images(client):
+    r = client.post("/api/search/by-image", content=b"definitely not a decodable image")
+    assert r.status_code == 400
+    assert client.post("/api/search/by-image", content=b"").status_code == 400

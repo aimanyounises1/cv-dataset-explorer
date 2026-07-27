@@ -15,20 +15,22 @@ Correctness notes:
   RRF sum live on different scales), so every response names its score basis
   and the UI labels it. Ranks, not scores, are what fusion combines.
 """
+import io
 import logging
 import re
 import sqlite3
 from typing import Optional, Union
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from PIL import Image as PILImage
 
 from .. import config, db
 from ..ml import hubness
 from ..ml.embedder import get_embedder
 from ..ml.index import get_caption_index, get_index
 from ..ml.prism import get_prism_index
-from ..schemas import MatchPath, SearchRequest, SearchResponse, TermStat
+from ..schemas import MatchPath, SampleCard, SearchRequest, SearchResponse, TermStat
 from .deps import (
     MAX_ID_LIST,
     SORT_KEYS,
@@ -446,3 +448,53 @@ def search_post(body: SearchRequest, conn: sqlite3.Connection = Depends(get_conn
                       attr=body.attr, offset=body.offset, axes=axes,
                       sort=body.sort, ids=entries,
                       max_agreement=body.max_agreement)
+
+
+# A query image is one file, so it needs no form envelope — the raw request
+# body avoids the multipart parser, which is a dependency this project does
+# not carry. Large enough for any photograph, small enough that a mistaken
+# video upload fails fast.
+MAX_QUERY_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+@router.post("/search/by-image", response_model=list[SampleCard])
+async def search_by_image(
+    request: Request,
+    top_k: int = Query(24, ge=1, le=100),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Rank the corpus against an uploaded image: image-to-image retrieval on
+    the same embeddings and the same exact index the text search uses.
+
+    Unlike every other search, this one cannot live in a URL — the query is
+    the image itself. The result ids can: the UI offers the ranked set as an
+    `?ids=` slice, which is the shareable artifact. Scores are plain cosines
+    (no hubness penalty): the penalty bank is calibrated on text queries, and
+    an uploaded image is not one.
+    """
+    index = get_index()
+    embedder = get_embedder()
+    if index is None or embedder is None:
+        raise HTTPException(503, "Embeddings not computed yet — run `python -m app.ingest`.")
+    body = await request.body()
+    if not body:
+        raise HTTPException(400, "Send the image bytes as the request body")
+    if len(body) > MAX_QUERY_IMAGE_BYTES:
+        raise HTTPException(
+            413, f"Query image over {MAX_QUERY_IMAGE_BYTES // (1024 * 1024)} MB")
+    try:
+        img = PILImage.open(io.BytesIO(body))
+        img = img.convert("RGB")
+    except Exception:
+        raise HTTPException(400, "The request body is not a decodable image") from None
+    vec = embedder.encode_images([img])[0]
+    results = index.search(vec, top_k=top_k)
+    ids = [sid for sid, _ in results]
+    if not ids:
+        return []
+    qmarks = ",".join("?" * len(ids))
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT * FROM samples WHERE id IN ({qmarks})", ids)}
+    captions = first_captions(conn, ids)
+    return [row_to_card(rows[sid], caption=captions.get(sid), score=score)
+            for sid, score in results if sid in rows]

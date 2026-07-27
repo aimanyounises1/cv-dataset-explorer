@@ -56,6 +56,36 @@ export default function GalleryPage() {
   const [hasMore, setHasMore] = useState(false);
   const [density, setDensity] = useState<string>(
     () => localStorage.getItem(DENSITY_KEY) ?? "M");
+  /* An image query cannot live in the URL — the query IS the image — so this
+   * is the one result set held in memory instead. The URL stays the boss:
+   * any change to it clears the image results, and the shareable artifact is
+   * the ranked id list, offered as an ?ids= link. */
+  const [imageQuery, setImageQuery] =
+    useState<{ name: string; items: SampleCard[] } | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const runImageSearch = (file: Blob & { name?: string }) => {
+    if (!file.type.startsWith("image/")) return;
+    setImageBusy(true);
+    setError(null);
+    api.searchByImage(file)
+      .then((cards) => setImageQuery({ name: file.name || "pasted image", items: cards }))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setImageBusy(false));
+  };
+
+  // A copied image pasted anywhere on the page is a query; text pastes (the
+  // search box, the id list) have no files attached and pass through untouched.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const f = e.clipboardData?.files?.[0];
+      if (f && f.type.startsWith("image/")) runImageSearch(f);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     try { localStorage.setItem(DENSITY_KEY, density); } catch { /* non-essential */ }
@@ -196,6 +226,10 @@ export default function GalleryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey, page]);
 
+  // The URL remains the source of truth: touching any filter, query or page
+  // dismisses the in-memory image results rather than competing with them.
+  useEffect(() => { setImageQuery(null); }, [filterKey, page]);
+
   const common = meta.terms.filter((t) => t.common);
   const missing = meta.terms.filter((t) => t.images === 0);
   const hasFilters = selection.active;
@@ -207,7 +241,12 @@ export default function GalleryPage() {
 
 
   return (
-    <div ref={pageRef}>
+    <div ref={pageRef}
+         onDragOver={(e) => { e.preventDefault(); }}
+         onDrop={(e) => {
+           const f = e.dataTransfer.files?.[0];
+           if (f && f.type.startsWith("image/")) { e.preventDefault(); runImageSearch(f); }
+         }}>
       <div className="controls">
         <div className="search-box">
           <input
@@ -217,6 +256,17 @@ export default function GalleryPage() {
             onChange={(e) => setInput(e.target.value)}
           />
         </div>
+        <button className="ghost by-image" disabled={imageBusy}
+                onClick={() => fileRef.current?.click()}
+                title="Rank the corpus against a picture: pick a file, drop one anywhere on this page, or paste a copied image">
+          {imageBusy ? "Embedding…" : "By image…"}
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
+               onChange={(e) => {
+                 const f = e.target.files?.[0];
+                 if (f) runImageSearch(f);
+                 e.target.value = "";   // the same file, picked twice, still fires
+               }} />
         <div className="mode-toggle" role="group" aria-label="Search mode">
           {MODES.map((m) => (
             <button
@@ -301,6 +351,35 @@ export default function GalleryPage() {
         </div>
       )}
 
+      {/* Image-query results replace the grid but never the URL: the image
+          cannot travel in a link, so the ranked ids are offered as the
+          shareable ?ids= slice instead, and any URL change dismisses this. */}
+      {imageQuery && (
+        <>
+          <div className="result-bar">
+            <div className="meta-line" aria-live="polite" style={{ marginBottom: 0 }}>
+              {imageQuery.items.length} images ranked against{" "}
+              <strong>“{imageQuery.name}”</strong> · cosine, same index as text search
+              {" · "}
+              <a className="open-all"
+                 href={`/?ids=${imageQuery.items.map((s) => s.id).join(",")}`}>
+                open as id list →
+              </a>
+            </div>
+            <button className="ghost" onClick={() => setImageQuery(null)}>
+              × Clear image query
+            </button>
+          </div>
+          <div className="grid"
+               style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
+            {imageQuery.items.map((s) => (
+              <ImageCard key={s.id} sample={s} scoreBasis="cosine" />
+            ))}
+          </div>
+        </>
+      )}
+
+      {!imageQuery && (<>
       <div className="result-bar">
         <div className="meta-line" aria-live="polite" style={{ marginBottom: 0 }}>
           {query
@@ -366,6 +445,7 @@ export default function GalleryPage() {
           </button>
         </div>
       )}
+      </>)}
     </div>
   );
 }

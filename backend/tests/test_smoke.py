@@ -86,6 +86,14 @@ def test_hybrid_degrades_without_embeddings(client):
     assert len(body["items"]) == 1
 
 
+def test_search_by_image_names_its_missing_dependency(client):
+    # Image search has no keyword fallback — without embeddings the honest
+    # answer is the command that would enable it, not an empty ranking.
+    r = client.post("/api/search/by-image", content=b"anything")
+    assert r.status_code == 503
+    assert "ingest" in r.json()["detail"]
+
+
 def test_boosted_falls_all_the_way_back_to_keyword(client):
     """Two degradations in one request, on the install a reviewer starts from.
 
