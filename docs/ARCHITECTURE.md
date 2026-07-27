@@ -1,0 +1,278 @@
+# Architecture
+
+How the system is layered today, where its seams are, and what would replace
+each piece at a scale this one does not have. [TECHNICAL.md](TECHNICAL.md) holds
+the schema, the real query plans and the measurements; this document is the map
+and the reasoning. [TESTING.md](TESTING.md) says which of these boundaries have
+tests.
+
+## Runtime topology
+
+```mermaid
+flowchart TB
+  subgraph fe["Frontend — React 18 + TypeScript, Vite"]
+    UI["Gallery · Sample · Map · Stats · Quality · Benchmark · Assistant<br/>all view state lives in the URL query string"]
+  end
+
+  subgraph be["Backend — FastAPI, one process, sync endpoints on the threadpool"]
+    RT["Routers: samples · search · export · stats · map · tags · views<br/>describe · attributes · qa · eval · leakage · admin · chat"]
+    SV["Service layer: run_search · build_filters · filtered_id_set<br/>one implementation, shared by REST, export and the agent tools"]
+  end
+
+  subgraph ml["Optional ML layers — each probes its own availability"]
+    EM["Embedder: SigLIP 2 text/image towers<br/>MPS · CUDA · CPU, inference serialized by a lock"]
+    IX["EmbeddingIndex: exact cosine, 8,000 x 768 float32<br/>candidate mask applied before top-k"]
+    HB["Hubness penalty: per-image scalar from a held-out caption bank"]
+    PR["PrismIndex: trained mu / log-sigma speaker models — boosted mode"]
+  end
+
+  subgraph st["Local state — all of it under backend/data, gitignored"]
+    DB[("SQLite in WAL mode<br/>samples · captions · FTS5 porter · tags · attributes · axes · saved_views")]
+    NP[["embeddings/*.npy — image, caption, PRISM mu and log-sigma, hubness penalty"]]
+    IM[["images/ and thumbs/ on disk, served read-only under /media"]]
+    CA[["cache/ — benchmark results, keyed by protocol version and artifact stamps"]]
+  end
+
+  subgraph bt["Batch CLIs — idempotent, re-runnable, never on the request path"]
+    IG["app.ingest: download → store → thumbnail → FTS → embed → UMAP"]
+    AN["app.analyze: caption embeddings · agreement · attributes · difficulty axes"]
+    TP["app.train_prism: torch, offline, writes mu and log-sigma"]
+    EN["app.enrich: optional VLM tags through Ollama"]
+  end
+
+  AG["Optional assistant: LangGraph orchestrator → up to 2 specialist lanes in parallel → synthesizer, over local Ollama"]
+  QA["Optional self-QA: flow registry → real Chrome → pass/fail report and deck"]
+
+  UI -->|"REST /api and static /media"| RT
+  RT --> SV
+  SV --> DB
+  SV -->|"always available"| CA
+  SV -.->|"absent: keyword only, response says degraded"| IX
+  SV -.-> EM
+  IX --> NP
+  IX -.->|"positionally aligned, invalidated together"| HB
+  SV -.->|"absent: falls back to semantic"| PR
+  PR --> NP
+  AG -->|"calls the same service functions, never the DB"| SV
+  QA -.->|"drives the real UI in a browser"| UI
+  IG --> DB
+  IG --> NP
+  IG --> IM
+  AN --> DB
+  AN --> NP
+  TP --> NP
+  EN --> DB
+```
+
+Solid edges are always present; dotted edges are the optional layers, and every
+one of them has a defined behaviour when it is missing (below).
+
+## What the request path is allowed to do
+
+A request does SQLite lookups plus, at most, one text-encoder forward pass.
+Everything else -- embeddings, the UMAP projection, clusters, thumbnails,
+agreement scores, attributes, difficulty axes, PRISM heads -- is precomputed by
+a batch CLI and read as an artifact.
+
+Endpoints are deliberately sync `def`. FastAPI runs them on a threadpool and
+NumPy and torch release the GIL, while an `async def` endpoint calling blocking
+model inference would stall the event loop. The cost of that choice is that
+inference must be serialized explicitly: two threads through one SigLIP module
+on Metal either segfault or deadlock, so `Embedder` holds a lock per batch. At
+real scale the honest fix is different -- embedding moves out of the API process
+entirely, which is the first row of the seam map below.
+
+## Exact search, and the point where it stops being right
+
+Retrieval is a brute-force cosine scan in NumPy, with no approximate index.
+The numbers that justify it, measured on an M-series Mac and recorded in
+[TECHNICAL.md](TECHNICAL.md): the matrix is 8,000 x 768 float32 = 24.6 MB, a
+full masked scan costs 0.18 ms, and the SigLIP text encode it waits behind costs
+7-8 ms. The search is therefore roughly 2% of the query it belongs to, and an
+ANN index would spend a dependency, a build step and some recall to speed up the
+fastest stage of the pipeline.
+
+The crossover is measured by extrapolating the scan against that encode, not
+guessed: 0.16 ms at 8k, 1.7 ms at 100k, 4.1 ms at 250k, 18 ms at 1M vectors, so
+the scan reaches the cost of the encode at roughly **400k vectors**. That is the
+number to act on, and the substitution is local:
+`EmbeddingIndex.search` already takes an `allowed_ids` candidate mask, so FAISS
+`IndexIVFFlat`, `hnswlib` or `sqlite-vec` can be dropped in behind it without
+the API changing. Hosted vector databases are excluded by design -- everything
+here runs on one machine.
+
+## Degradation boundaries
+
+The rule, stated once: a missing capability returns 200 with the degradation
+named in the response. It never 500s, and it never produces a different number
+under the same label.
+
+| Layer | Probe | Behaviour when absent |
+| --- | --- | --- |
+| Semantic and hybrid search | `get_index()` and `get_embedder()` | ranks by BM25 instead, sets `degraded`, `mode_used: keyword`, and a message naming the command to run |
+| Boosted search | `get_prism_index(index)` | falls back to semantic, names `python -m app.train_prism`, and publishes a cosine basis rather than `prism_ll` |
+| Embedding map, duplicates, similar images | index presence | the view states what to run |
+| Caption QA, attributes, difficulty axes | analysis columns | the view states what to run |
+| Retrieval benchmark | image + caption indexes | `available: false` with the command; with no embedder it falls back to stored caption vectors and says the rows understate the shipped path |
+| Assistant | agent imports + an Ollama probe | `GET /api/chat/status` reports `available: false`; `POST /api/chat` returns 503 with setup instructions |
+| Self-QA sweep | `playwright` import | `POST /api/qa/run` returns 503 with setup instructions |
+| QA slide deck | `python-pptx` import | the Markdown report is still written and says the deck was skipped |
+| VLM tags | Ollama + a vision model | the tags are simply absent; nothing else changes |
+
+## How model and index consistency is protected
+
+Every artifact in `embeddings/` is only meaningful next to the model that
+produced it, so each consumer validates rather than assumes.
+
+- Vectors are L2-normalised at write time, so cosine similarity *is* the dot
+  product and no query-time normalisation can be forgotten.
+- The hubness penalty is positionally aligned to the image index, so it cannot
+  outlive it: `invalidate_index()` invalidates the penalty in the same call, and
+  `EmbeddingIndex.search` raises if a penalty vector does not match the score
+  vector it would be subtracted from.
+- PRISM artifacts are validated against the live index when they load. The id
+  set must match the corpus, and the `mu` dimension must match the index
+  dimension -- after a backbone swap the ids are unchanged and only the
+  dimension betrays that those vectors no longer live where the queries do.
+  Either mismatch returns `None`, which degrades the request instead of raising
+  a shape error on the first boosted query.
+- The benchmark cache key carries the protocol version, the query sample size,
+  `RRF_K`, `SEARCH_DEPTH`, the hubness constants, the PRISM artifact presence and
+  the mtimes of the embeddings and the database -- so a cached row computed under
+  a different definition can never be served as if it were current.
+- `CVDE_EMBED_MODEL` must be identical for indexing and for serving, because the
+  server encodes queries live. [../scripts/swap_backbone_so400m.sh](../scripts/swap_backbone_so400m.sh)
+  exists to do that consistently, and the guards above turn a mistake into a
+  fallback rather than a silently wrong ranking.
+
+## How train, validation and test stay apart
+
+The split is a column on `samples`, and three separate things depend on keeping
+it honest.
+
+- **PRISM** trains on train-split captions only, and its epoch and WiSE-FT
+  interpolation are selected on validation. The paired rows the Benchmark page
+  adds therefore draw a dedicated **test-split** query sample: grading it on the
+  main sample, which is ~75% train captions, would score the model on its own
+  training text.
+- **The hubness bank** is drawn from captions, and those caption ids are removed
+  from the benchmark sample, so no query is one of the captions that built the
+  correction being measured.
+- **The benchmark** excludes each query caption from the lexical index it
+  searches. Without that, keyword R@1 measured 99.1% -- pure self-retrieval. The
+  image's other four captions stay indexed: that is the published protocol, not
+  a leak.
+
+Contamination that predates all of this is reported rather than assumed away:
+`GET /api/stats/leakage` returns held-out images with a near-duplicate in
+training as a ladder over cosine thresholds, because the answer moves violently
+with the cut and a single headline figure would be an arbitrary choice dressed as
+a measurement.
+
+## How filters and ranking compose
+
+One invariant carries most of the correctness weight: **filters are applied
+inside each ranking, never after a LIMIT.**
+
+1. `build_filters` composes one parameterised `WHERE` from split, tag, VLM tag,
+   repeated attribute facets, four axis ranges, a pasted id list and an
+   agreement threshold. Column names are whitelisted identifiers; every value is
+   a bound parameter.
+2. `filtered_id_set` runs that clause once and returns the candidate mask the
+   semantic path passes to `EmbeddingIndex.search`.
+3. The keyword path splices the same clause into its FTS5 query as `AND`, before
+   `LIMIT`.
+4. Both rankings are taken to exactly `SEARCH_DEPTH` (300) and fused once by
+   reciprocal rank -- ranks, not scores, because a SigLIP cosine and a BM25 score
+   are not comparable. The depth is a hard horizon, so paging slices a window out
+   of one ranking rather than recomputing a deeper one per page.
+5. An optional axis sort re-orders the whole retrieved set in SQL, and the
+   response says so, because that replaces relevance order rather than refining
+   it.
+6. Each card carries the path that retrieved it and its absolute rank, and the
+   response names the basis of its score: `cosine`, `cosine_adj` when the hubness
+   penalty re-ranked, `rrf` for a fused rank, `prism_ll` for a log-likelihood.
+   These live on different scales and must never be read against each other.
+
+`/api/export` reuses `run_search`, so an exported slice is exactly the result set
+the user was looking at, in the same order, with the query and the embedding
+model recorded in its manifest.
+
+## Where generated state lives
+
+Everything below is created locally and gitignored; the repository carries no
+images, database, embeddings or model weights.
+
+| Path | Written by | Read by |
+| --- | --- | --- |
+| `backend/data/explorer.db` | `app.ingest`, `app.analyze`, tag and view writes | every request |
+| `backend/data/images/`, `thumbs/` | `app.ingest` | `/media` static mounts |
+| `backend/data/embeddings/*.npy` | `app.ingest`, `app.analyze`, `app.train_prism`, `app.ml.hubness` | `EmbeddingIndex`, `PrismIndex`, hubness |
+| `backend/data/cache/` | the benchmark and the hubness build | the benchmark, keyed as above |
+| `backend/data/qa/<run_id>/` | the self-QA sweep | `/media/qa` and `/api/qa/artifact` |
+| `backend/data/reports/` | assistant report generation | `/api/reports/{name}` |
+
+`POST /api/admin/reload` re-reads the indexes in place, which is how a finished
+batch job becomes visible without restarting the API.
+
+## Production scale path
+
+The closest public reference architecture for this problem is NVIDIA's
+[Cosmos Dataset Search blueprint](https://github.com/NVIDIA-Omniverse-blueprints/cosmos-dataset-search)
+(ingestion → GPU embedding service → Milvus vectors + Postgres metadata →
+API/UI over object storage). This project is intentionally that shape in
+miniature.
+
+### Seam map
+
+| Local component | Production component |
+| --- | --- |
+| `datasets/` adapter | Ingestion service consuming uploads from a message queue |
+| `Embedder` (in-process) | GPU inference service (Triton/NIM, dynamic batching) |
+| `EmbeddingIndex` (numpy) | Vector DB shards (Milvus/Qdrant), build/serve separated |
+| SQLite metadata | Postgres + lakehouse tables (Parquet/Iceberg/Lance) |
+| `ingest.py` / `analyze.py` | Orchestrated batch DAGs (Airflow/Dagster) over the lake |
+| `POST /api/admin/reload` | Index versioning + blue/green index swap with validation |
+| Benchmark tab (recall@k) | Continuous retrieval-quality SLO on golden query sets |
+| Export manifest | Versioned dataset slices with lineage (query → slice → run) |
+| LangGraph assistant | Agentic analysis layer calling the deterministic search API |
+
+### What breaks first, and the fix at each stage
+
+**~100k images.** Exact search is still ~ms; what breaks first is request-path
+embedding and in-process index reload. Fix: dedicated GPU embedding service with
+dynamic batching; an ANN index (HNSW); atomic blue/green index swap behind the
+existing reload seam.
+
+**~10M.** Single-node memory and index rebuild time break. Fix: vector DB with
+disaggregated build/serve nodes, quantization (PQ/int8); metadata to Postgres;
+embeddings to object storage (Lance/Parquet); analysis becomes orchestrated DAGs;
+recall@k and latency become monitored SLOs; embedding-drift monitoring
+(distribution shift against a reference set) joins the dashboard.
+
+**~1B+ (fleet scale, hundreds of PB).** RAM-resident indexes stop making
+economic sense. Fix: disk/object-storage-based sharded indexes (DiskANN-style,
+tiered storage), embeddings at multiple granularities (clip / frame / object),
+aggressive metadata pre-filtering to shrink the candidate space before vector
+search, result caching, and first-class data versioning so any curated slice is a
+reproducible training set. At this scale the product is no longer "search" but a
+curation platform with lineage.
+
+### Where the agents sit
+
+At every scale, LLM and VLM agents (hypothesis generation, semantic query
+expansion, failure triage) remain a *client* of the deterministic retrieval API,
+never inside it. Retrieval stays testable, reproducible and benchmarkable; agents
+add reasoning on top. That separation is this repository's assistant design, and
+it is also how production "AI data analyst" layers are built over search
+infrastructure.
+
+### References
+
+NVIDIA Cosmos Dataset Search ([repo](https://github.com/NVIDIA-Omniverse-blueprints/cosmos-dataset-search),
+[docs](https://docs.nvidia.com/cosmos/cds/latest/introduction.html)) ·
+[Milvus architecture](https://milvus.io/blog/deep-dive-1-milvus-architecture-overview.md) ·
+[Lance format](https://github.com/lance-format/lance) ·
+[Triton serving](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/architecture.html) ·
+[Hybrid search + rerank](https://qdrant.tech/documentation/advanced-tutorials/reranking-hybrid-search/) ·
+[Embedding drift monitoring](https://www.evidentlyai.com/blog/embedding-drift-detection)
