@@ -1,5 +1,3 @@
-import "../styles/active-filters.css";
-
 export interface ActiveFilterChip {
   key: string;        // stable id, e.g. "split" or "difficulty"
   label: string;      // e.g. "Split" / "Difficulty"

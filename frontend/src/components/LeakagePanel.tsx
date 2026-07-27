@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { LeakageReport } from "../api/types";
-import "../styles/leakage.css";
 
 /**
  * Held-out images that have a near-duplicate in training.

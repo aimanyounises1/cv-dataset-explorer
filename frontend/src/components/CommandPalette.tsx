@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { AXES, AttributeGroup, TagInfo } from "../api/types";
 import { useHotkey } from "../hooks/useHotkey";
-import "../styles/palette.css";
 
 type NavigateFn = ReturnType<typeof useNavigate>;
 

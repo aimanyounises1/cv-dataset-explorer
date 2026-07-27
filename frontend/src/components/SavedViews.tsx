@@ -1,5 +1,4 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import "../styles/saved-views.css";
 
 interface SavedView {
   name: string;
