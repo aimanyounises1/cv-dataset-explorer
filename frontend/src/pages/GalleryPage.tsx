@@ -61,6 +61,38 @@ export default function GalleryPage() {
     try { localStorage.setItem(DENSITY_KEY, density); } catch { /* non-essential */ }
   }, [density]);
 
+  // Scroll restore for back-nav. Position is keyed by the full query string in
+  // sessionStorage: scan position is ephemeral scan-order state like the result
+  // order, not something a pasted link should reproduce — the URL deliberately
+  // does not own it. Restored once per mount, after the first result set
+  // renders, because before that the page has no height to scroll into.
+  const scrollKey = `cvde-scroll:${searchParams.toString()}`;
+  const scrollKeyRef = useRef(scrollKey);
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { scrollKeyRef.current = scrollKey; }, [scrollKey]);
+  useEffect(() => {
+    const save = () => {
+      // Navigating away fires one last scroll event: the next page's shorter
+      // document clamps the position to 0 before this listener is removed
+      // (passive-effect cleanup runs after paint). Recording that 0 would
+      // overwrite the very position this key exists to keep, so a scroll only
+      // counts while the gallery's own DOM is still attached. Measured: the
+      // clamp event arrives with the root already disconnected.
+      if (!pageRef.current || !pageRef.current.isConnected) return;
+      try { sessionStorage.setItem(scrollKeyRef.current, String(window.scrollY)); }
+      catch { /* non-essential */ }
+    };
+    window.addEventListener("scroll", save, { passive: true });
+    return () => window.removeEventListener("scroll", save);
+  }, []);
+  const restoredScroll = useRef(false);
+  useEffect(() => {
+    if (restoredScroll.current || loading || items.length === 0) return;
+    restoredScroll.current = true;
+    const saved = Number(sessionStorage.getItem(scrollKey) ?? NaN);
+    if (Number.isFinite(saved) && saved > 0) window.scrollTo(0, saved);
+  }, [loading, items.length, scrollKey]);
+
   // Lets the fetch effect see the current list without depending on it.
   const itemsRef = useRef<SampleCard[]>([]);
   useEffect(() => { itemsRef.current = items; }, [items]);
@@ -175,7 +207,7 @@ export default function GalleryPage() {
 
 
   return (
-    <div>
+    <div ref={pageRef}>
       <div className="controls">
         <div className="search-box">
           <input
