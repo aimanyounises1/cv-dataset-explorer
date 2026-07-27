@@ -1,7 +1,7 @@
 """API response models."""
 from typing import Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AxisScores(BaseModel):
@@ -337,8 +337,12 @@ class SavedView(BaseModel):
 
 
 class SavedViewCreate(BaseModel):
-    name: str
-    query_string: str
+    # Bounded because unbounded was measured: a 200,000-character name was
+    # accepted and stored. 200 covers any label a human types; the query
+    # string ceiling sits above the ~64 KiB URL transport limit, so no view
+    # a browser can actually carry is refused.
+    name: str = Field(max_length=200)
+    query_string: str = Field(max_length=100_000)
 
 
 class ChatMessage(BaseModel):
