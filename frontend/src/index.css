@@ -138,10 +138,11 @@ body {
 /* The active marker is a left edge, not an underline: in a vertical list the
    edge reads as "you are here on this branch" rather than as a divider. */
 .rail-link.active {
-  /* The active state carries the brand rather than a neutral highlight: a
-     grey-on-grey selection would leave the blue nowhere on a page whose whole
-     centre is photographs. */
-  color: var(--text); background: var(--accent-soft);
+  /* The active state carries the brand as a solid, not a tint: this is the
+     one place the logo blue (#1f2eb8) can sit at full strength on a dark
+     page, because it is a fill under white text (9.8:1), not text on black.
+     A soft wash here would leave the brand colour nowhere but buttons. */
+  color: #ffffff; background: var(--accent-deep);
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
@@ -249,7 +250,7 @@ select:hover { border-color: var(--border-strong); }
   transition: color 0.12s, background 0.12s;
 }
 .mode-toggle button:hover { color: var(--text); }
-.mode-toggle button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.mode-toggle button.active { background: var(--accent-deep); color: #ffffff; font-weight: 600; }
 
 /* Density control — scanning 8,000 frames is a different task from reading 20. */
 .density { display: flex; align-items: center; gap: 7px; }
