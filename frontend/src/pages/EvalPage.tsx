@@ -144,7 +144,9 @@ export default function EvalPage() {
                 <th>mode</th><th>R@1</th><th>R@5</th><th>R@10</th>
                 <th title={`Mean reciprocal rank within the top ${result.depth}`}>MRR@{result.depth}</th>
                 <th title="Median rank of the correct image (lower is better)">median rank</th>
-                <th title="How many images this mode actually had to rank, averaged over queries">
+                <th title={"How many images this mode actually had to rank, averaged over queries. "
+                         + "For hybrid the figure sums the semantic pool and the mean keyword pool, "
+                         + "so an image both paths returned is counted twice — read it as an upper bound."}>
                   candidates
                 </th>
               </tr>
