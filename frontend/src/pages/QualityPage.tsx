@@ -226,6 +226,10 @@ export default function QualityPage() {
       <p className="meta-line">
         Lowest image-caption agreement first. Low score + high sibling mean ⇒ the
         caption is likely wrong; all-low ⇒ the image itself is unusual.
+        Record your call as a tag on the sample page —{" "}
+        <span className="mono">verdict:caption-error · scorer-error · ambiguous ·
+        duplicate · ok</span> — and the review session becomes a filterable,
+        exportable slice.
       </p>
       {suspects.length === 0 ? (
         <div className="empty">No scored captions to show.</div>

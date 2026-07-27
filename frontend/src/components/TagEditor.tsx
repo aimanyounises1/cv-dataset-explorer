@@ -56,7 +56,7 @@ export default function TagEditor({ sampleId, tags, onChanged }: Props) {
       </div>
       <form className="tag-input" onSubmit={(e) => void add(e)}>
         <input
-          placeholder="Add tag (e.g. edge-case, mislabeled)…"
+          placeholder="Add tag (e.g. edge-case, verdict:caption-error)…"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           disabled={busy}

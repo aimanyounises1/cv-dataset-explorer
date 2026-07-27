@@ -163,6 +163,12 @@ brush, over the captions least supported by their image](docs/screenshots/6-qual
 where annotation errors are. The threshold brush is a real filter, so a triage
 selection made here can leave the page it was made on.
 
+Verdicts are tags with a convention, not a schema: record
+`verdict:caption-error`, `verdict:scorer-error`, `verdict:ambiguous`,
+`verdict:duplicate` or `verdict:ok` on the sample page, and the review session
+becomes a filterable, exportable slice (`?tag=verdict:caption-error`) with zero
+new tables.
+
 ### Dataset profile
 
 ![Split sizes, caption length and vocabulary distributions, zero-shot attribute
