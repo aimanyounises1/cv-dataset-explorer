@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Link, Route, Routes } from "react-router-dom";
 import CommandPalette from "./components/CommandPalette";
 import LeftRail from "./components/shell/LeftRail";
 import SelectionRail from "./components/shell/SelectionRail";
@@ -41,6 +41,13 @@ export default function App() {
             <Route path="/quality" element={<QualityPage />} />
             <Route path="/eval" element={<EvalPage />} />
             <Route path="/chat" element={<ChatPage />} />
+            {/* An unmatched path must say so — on a near-black theme, an
+                empty <Routes> is indistinguishable from a crashed build. */}
+            <Route path="*" element={
+              <div className="empty">
+                Nothing at this address — <Link to="/">back to Browse</Link>.
+              </div>
+            } />
           </Routes>
         </Suspense>
       </main>
