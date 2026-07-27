@@ -88,16 +88,6 @@ export function sequential(t: number): string {
   return interpolate(VIRIDIS, t);
 }
 
-/** Cool→warm diverging ramp for a signed quantity in [0,1] centred at 0.5.
- * Deliberately avoids red/green as its endpoints. */
-const DIVERGING: readonly [number, number, number][] = [
-  [59, 118, 175], [126, 168, 204], [200, 208, 216],
-  [232, 168, 116], [214, 96, 77],
-];
-export function diverging(t: number): string {
-  return interpolate(DIVERGING, t);
-}
-
 /** Categorical palette for nominal values such as cluster id or split. */
 export const CATEGORICAL = [
   "#6f80ff", "#3fcf9a", "#f0b428", "#c792ea", "#4dd0e1",
@@ -130,12 +120,6 @@ export const HEAT_COLOR: Record<Heat, string> = {
   warm: SURFACE.amber,
   hot: "#ff9d9d",
 };
-
-/** Continuous colour for a 0-10 axis value, for canvas use. */
-export function axisColor(v: number | null | undefined): string {
-  if (v == null) return SURFACE.textFaint;
-  return sequential(v / 10);
-}
 
 // ------------------------------------------------------------- formatting ---
 

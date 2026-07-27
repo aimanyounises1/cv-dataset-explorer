@@ -12,8 +12,6 @@ all the context the UI gave it.
 """
 from typing import Any
 
-_INDENT = "  "
-
 
 def report_to_markdown(block: dict) -> str:
     if block.get("kind") != "report":

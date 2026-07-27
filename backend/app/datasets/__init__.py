@@ -18,7 +18,3 @@ def get_adapter(name: str) -> DatasetAdapter:
         return _REGISTRY[name]()
     except KeyError as exc:
         raise ValueError(f"Unknown dataset '{name}'. Available: {list(_REGISTRY)}") from exc
-
-
-def available_datasets() -> list[str]:
-    return list(_REGISTRY)

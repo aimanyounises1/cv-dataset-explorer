@@ -15,7 +15,7 @@ selection, which is the difference between "the orchestrator may consult two
 specialists" and "every question boots a browser".
 """
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from .tools import (
     attribute_coverage,
@@ -164,12 +164,6 @@ def routing_menu() -> str:
     lines.append('- "direct": greetings, or questions about what you can do — '
                  'no data access needed')
     return "\n".join(lines)
-
-
-def parallelisable() -> list[str]:
-    return [s.name for s in SPECIALISTS if s.cost == "cheap"]
-
-
 def register(spec: Specialist, *, at: int | None = None) -> None:
     """Add a specialist. Exposed so tests can prove the extension point works
     without editing this file, and so a deployment can add a lane at runtime."""
@@ -184,13 +178,3 @@ def register(spec: Specialist, *, at: int | None = None) -> None:
 def unregister(name: str) -> None:
     global SPECIALISTS
     SPECIALISTS = [s for s in SPECIALISTS if s.name != name]
-
-
-def tool_index() -> dict[str, list[str]]:
-    """Which tools each specialist can reach — used by the /agent/graph endpoint
-    so the UI can show the real topology instead of a drawing of it."""
-    return {s.name: [_tool_name(t) for t in s.tools] for s in SPECIALISTS}
-
-
-def _tool_name(t: Callable | Any) -> str:
-    return getattr(t, "name", None) or getattr(t, "__name__", str(t))

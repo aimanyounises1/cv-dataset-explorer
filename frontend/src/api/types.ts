@@ -295,20 +295,4 @@ export interface ChatStatus {
   specialists?: string[];
 }
 
-export interface AgentSpecialist {
-  name: string;
-  summary: string;
-  cost: "cheap" | "expensive";
-  tools: string[];
-}
-
-/** The live agent topology, read from the backend registry rather than drawn by
- * hand — so what the assistant page claims about itself cannot go stale. */
-export interface AgentTopology {
-  specialists: AgentSpecialist[];
-  max_parallel_lanes: number;
-  model: string;
-  lane_timeout_s: number;
-}
-
 export type SearchMode = "hybrid" | "semantic" | "keyword" | "boosted";
