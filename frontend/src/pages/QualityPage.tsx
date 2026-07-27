@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { QASelection, QASummary, SuspectCaption } from "../api/types";
 import { SURFACE, sequential } from "../lib/viz";
@@ -51,6 +51,23 @@ export default function QualityPage() {
   const [error, setError] = useState<string | null>(null);
   const [sectionErrors, setSectionErrors] = useState<string[]>([]);
   const [threshold, setThreshold] = useState<number | null>(null);
+  /* The brush is a selection, and a selection this app promises to keep in
+   * the URL: open a suspect, press Back, and the cutoff you set must still be
+   * there — as must a pasted /quality?max_agreement=… link. The computed
+   * default stays OUT of the URL: only a value the user chose is user state. */
+  const [, setSearchParams] = useSearchParams();
+  const touched = useRef(false);
+  useEffect(() => {
+    if (threshold == null || !touched.current) return;
+    const t = setTimeout(() => {
+      setSearchParams((p) => {
+        const next = new URLSearchParams(p);
+        next.set("max_agreement", String(threshold));
+        return next;
+      }, { replace: true });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [threshold, setSearchParams]);
   const [listLoading, setListLoading] = useState(false);
   const [selection, setSelection] = useState<QASelection | null>(null);
 
@@ -60,7 +77,20 @@ export default function QualityPage() {
     const fail = (what: string) => () =>
       setSectionErrors((prev) => [...prev, what]);
     api.qaSummary()
-      .then((s) => { setSummary(s); if (s.available) setThreshold(defaultThreshold(s)); })
+      .then((s) => {
+        setSummary(s);
+        if (!s.available) return;
+        // A cutoff arriving in the URL is one the user (or their colleague)
+        // chose — restore it exactly; otherwise start at the computed default.
+        const raw = new URLSearchParams(window.location.search).get("max_agreement");
+        const carried = raw !== null ? Number(raw) : NaN;
+        if (Number.isFinite(carried)) {
+          touched.current = true;
+          setThreshold(carried);
+        } else {
+          setThreshold(defaultThreshold(s));
+        }
+      })
       .catch((e) => setError(String(e)));
     api.inconsistentSamples().then(setInconsistent).catch(fail("consistency ranking"));
   }, []);
@@ -185,7 +215,7 @@ export default function QualityPage() {
               max={summary.max_agreement ?? 1}
               step={0.001}
               value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
+              onChange={(e) => { touched.current = true; setThreshold(Number(e.target.value)); }}
             />
             <span className="dist-readout" style={{ color: SURFACE.textDim }}>
               {listLoading ? "updating…" : `${suspects.length} shown`}
