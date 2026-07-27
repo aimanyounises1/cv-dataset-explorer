@@ -28,14 +28,15 @@
   --text-dim: #a2a6c8;
   --text-faint: #6f739a;
 
-  /* Mobileye's blues, both read off mobileye.com's own styles rather than
-     approximated: #1637be is what their navigation paints link text with, and
-     #7883fd is the light companion their brand gradient pairs it with — the
-     right accent for a near-black surface (6.05:1 on --bg, past AA), where
-     the core blue alone would be too dark. --accent-deep keeps that core for
-     solid fills that carry white text. */
+  /* Mobileye's blues, read off Mobileye's own assets rather than approximated.
+     #1f2eb8 is the logo itself — the single fill in new_logo.svg on
+     mobileye.com — and #7883fd is the light companion their site's brand
+     gradient pairs that blue with: the right accent for a near-black surface
+     (6.05:1 on --bg, past AA), where the logo blue alone would be too dark.
+     --accent-deep keeps the logo value for solid fills that carry white text
+     (9.8:1). */
   --accent: #7883fd;
-  --accent-deep: #1637be;
+  --accent-deep: #1f2eb8;
   --accent-soft: rgba(120, 131, 253, 0.20);
   --green: #3fcf9a;
   --amber: #f0b428;
