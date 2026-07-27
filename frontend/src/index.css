@@ -832,3 +832,20 @@ a.tag:hover { filter: brightness(1.15); }
   color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1;
 }
 .provenance-x:hover { color: var(--text); }
+
+/* ---- Similarity floor -------------------------------------------------
+   The similar grid always returns k cards, so the floor is what separates
+   "similar images" from "the least dissimilar of 8,000". Corpus-derived,
+   URL-overridable, and everything below it stays on screen: greyed context,
+   not a hidden cutoff — absence of a class is itself a finding. */
+.sim-divider {
+  display: flex; align-items: center; gap: 10px;
+  margin: 14px 0 10px;
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.02em;
+  color: var(--text-faint); cursor: help;
+}
+.sim-divider::before, .sim-divider::after {
+  content: ""; flex: 1; border-top: 1px dashed var(--border);
+}
+.grid.dim .card { opacity: 0.45; transition: opacity 0.14s; }
+.grid.dim .card:hover { opacity: 1; }
