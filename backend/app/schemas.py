@@ -345,6 +345,51 @@ class SavedViewCreate(BaseModel):
     query_string: str = Field(max_length=100_000)
 
 
+class AlbumSummary(BaseModel):
+    """One album on the shelf. `origin` is provenance — 'manual' | 'tag' |
+    'agent' — kept so an agent-proposed album stays distinguishable from the
+    user's own curation when a review flow arrives."""
+    id: int
+    name: str
+    summary: Optional[str] = None
+    category: Optional[str] = None
+    origin: str
+    item_count: int
+    # Thumb of the chosen cover, else the first item; None only when empty.
+    cover: Optional[str] = None
+    created_at: str                      # ISO-8601, UTC
+
+
+class AlbumDetail(AlbumSummary):
+    notes: Optional[str] = None
+    cover_sample_id: Optional[int] = None  # None: cover falls back to first item
+    updated_at: str
+    items: list[SampleCard] = []         # in album order
+
+
+class AlbumCreate(BaseModel):
+    # Name shares the saved-view ceiling; the prose fields are bounded because
+    # an unbounded text field was measured as a real hole once already (the
+    # 200,000-character view name).
+    name: str = Field(max_length=200)
+    summary: Optional[str] = Field(None, max_length=2000)
+    category: Optional[str] = Field(None, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+class AlbumUpdate(BaseModel):
+    """PATCH body: an absent field means "leave alone", an explicit null means
+    "clear" — the endpoint reads `model_dump(exclude_unset=True)` to keep the
+    two distinguishable."""
+    name: Optional[str] = Field(None, max_length=200)
+    summary: Optional[str] = Field(None, max_length=2000)
+    category: Optional[str] = Field(None, max_length=2000)
+    notes: Optional[str] = Field(None, max_length=2000)
+    # Bounded to SQLite's signed 64-bit range: a larger int overflows at bind
+    # time and would surface as a 500 instead of a 422.
+    cover_sample_id: Optional[int] = Field(None, ge=1, le=2**63 - 1)
+
+
 class ChatMessage(BaseModel):
     role: str                            # "user" | "assistant"
     content: str

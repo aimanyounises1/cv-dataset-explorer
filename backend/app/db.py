@@ -83,6 +83,33 @@ CREATE TABLE IF NOT EXISTS saved_views (
     query_string TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+-- Albums: first-class ordered collections. A tag is a flat label; an album is
+-- a destination — ordered membership, a cover, provenance. `origin` records
+-- who proposed it ('manual' | 'tag' | 'agent') so agent-proposed albums stay
+-- reviewable rather than indistinguishable from the user's own curation.
+-- No FK cascade on album_items: membership is deleted explicitly with its
+-- album, so the invariant holds even on connections without foreign_keys=ON.
+CREATE TABLE IF NOT EXISTS albums (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    summary TEXT,
+    category TEXT,
+    notes TEXT,
+    cover_sample_id INTEGER,              -- NULL: cover falls back to first item
+    origin TEXT NOT NULL DEFAULT 'manual',
+    position INTEGER NOT NULL DEFAULT 0,  -- ordering among albums
+    created_at TEXT NOT NULL,             -- ISO-8601 UTC, like saved_views
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS album_items (
+    album_id INTEGER NOT NULL,
+    sample_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,            -- ordering within the album
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (album_id, sample_id)
+);
+CREATE INDEX IF NOT EXISTS idx_album_items_album ON album_items(album_id, position);
 """
 
 
