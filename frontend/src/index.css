@@ -623,6 +623,29 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 .dup-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
 .dup-more { margin-top: 12px; }
 
+/* ---- Album picking ----------------------------------------------------
+   Select-mode turns a click into membership instead of navigation. The
+   picked set is transient; the tag it writes is the durable album. */
+.select-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 14px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-left: 3px solid var(--accent); border-radius: var(--radius);
+}
+.select-bar input { width: 250px; }
+.select-count {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--text-dim); white-space: nowrap;
+}
+.ghost.select-on { color: var(--accent); border-color: var(--accent); }
+.grid .card.picked { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pick-mark {
+  position: absolute; top: 6px; right: 6px; width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-deep); color: #ffffff;
+  border-radius: 50%; font-size: 13px;
+}
+
 /* Map */
 .map-wrap { position: relative; }
 .map-canvas {

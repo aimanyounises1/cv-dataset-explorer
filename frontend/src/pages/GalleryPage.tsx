@@ -64,6 +64,49 @@ export default function GalleryPage() {
     useState<{ name: string; items: SampleCard[] } | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  /* An album is a tag made by hand-picking rather than by a query — same
+   * storage, same filters, same export, so "album" adds no schema. Select
+   * mode only changes what a click means; the picked set is transient and
+   * the tag it writes is the durable thing. */
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [albumName, setAlbumName] = useState("");
+  const [albumBusy, setAlbumBusy] = useState(false);
+  const [knownTags, setKnownTags] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!selecting) return;
+    // Existing tags feed the datalist so "add to an existing album" is one
+    // keystroke, not a memory test.
+    api.tags().then((ts) => setKnownTags(ts.map((t) => t.name))).catch(() => {});
+  }, [selecting]);
+
+  const togglePick = (id: number) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const saveAlbum = () => {
+    const name = albumName.trim();
+    if (!name || picked.size === 0) return;
+    setAlbumBusy(true);
+    setError(null);
+    api.bulkTag([...picked], name)
+      .then(() => {
+        // Land inside the album: the tag-filtered gallery, where the set is
+        // revisitable, shareable and exportable like any other slice.
+        setSelecting(false);
+        setPicked(new Set());
+        setAlbumName("");
+        setInput("");
+        setParams({ tag: name, q: "", page: "" });
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setAlbumBusy(false));
+  };
 
   const runImageSearch = (file: Blob & { name?: string }) => {
     if (!file.type.startsWith("image/")) return;
@@ -308,7 +351,36 @@ export default function GalleryPage() {
             ))}
           </div>
         </div>
+        <button className={`ghost${selecting ? " select-on" : ""}`}
+                aria-pressed={selecting}
+                onClick={() => { setSelecting(!selecting); setPicked(new Set()); }}
+                title="Hand-pick images into an album — a tag you can filter by, revisit and export">
+          {selecting ? "Done picking" : "Select"}
+        </button>
       </div>
+
+      {selecting && (
+        <div className="select-bar">
+          <span className="select-count" aria-live="polite">
+            {picked.size} picked
+          </span>
+          <input list="album-names" value={albumName}
+                 onChange={(e) => setAlbumName(e.target.value)}
+                 placeholder="Album name (stored as a tag)…"
+                 aria-label="Album name" />
+          <datalist id="album-names">
+            {knownTags.map((t) => <option key={t} value={t} />)}
+          </datalist>
+          <button className="primary" disabled={!picked.size || !albumName.trim() || albumBusy}
+                  onClick={saveAlbum}>
+            {albumBusy ? "Saving…" : `Add ${picked.size || ""} to album`}
+          </button>
+          <button className="ghost" disabled={!picked.size}
+                  onClick={() => setPicked(new Set())}>
+            Clear
+          </button>
+        </div>
+      )}
 
 
 
@@ -373,7 +445,9 @@ export default function GalleryPage() {
           <div className="grid"
                style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
             {imageQuery.items.map((s) => (
-              <ImageCard key={s.id} sample={s} scoreBasis="cosine" />
+              <ImageCard key={s.id} sample={s} scoreBasis="cosine"
+                         selectMode={selecting} selected={picked.has(s.id)}
+                         onToggleSelect={togglePick} />
             ))}
           </div>
         </>
@@ -402,7 +476,9 @@ export default function GalleryPage() {
             page 3 is rank 121, not rank 1. */}
         {items.map((s, i) => (
           <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
-                     query={query} mode={mode} rank={i + 1} />
+                     query={query} mode={mode} rank={i + 1}
+                     selectMode={selecting} selected={picked.has(s.id)}
+                     onToggleSelect={togglePick} />
         ))}
       </div>
 

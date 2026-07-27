@@ -46,6 +46,12 @@ interface Props {
    * result set. The card cannot infer any of the three, and without them the
    * sample page cannot say why the researcher is looking at this frame. */
   query?: string;
+  /** Gallery select-mode: clicking toggles membership in the picked set
+   * instead of navigating. The card stays a link underneath, so middle-click
+   * and "open in new tab" keep working even while picking. */
+  selectMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: number) => void;
   mode?: string;
   rank?: number;
 }
@@ -55,7 +61,8 @@ interface Props {
  * contain a comma; a pipe cannot appear in a term the tokenizer produced. */
 const TERM_SEP = "|";
 
-export default function ImageCard({ sample, scoreBasis, query, mode, rank }: Props) {
+export default function ImageCard({ sample, scoreBasis, query, mode, rank,
+                                    selectMode, selected, onToggleSelect }: Props) {
   const caption = sample.match_caption ?? sample.caption ?? sample.filename;
   const basis = scoreBasis ?? undefined;
 
@@ -119,12 +126,18 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank }: Pro
     }
   }
   return (
-    <Link className="card" to={search ? `/samples/${sample.id}?${search}` : `/samples/${sample.id}`}>
+    <Link className={`card${selected ? " picked" : ""}`}
+          to={search ? `/samples/${sample.id}?${search}` : `/samples/${sample.id}`}
+          aria-pressed={selectMode ? Boolean(selected) : undefined}
+          onClick={selectMode
+            ? (e) => { e.preventDefault(); onToggleSelect?.(sample.id); }
+            : undefined}>
       <div className="card-media">
         <img src={sample.thumb_url} alt={caption} loading="lazy" />
         {/* Frame number, as on a contact sheet — cite or find a sample without
             opening it. */}
         <span className="frame-no">{sample.id}</span>
+        {selected && <span className="pick-mark" aria-hidden="true">✓</span>}
       </div>
       <div className="card-body">
         <div className="card-caption" title={caption}>
