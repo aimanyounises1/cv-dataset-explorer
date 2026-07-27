@@ -1,0 +1,30 @@
+version: 2
+
+# Monthly and grouped, deliberately. This is a local research tool, not a
+# deployed service, so a weekly stream of individual bumps would cost more review
+# than it buys -- and the heavy pins (torch, transformers) are the ones a bump can
+# quietly change retrieval numbers with, which is a re-measurement, not an update.
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      backend:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      frontend:
+        patterns: ["*"]
+
+  # The workflow pins actions by major version; this keeps that honest.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
