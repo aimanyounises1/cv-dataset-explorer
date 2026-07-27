@@ -42,11 +42,60 @@ const PATH_LABEL: Record<string, string> = { keyword: "kw", semantic: "sem", boo
 interface Props {
   sample: SampleCard;
   scoreBasis?: string | null;
+  /** The query and mode that produced this card, and its 1-based place in the
+   * result set. The card cannot infer any of the three, and without them the
+   * sample page cannot say why the researcher is looking at this frame. */
+  query?: string;
+  mode?: string;
+  rank?: number;
 }
 
-export default function ImageCard({ sample, scoreBasis }: Props) {
+/** Query terms go into one parameter, separated by a pipe rather than a comma,
+ * because a matched term is a slice of caption text and can legitimately
+ * contain a comma; a pipe cannot appear in a term the tokenizer produced. */
+const TERM_SEP = "|";
+
+export default function ImageCard({ sample, scoreBasis, query, mode, rank }: Props) {
   const caption = sample.match_caption ?? sample.caption ?? sample.filename;
   const basis = scoreBasis ?? undefined;
+
+  /** Clicking a result used to throw away every reason it was on screen. The
+   * link carries them instead, so the sample page can answer "why am I looking
+   * at this?" from the URL alone and the answer survives a bookmark or a paste.
+   * URLSearchParams does the escaping, which a query full of spaces and quotes
+   * needs. Grids that are not result sets (the similar-images strip, a chat
+   * transcript) pass nothing and keep a bare link: what they are is already
+   * visible around them, and `rank` is what marks a caller as ranked. */
+  const provenance = new URLSearchParams();
+  if (rank != null) {
+    if (query) {
+      provenance.set("src", "search");
+      provenance.set("q", query);
+      if (mode) provenance.set("mode", mode);
+      provenance.set("rank", String(rank));
+      // The same three decimals the badge below shows, so a banner reading the
+      // URL cannot contradict the card that was clicked.
+      // The basis travels with the score, always. A bare `score=0.016` is
+      // uninterpretable, and it cannot be recovered from `mode`: `semantic`
+      // yields "cosine" or "cosine_adj" depending on whether the hubness
+      // penalty loaded for that request -- runtime state, not mode -- and
+      // `keyword` yields no basis at all. Deriving the label would relabel an
+      // adjusted cosine as a plain one, which is the mistake SCORE_LABEL above
+      // exists to prevent.
+      if (sample.score != null && basis) {
+        provenance.set("score", sample.score.toFixed(3));
+        provenance.set("basis", basis);
+      }
+      const terms = sample.matched_terms?.filter((t) => t.length > 0) ?? [];
+      if (terms.length > 0) provenance.set("terms", terms.join(TERM_SEP));
+    } else {
+      // No query means the ordering came from a filter or an id list, not a
+      // ranking, so the search-only parameters would be lies. An empty `q=`
+      // would read as "searched for nothing", which is worse than silence.
+      provenance.set("src", "browse");
+    }
+  }
+  const search = provenance.toString();
 
   /** The one axis worth naming in text. The sparkline shows all four; spelling
    * out the highest gives the eye somewhere to land without reading the chart. */
@@ -70,7 +119,7 @@ export default function ImageCard({ sample, scoreBasis }: Props) {
     }
   }
   return (
-    <Link className="card" to={`/samples/${sample.id}`}>
+    <Link className="card" to={search ? `/samples/${sample.id}?${search}` : `/samples/${sample.id}`}>
       <div className="card-media">
         <img src={sample.thumb_url} alt={caption} loading="lazy" />
         {/* Frame number, as on a contact sheet — cite or find a sample without
