@@ -116,7 +116,7 @@
   background: var(--bg-inset); border: 1px solid var(--border);
   border-radius: 999px; padding: 3px 11px 3px 8px;
   color: var(--text-dim); font-family: var(--font-sans); font-size: 11.5px;
-  cursor: pointer; transition: color 0.12s, border-color 0.12s, opacity 0.12s;
+  cursor: pointer; transition: color var(--t-quick), border-color var(--t-quick), opacity var(--t-quick);
 }
 .vblock-legend-item:hover { color: var(--text); border-color: var(--border-strong); }
 .vblock-legend-item.off { opacity: 0.45; text-decoration: line-through; }
@@ -147,7 +147,7 @@
   font-family: var(--font-sans); font-size: 11.5px; color: var(--text-dim);
   text-align: left;
 }
-.vblock-value-link { cursor: pointer; transition: background 0.12s, color 0.12s; }
+.vblock-value-link { cursor: pointer; transition: background var(--t-quick), color var(--t-quick); }
 .vblock-value-link:hover { background: var(--bg-hover); color: var(--text); }
 .vblock-value-link:hover .vblock-value-label { color: var(--accent); }
 .vblock-value-label { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -240,7 +240,7 @@
   padding: 7px 11px; background: none; border: none;
   font-family: var(--font-sans); font-size: 10.5px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--text-faint); cursor: pointer; transition: color 0.12s;
+  color: var(--text-faint); cursor: pointer; transition: color var(--t-quick);
 }
 .vblock-table th.num .vblock-th-sort { justify-content: flex-end; }
 .vblock-th-sort:hover { color: var(--text); }
@@ -275,13 +275,13 @@
 }
 button.vstat-card {
   cursor: pointer; width: 100%;
-  transition: border-color 0.12s, background 0.12s;
+  transition: border-color var(--t-quick), background var(--t-quick);
 }
 button.vstat-card:hover { border-color: var(--accent); background: var(--bg-hover); }
 .vstat-go {
   display: block; margin-top: 7px;
   font-family: var(--font-mono); font-size: 10px; color: var(--text-faint);
-  transition: color 0.12s;
+  transition: color var(--t-quick);
 }
 button.vstat-card:hover .vstat-go { color: var(--accent); }
 
@@ -304,7 +304,7 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
 .vflow { display: block; margin: 0 auto; }
 .vflow text { font-family: var(--font-sans); }
 .vflow-edge-label text { fill: var(--text-faint); font-family: var(--font-mono); }
-.vflow-node rect { transition: fill-opacity 0.12s, stroke-width 0.12s; }
+.vflow-node rect { transition: fill-opacity var(--t-quick), stroke-width var(--t-quick); }
 .vflow-node.drillable { cursor: pointer; }
 .vflow-node.drillable:hover rect { fill-opacity: 0.3; stroke-width: 2; }
 .vflow-node.drillable:focus-visible {
@@ -441,7 +441,7 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
   display: block; position: relative; margin-top: 9px; padding: 0;
   background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
   overflow: hidden; cursor: pointer; line-height: 0;
-  transition: border-color 0.12s;
+  transition: border-color var(--t-quick);
 }
 .vqa-shot:hover { border-color: var(--accent); }
 .vqa-shot img { display: block; width: 240px; max-width: 100%; height: auto; }
@@ -520,7 +520,7 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
 .vqa-lightbox-close {
   background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
   color: var(--text-dim); font-family: var(--font-sans); font-size: 12px;
-  padding: 4px 12px; cursor: pointer; transition: color 0.12s, border-color 0.12s;
+  padding: 4px 12px; cursor: pointer; transition: color var(--t-quick), border-color var(--t-quick);
 }
 .vqa-lightbox-close:hover { color: var(--text); border-color: var(--border-strong); }
 .vqa-lightbox-inner img {
