@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { AXES, AttributeGroup, TagInfo } from "../api/types";
 import { useHotkey } from "../hooks/useHotkey";
+import { SCALARS } from "../hooks/useSelection";
 
 type NavigateFn = ReturnType<typeof useNavigate>;
 
@@ -211,7 +212,9 @@ function downloadCurrentView(pathname: string, search: string): void {
     out.set("mode", params.get("mode") || "hybrid");
     out.set("top_k", "500");
   }
-  for (const k of ["split", "tag", "vlm_tag", "ids", "max_agreement"]) {
+  // The selection's own vocabulary, not a copy: a hand-maintained list here
+  // silently dropped `cluster`, exporting the whole corpus labelled as a slice.
+  for (const k of SCALARS) {
     const v = params.get(k);
     if (v) out.set(k, v);
   }

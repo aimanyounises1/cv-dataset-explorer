@@ -30,9 +30,12 @@ import type { ActiveFilterChip } from "../components/ActiveFilters";
  * used to be private to GalleryPage has to be reachable from anywhere.
  */
 
-/** Everything that narrows the corpus. `q`/`mode` are query, not membership. */
-const SCALARS = ["split", "tag", "vlm_tag", "ids", "max_agreement",
-                 "cluster"] as const;
+/** Everything that narrows the corpus. `q`/`mode` are query, not membership.
+ * Exported so other export paths (the command palette) serialize from this
+ * one vocabulary — a hand-copied key list over there is how `cluster` once
+ * went missing from "Download current view" and 8,000 rows shipped as 552. */
+export const SCALARS = ["split", "tag", "vlm_tag", "ids", "max_agreement",
+                        "cluster"] as const;
 
 /** Parameters that may appear more than once, intersected server-side.
  *
