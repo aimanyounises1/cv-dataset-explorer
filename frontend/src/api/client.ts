@@ -41,6 +41,17 @@ export const api = {
   similar: (id: number | string) => get<SampleCard[]>(`/samples/${id}/similar`),
   search: (q: string, mode: SearchMode, filters: Params, signal?: AbortSignal) =>
     get<SearchResponse>("/search", { q, mode, ...filters }, signal),
+  /** Image-to-image retrieval. Raw bytes, not multipart: one file needs no
+   * form envelope, and the server carries no form parser. */
+  searchByImage: async (file: Blob, topK = 24): Promise<SampleCard[]> => {
+    const res = await fetch(`/api/search/by-image?top_k=${topK}`, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    return res.json() as Promise<SampleCard[]>;
+  },
 
   overview: () => get<StatsOverview>("/stats/overview"),
   captionStats: () => get<CaptionStats>("/stats/captions"),
