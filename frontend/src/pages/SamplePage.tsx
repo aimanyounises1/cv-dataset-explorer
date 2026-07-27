@@ -75,7 +75,26 @@ export default function SamplePage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [neighbours, navigate]);
 
-  if (error) return <div className="error">{error}</div>;
+  if (error) {
+    // A raw `Error: 404: {"detail":...}` on an otherwise empty pane reads as
+    // a crash. The missing-sample case gets a human sentence and a way back;
+    // genuinely unexpected errors keep the raw string, which is then a clue.
+    const missing = error.includes("404");
+    return (
+      <div>
+        <button className="ghost back-btn"
+                onClick={() => window.history.length > 1 ? navigate(-1) : navigate("/")}>
+          ← Back
+        </button>
+        <div className="error">
+          {missing
+            ? `Sample ${id} does not exist — the id may be mistyped, or the link
+               may predate a re-ingest of the dataset.`
+            : error}
+        </div>
+      </div>
+    );
+  }
   if (!detail) return <div className="loading">Loading…</div>;
 
   const back = () =>
