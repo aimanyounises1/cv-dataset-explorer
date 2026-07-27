@@ -233,10 +233,28 @@ export default function SamplePage() {
               neighbours but not filter, sort or export them. The gallery already
               accepts an explicit id list, so hand it over — same construction the
               map's lasso uses. */}
-          {similar.length > 0 && (
+          {/* The hand-off respects the floor it sits under: the primary link
+              carries only the ids the page itself called a class — promoting
+              the greyed context into a slice would feed padding straight into
+              any export made there. The full set stays one click away,
+              labelled as what it is. */}
+          {similar.length > 0 && above.length > 0 && (
+            <Link className="open-all" to={`/?ids=${above.map((s) => s.id).join(",")}`}
+                  title="Open the neighbours above the similarity floor in the gallery — the class, without the greyed context">
+              Open {above.length} above floor in gallery →
+            </Link>
+          )}
+          {similar.length > 0 && above.length > 0 && below.length > 0 && (
+            <Link className="open-all open-all-dim"
+                  to={`/?ids=${similar.map((s) => s.id).join(",")}`}
+                  title="Include the below-floor context too — remember it travels into any export made there">
+              all {similar.length}
+            </Link>
+          )}
+          {similar.length > 0 && above.length === 0 && (
             <Link className="open-all" to={`/?ids=${similar.map((s) => s.id).join(",")}`}
-                  title="Open exactly these neighbours in the gallery, where they can be filtered, sorted and exported">
-              Open all {similar.length} in gallery →
+                  title="Every neighbour here is below the similarity floor — this opens context, not a class">
+              Open all {similar.length} (below floor) in gallery →
             </Link>
           )}
         </span>
