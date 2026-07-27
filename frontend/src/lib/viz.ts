@@ -32,7 +32,7 @@ export const SURFACE = {
   text: "#eceefa",
   textDim: "#a2a6c8",
   textFaint: "#6f739a",
-  accent: "#6f80ff",
+  accent: "#7883fd",
   green: "#3fcf9a",
   amber: "#f0b428",
   red: "#ff7f7a",
@@ -90,7 +90,7 @@ export function sequential(t: number): string {
 
 /** Categorical palette for nominal values such as cluster id or split. */
 export const CATEGORICAL = [
-  "#6f80ff", "#3fcf9a", "#f0b428", "#c792ea", "#4dd0e1",
+  "#7883fd", "#3fcf9a", "#f0b428", "#c792ea", "#4dd0e1",
   "#ff9d9d", "#aed581", "#ffb74d", "#90a4ae", "#b39ddb",
   "#f48fb1", "#80cbc4",
 ] as const;
