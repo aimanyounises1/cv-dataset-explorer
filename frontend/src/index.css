@@ -159,6 +159,32 @@ body {
   box-shadow: inset 3px 0 0 var(--accent);
 }
 
+/* Collapsed library rail: geometry, not navigation loss. Every link stays in
+   the DOM as a one-letter keycap with the full label in its tooltip, so
+   collapsing never remounts the nav — and the width var on the root element
+   is what the app grid actually reads. */
+:root[data-rail="min"] { --rail-l: 56px; }
+.rail-toggle {
+  margin-left: auto; flex-shrink: 0;
+  background: none; border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint); cursor: pointer;
+  font-size: 12px; line-height: 1; padding: 2px 6px;
+  transition: color var(--t-quick), border-color var(--t-quick);
+}
+.rail-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.rail-link-min { display: none; }
+.rail-l.collapsed .rail-brand { padding-left: 10px; padding-right: 10px; }
+.rail-l.collapsed .rail-brand-name,
+.rail-l.collapsed .rail-group-title,
+.rail-l.collapsed .rail-library,
+.rail-l.collapsed .rail-filters,
+.rail-l.collapsed .rail-foot { display: none; }
+.rail-l.collapsed .rail-link-label { display: none; }
+.rail-l.collapsed .rail-link-min { display: block; text-align: center; }
+.rail-l.collapsed .rail-groups { padding: 0 8px; }
+.rail-l.collapsed .rail-link { padding: 7px 0; }
+
 .rail-foot {
   padding: 12px 16px 0; margin-top: 10px;
   border-top: 1px solid var(--border);
@@ -228,8 +254,15 @@ body {
      item it stretched the header to ~250px of dead space while itself sitting
      off-screen to the right, reachable only by an unindicated sideways
      scroll. Until a real phone layout exists for it, the strip holds
-     navigation only — filters still arrive via the URL and the palette. */
-  .rail-l .rail-filters { display: none; }
+     navigation only — filters still arrive via the URL and the palette.
+     The library panel and the collapse toggle follow the same rule: a
+     <details> flex item stretches the strip exactly the way filters did,
+     and collapsing a horizontal strip means hiding the nav, so a desktop
+     "collapsed" preference must not follow the user onto a phone. */
+  .rail-l .rail-filters, .rail-l .rail-library, .rail-toggle { display: none; }
+  .rail-l.collapsed .rail-brand-name { display: inline; }
+  .rail-l.collapsed .rail-link-label { display: inline; }
+  .rail-l.collapsed .rail-link-min { display: none; }
   .rail-r {
     position: static; width: auto; max-height: none;
     border-left: none; border-top: 1px solid var(--border);

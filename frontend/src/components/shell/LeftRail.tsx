@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import FilterPanel from "./FilterPanel";
+import SavedViews from "../SavedViews";
 
 /**
  * Navigation grouped by the job you came to do, not by the table behind it.
@@ -65,8 +66,25 @@ function corpusSize() {
   return overviewPromise;
 }
 
+const RAIL_KEY = "cvde-rail";
+
 export default function LeftRail() {
   const [total, setTotal] = useState<number | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  /* Collapsed is workspace geometry, not shareable state — localStorage like
+   * the gallery density, never the URL. The state is mirrored onto the root
+   * element so the app grid's column width follows without prop-drilling
+   * through App. */
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem(RAIL_KEY) === "min");
+  useEffect(() => {
+    try { localStorage.setItem(RAIL_KEY, collapsed ? "min" : "full"); }
+    catch { /* non-essential */ }
+    if (collapsed) document.documentElement.dataset.rail = "min";
+    else delete document.documentElement.dataset.rail;
+  }, [collapsed]);
+
   useEffect(() => {
     let live = true;
     corpusSize().then((o) => { if (live && o) setTotal(o.total_samples); });
@@ -74,10 +92,15 @@ export default function LeftRail() {
   }, []);
 
   return (
-    <nav className="rail-l" aria-label="Sections">
+    <nav className={`rail-l${collapsed ? " collapsed" : ""}`} aria-label="Sections">
       <div className="rail-brand">
         <span className="brand-mark" aria-hidden="true">◈</span>
         <span className="rail-brand-name">CV Dataset Explorer</span>
+        <button className="rail-toggle" aria-expanded={!collapsed}
+                title={collapsed ? "Expand the library rail" : "Collapse the library rail"}
+                onClick={() => setCollapsed(!collapsed)}>
+          {collapsed ? "»" : "«"}
+        </button>
       </div>
 
       <div className="rail-groups">
@@ -85,14 +108,32 @@ export default function LeftRail() {
           <div className="rail-group" key={g.title}>
             <div className="eyebrow rail-group-title">{g.title}</div>
             {g.items.map((it) => (
-              <NavLink key={it.to} to={it.to} end={it.end} title={it.hint}
+              <NavLink key={it.to} to={it.to} end={it.end}
+                       title={collapsed ? `${it.label} — ${it.hint}` : it.hint}
                        className={({ isActive }) =>
                          `rail-link${isActive ? " active" : ""}`}>
-                {it.label}
+                {/* Both spans always render; CSS swaps them, so collapsing
+                    never remounts the nav or loses keyboard focus. */}
+                <span className="rail-link-label">{it.label}</span>
+                <span className="rail-link-min" aria-hidden="true">{it.label[0]}</span>
               </NavLink>
             ))}
           </div>
         ))}
+
+        {/* The library lives with navigation, not with the selection: a saved
+            view is how you COME BACK, so it must be reachable when nothing is
+            selected yet — which is exactly when the selection rail is absent.
+            Saving captures the gallery's query string (the only route whose
+            search params are a filter set); restoring navigates there. */}
+        <div className="rail-group rail-library">
+          <div className="eyebrow rail-group-title">Library</div>
+          <SavedViews
+            current={location.pathname === "/" ? location.search : ""}
+            onRestore={(qs) => navigate(qs ? `/?${qs}` : "/")}
+          />
+        </div>
+
         <FilterPanel />
       </div>
 
