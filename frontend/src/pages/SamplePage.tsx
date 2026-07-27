@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { SampleCard, SampleDetail } from "../api/types";
 import AxisBreakdown from "../components/AxisBreakdown";
@@ -8,6 +8,15 @@ import ImageCard from "../components/ImageCard";
 import ProvenanceBanner from "../components/ProvenanceBanner";
 import TagEditor from "../components/TagEditor";
 import { useNeighbours } from "../hooks/useResultOrder";
+
+/** The 10th percentile of nearest-neighbour similarity across this corpus: for
+ * every image, the cosine to its closest other image, self excluded — measured
+ * offline from the shipped embeddings (8,000 × SigLIP 2). The similar grid
+ * always returns k cards, so k alone cannot tell a real class from padding;
+ * this is the line between "similar images" and "the least dissimilar of
+ * 8,000". Overridable per-URL with ?min_sim= (0 disables). Recompute if the
+ * embedding model changes. */
+const DEFAULT_SIM_FLOOR = 0.76;
 
 function AgreementBadge({ value }: { value?: number | null }) {
   if (value == null) return null;
@@ -23,10 +32,13 @@ function AgreementBadge({ value }: { value?: number | null }) {
 export default function SamplePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [detail, setDetail] = useState<SampleDetail | null>(null);
   const [similar, setSimilar] = useState<SampleCard[]>([]);
   const [similarError, setSimilarError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [gapBusy, setGapBusy] = useState(false);
+  const [gapError, setGapError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     if (!id) return;
@@ -68,6 +80,25 @@ export default function SamplePage() {
 
   const back = () =>
     window.history.length > 1 ? navigate(-1) : navigate("/");
+
+  // The floor arrives from the URL so a pasted link carries the same cutoff its
+  // author saw; anything unparseable falls back to the measured default rather
+  // than to "no floor", which would silently upgrade padding to neighbours.
+  const rawFloor = searchParams.get("min_sim");
+  const parsedFloor = rawFloor === null ? NaN : Number(rawFloor);
+  const floor = Number.isFinite(parsedFloor) && parsedFloor >= 0 && parsedFloor <= 1
+    ? parsedFloor : DEFAULT_SIM_FLOOR;
+  const above = similar.filter((s) => s.score == null || s.score >= floor);
+  const below = similar.filter((s) => s.score != null && s.score < floor);
+
+  const tagCoverageGap = () => {
+    setGapBusy(true);
+    setGapError(null);
+    api.addTag(detail.id, "coverage-gap")
+      .then(refresh)
+      .catch((e) => setGapError(e instanceof Error ? e.message : "Failed to tag"))
+      .finally(() => setGapBusy(false));
+  };
 
   return (
     <div>
@@ -188,9 +219,42 @@ export default function SamplePage() {
         {similar.some((s) => s.axes) && <AxisLegend />}
       </div>
       {similarError && <div className="notice">{similarError}</div>}
-      <div className="grid">
-        {similar.map((s) => <ImageCard key={s.id} sample={s} scoreBasis="cosine" />)}
-      </div>
+      {/* A singleton is a finding, not an empty state: when nothing clears the
+          floor, say so and make the gap tangible — the tag turns "I noticed a
+          hole" into a filterable, exportable slice via the existing tag API. */}
+      {similar.length > 0 && above.length === 0 && (
+        <div className="notice">
+          No related cases above the similarity floor. This looks like a
+          singleton — possible coverage gap.{" "}
+          {detail.tags.includes("coverage-gap") ? (
+            <strong>Tagged coverage-gap.</strong>
+          ) : (
+            <button className="ghost" onClick={tagCoverageGap} disabled={gapBusy}
+                    title="Tag this sample 'coverage-gap' so the gap becomes a filterable, exportable slice">
+              Tag as coverage-gap
+            </button>
+          )}
+          {gapError && <span style={{ marginLeft: 8, fontSize: 12 }}>{gapError}</span>}
+        </div>
+      )}
+      {above.length > 0 && (
+        <div className="grid">
+          {above.map((s) => <ImageCard key={s.id} sample={s} scoreBasis="cosine" />)}
+        </div>
+      )}
+      {below.length > 0 && (
+        <>
+          <div className="sim-divider"
+               title={"The floor is the 10th percentile of nearest-neighbour similarity "
+                    + "across this corpus, computed offline from the shipped embeddings. "
+                    + "Override with ?min_sim= in the URL (0 disables)."}>
+            below similarity floor {Number(floor.toFixed(3))} — shown for context
+          </div>
+          <div className="grid dim">
+            {below.map((s) => <ImageCard key={s.id} sample={s} scoreBasis="cosine" />)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
