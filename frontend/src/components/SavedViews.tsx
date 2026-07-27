@@ -4,6 +4,10 @@ interface SavedView {
   name: string;
   query_string: string;
   created_at: string;
+  /** Warning text when the view was saved under a different embedding model or
+   * corpus than the one now loaded; null/absent when the environments match —
+   * or when the view predates fingerprinting and there is nothing to compare. */
+  stale_env?: string | null;
 }
 
 interface Props {
@@ -146,6 +150,11 @@ export default function SavedViews({ current, onRestore }: Props) {
                 onClick={() => onRestore(v.query_string)}
               >
                 <span className="saved-view-name">{v.name}</span>
+                {/* Non-blocking by design: the view still restores — this only
+                    says its results may not reproduce, and why is in the title. */}
+                {v.stale_env && (
+                  <span className="saved-view-stale" title={v.stale_env}>env differs</span>
+                )}
                 <span className="saved-view-date">{shortDate(v.created_at)}</span>
               </button>
               <button

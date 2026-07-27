@@ -329,6 +329,11 @@ class SavedView(BaseModel):
     name: str
     query_string: str
     created_at: str                      # ISO-8601, UTC
+    # A human-readable warning when the view was saved under a different
+    # embedding model or corpus than the one now loaded. None when the
+    # environments match — or when the view predates fingerprinting and there
+    # is nothing to compare, in which case silence is the honest answer.
+    stale_env: Optional[str] = None
 
 
 class SavedViewCreate(BaseModel):

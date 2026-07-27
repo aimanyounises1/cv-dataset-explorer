@@ -332,6 +332,8 @@ def test_export_manifest(client):
     assert body["count"] == 1
     assert body["samples"][0]["captions"]
     assert body["filters"]["embed_model"]  # the slice records how to regenerate it
+    assert body["filters"]["corpus_samples"] >= 1
+    assert body["filters"]["embeddings_fingerprint"]  # pins which embeddings scored it
 
 
 ORIGINAL_CSV_HEADER = "id,filename,split,captions,tags"

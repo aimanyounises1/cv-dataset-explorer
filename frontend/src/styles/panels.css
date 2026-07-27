@@ -535,6 +535,19 @@
   color: var(--text-faint);
 }
 
+/* Saved under a different embedding model or corpus than the one now loaded. */
+.saved-view-stale {
+  align-self: center;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--amber);
+  border: 1px solid rgba(240, 180, 41, 0.38);
+  border-radius: 999px;
+  padding: 0 6px;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .saved-view-delete {
   background: none;
   border: none;

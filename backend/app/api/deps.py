@@ -1,11 +1,12 @@
 """Shared FastAPI dependencies and row helpers."""
+import hashlib
 import json
 import sqlite3
 from typing import Iterator, Optional, Union
 
 from fastapi import HTTPException, Query
 
-from .. import db
+from .. import config, db
 from ..db import AXES
 from ..schemas import AxisScores, SampleCard
 
@@ -17,6 +18,24 @@ SORT_KEYS = tuple(f"{a}_{d}" for a in AXES for d in ("asc", "desc"))
 def get_conn() -> Iterator[sqlite3.Connection]:
     with db.get_db() as conn:
         yield conn
+
+
+def embeddings_fingerprint() -> str:
+    """Size+mtime of the embedding artifacts, hashed short.
+
+    Deliberately not the database file: SQLite's mtime moves on every tag
+    edit, which would cry "environment differs" over saved views whose results
+    are identical. The embedding files change exactly when a re-ingest or
+    re-embed changes what a query returns — the event worth catching.
+    """
+    parts = []
+    for name in ("image_embeddings.npy", "caption_embeddings.npy"):
+        try:
+            st = (config.EMB_DIR / name).stat()
+            parts.append(f"{name}:{st.st_size}:{int(st.st_mtime)}")
+        except OSError:
+            parts.append(f"{name}:absent")
+    return hashlib.sha1(";".join(parts).encode()).hexdigest()[:12]
 
 
 def thumb_url(filename: str) -> str:
