@@ -1,7 +1,7 @@
 """User tags (curation) + VLM tag facets."""
 import sqlite3
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from ..schemas import TagInfo
 from .deps import get_conn
@@ -18,7 +18,8 @@ def list_tags(conn: sqlite3.Connection = Depends(get_conn)):
 
 
 @router.get("/vlm-tags", response_model=list[TagInfo])
-def list_vlm_tags(limit: int = 40, conn: sqlite3.Connection = Depends(get_conn)):
+def list_vlm_tags(limit: int = Query(40, ge=1, le=1000),
+                  conn: sqlite3.Connection = Depends(get_conn)):
     rows = conn.execute(
         "SELECT tag AS name, COUNT(*) AS n FROM vlm_tags GROUP BY tag "
         "ORDER BY n DESC LIMIT ?", (limit,))
@@ -50,15 +51,22 @@ def bulk_tag(sample_ids: list[int] = Body(...), name: str = Body(...),
         raise HTTPException(400, "Empty tag")
     if not sample_ids:
         raise HTTPException(400, "No samples selected")
+    # More ids than the corpus could ever hold is a runaway client, not a
+    # selection; a 1M-id body used to be accepted and fed to executemany.
+    if len(sample_ids) > 100_000:
+        raise HTTPException(400, f"Too many samples: {len(sample_ids):,}. "
+                                 "The limit is 100,000.")
     conn.execute("INSERT OR IGNORE INTO tags(name) VALUES (?)", (name,))
     tag_id = conn.execute("SELECT id FROM tags WHERE name = ?", (name,)).fetchone()["id"]
+    before = conn.total_changes
     conn.executemany(
         "INSERT OR IGNORE INTO sample_tags(sample_id, tag_id) "
         "SELECT id, ? FROM samples WHERE id = ?",
         [(tag_id, sid) for sid in sample_ids])
     conn.commit()
-    n = conn.execute("SELECT COUNT(*) FROM sample_tags WHERE tag_id = ?", (tag_id,)).fetchone()[0]
-    return {"ok": True, "tag": name, "tagged": n}
+    # What THIS call tagged — not the tag's corpus-wide total, which is what
+    # the field used to report while sitting next to `ok` in the response.
+    return {"ok": True, "tag": name, "tagged": conn.total_changes - before}
 
 
 @router.delete("/samples/{sample_id}/tags/{name}")

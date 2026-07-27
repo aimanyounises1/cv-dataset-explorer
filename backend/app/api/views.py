@@ -92,7 +92,10 @@ def create_view(body: SavedViewCreate, conn: sqlite3.Connection = Depends(get_co
     return SavedView(name=name, query_string=bare, created_at=created_at)
 
 
-@router.delete("/views/{name}")
+# `:path` because starlette decodes %2F before routing: a view named
+# "night / indoor" saves fine but a single-segment route could never match
+# its delete URL again — created once, deletable never.
+@router.delete("/views/{name:path}")
 def delete_view(name: str, conn: sqlite3.Connection = Depends(get_conn)):
     cur = conn.execute("DELETE FROM saved_views WHERE name = ?", (name.strip(),))
     conn.commit()

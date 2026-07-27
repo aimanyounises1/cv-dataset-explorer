@@ -413,7 +413,8 @@ def search(
     offset: int = Query(0, ge=0, le=5000),
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
     max_agreement: Optional[float] = Query(
-        None, description="Samples with any caption at or below this agreement"),
+        None, ge=0.0, le=1.0, allow_inf_nan=False,
+        description="Samples with any caption at or below this agreement"),
     axes: dict = Depends(axis_bounds),
     ids: list = Depends(id_list),
     split: Optional[str] = None,

@@ -31,7 +31,10 @@ router = APIRouter()
 
 @router.get("/samples", response_model=SampleList)
 def list_samples(
-    page: int = Query(1, ge=1),
+    # Bounded above as well: page * per_page becomes a SQL OFFSET, and 2^63
+    # used to arrive there as a bare 500. The ceiling covers any real corpus
+    # by orders of magnitude.
+    page: int = Query(1, ge=1, le=1_000_000),
     per_page: int = Query(60, ge=1, le=200),
     split: Optional[str] = None,
     tag: Optional[str] = None,
@@ -42,7 +45,8 @@ def list_samples(
                           "attr=setting:indoor is the images that are both."),
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
     max_agreement: Optional[float] = Query(
-        None, description="Samples with any caption at or below this agreement"),
+        None, ge=0.0, le=1.0, allow_inf_nan=False,
+        description="Samples with any caption at or below this agreement"),
     cluster: Optional[int] = Query(None, description="k-means group id"),
     axes: dict = Depends(axis_bounds),
     ids: list = Depends(id_list),
@@ -128,7 +132,8 @@ def export_subset(
                           "attr=setting:indoor is the images that are both."),
     fmt: str = Query("json", alias="format", pattern="^(json|jsonl|csv)$"),
     max_agreement: Optional[float] = Query(
-        None, description="Samples with any caption at or below this agreement"),
+        None, ge=0.0, le=1.0, allow_inf_nan=False,
+        description="Samples with any caption at or below this agreement"),
     cluster: Optional[int] = Query(None, description="k-means group id"),
     scores: bool = Query(
         True, description="Include the computed per-sample signals "
