@@ -65,10 +65,13 @@ export default function SamplePage() {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // Stepping REPLACES the history entry: twenty j-presses used to mean
+      // twenty Back-presses to reach the grid again. Arriving from the grid
+      // was the one push; the walk itself is one place, revisited.
       if ((e.key === "ArrowLeft" || e.key === "k") && neighbours.prev != null) {
-        navigate(`/samples/${neighbours.prev}`);
+        navigate(`/samples/${neighbours.prev}`, { replace: true });
       } else if ((e.key === "ArrowRight" || e.key === "j") && neighbours.next != null) {
-        navigate(`/samples/${neighbours.next}`);
+        navigate(`/samples/${neighbours.next}`, { replace: true });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -127,13 +130,15 @@ export default function SamplePage() {
         {neighbours.position != null && (
           <div className="detail-stepper">
             <button className="ghost" disabled={neighbours.prev == null}
-                    onClick={() => neighbours.prev != null && navigate(`/samples/${neighbours.prev}`)}
+                    onClick={() => neighbours.prev != null
+                      && navigate(`/samples/${neighbours.prev}`, { replace: true })}
                     title="Previous result (← or k)">← Prev</button>
             <span className="meta-line" style={{ margin: 0 }}>
               {neighbours.position} / {neighbours.total}
             </span>
             <button className="ghost" disabled={neighbours.next == null}
-                    onClick={() => neighbours.next != null && navigate(`/samples/${neighbours.next}`)}
+                    onClick={() => neighbours.next != null
+                      && navigate(`/samples/${neighbours.next}`, { replace: true })}
                     title="Next result (→ or j)">Next →</button>
           </div>
         )}
