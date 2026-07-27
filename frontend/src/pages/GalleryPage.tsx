@@ -359,8 +359,12 @@ export default function GalleryPage() {
         </button>
       </div>
 
-      {selecting && (
-        <div className="select-bar">
+      {/* The tray exists only while something is picked — a tray of zero
+          would be furniture. Fixed to the viewport bottom so the running
+          count and the album action stay in reach however deep the scroll,
+          which is exactly when hand-picking happens. */}
+      {selecting && picked.size > 0 && (
+        <div className="selection-tray" role="toolbar" aria-label="Selected images">
           <span className="select-count" aria-live="polite">
             {picked.size} picked
           </span>
@@ -378,6 +382,10 @@ export default function GalleryPage() {
           <button className="ghost" disabled={!picked.size}
                   onClick={() => setPicked(new Set())}>
             Clear
+          </button>
+          <button className="ghost"
+                  onClick={() => { setSelecting(false); setPicked(new Set()); }}>
+            Done
           </button>
         </div>
       )}
