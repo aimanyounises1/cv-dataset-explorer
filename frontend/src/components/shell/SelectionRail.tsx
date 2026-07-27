@@ -1,6 +1,4 @@
-import { useSearchParams } from "react-router-dom";
 import ActiveFilters from "../ActiveFilters";
-import SavedViews from "../SavedViews";
 import SetSummary from "../SetSummary";
 import { useSelection } from "../../hooks/useSelection";
 
@@ -25,7 +23,6 @@ import { useSelection } from "../../hooks/useSelection";
  */
 export default function SelectionRail() {
   const sel = useSelection();
-  const [searchParams, setSearchParams] = useSearchParams();
 
   // Shown for a search too: its results are a set you can export, even
   // though a query adds no chip.
@@ -74,11 +71,9 @@ export default function SelectionRail() {
             </a>
           ))}
         </div>
-        <SavedViews
-          current={searchParams.toString()}
-          onRestore={(qs) => setSearchParams(new URLSearchParams(qs),
-                                             { replace: false })}
-        />
+        {/* Saved views moved to the library rail: a view is how you come BACK,
+            so it cannot live in a rail that only exists once a selection is
+            already active. */}
       </section>
     </aside>
   );
