@@ -829,6 +829,7 @@ mark {
   color: var(--accent); text-decoration: none; white-space: nowrap;
 }
 .open-all:hover { text-decoration: underline; }
+.open-all-dim { color: var(--text-faint); font-size: 12.5px; }
 /* Tags that link somewhere keep the pill look; only the underline goes. */
 a.tag { text-decoration: none; }
 a.tag:hover { filter: brightness(1.15); }
