@@ -15,6 +15,7 @@ from .deps import (
     axis_bounds,
     axis_scores,
     build_filters,
+    embeddings_fingerprint,
     first_captions,
     get_conn,
     id_list,
@@ -224,8 +225,12 @@ def export_subset(
              "axes": {a: list(b) for a, b in axes.items()},
              "max_agreement": max_agreement, "scores": scores,
              # Named so a consumer can tell whether two exports are comparable:
-             # the axes are percentile ranks over whatever corpus was loaded.
+             # the axes are percentile ranks over whatever corpus was loaded,
+             # and the fingerprint pins which embeddings produced the scores.
              "embed_model": config.EMBED_MODEL,
+             "corpus_samples": conn.execute(
+                 "SELECT COUNT(*) FROM samples").fetchone()[0],
+             "embeddings_fingerprint": embeddings_fingerprint(),
              "axis_semantics": "0-10 percentile ranks over this corpus; "
                                "not comparable across datasets"}
 

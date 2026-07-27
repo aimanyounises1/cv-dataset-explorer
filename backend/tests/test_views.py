@@ -105,3 +105,50 @@ def test_query_string_may_be_empty(client):
     r = client.post("/api/views", json={"name": "everything", "query_string": ""})
     assert r.status_code == 201
     assert r.json()["query_string"] == ""
+
+
+def test_env_fingerprint_is_server_side_only(client):
+    # The environment suffix is stored, but the client never sees it: what you
+    # save comes back byte-identical, and a restored URL stays clean.
+    r = client.post("/api/views", json={"name": "fp round trip",
+                                        "query_string": "split=train&rarity_min=7"})
+    assert r.status_code == 201
+    assert r.json()["query_string"] == "split=train&rarity_min=7"
+    v = [v for v in client.get("/api/views").json() if v["name"] == "fp round trip"][0]
+    assert v["query_string"] == "split=train&rarity_min=7"
+    assert v["stale_env"] is None    # saved just now, under this environment
+
+    # A client cannot smuggle its own env params past the server's.
+    r = client.post("/api/views", json={"name": "smuggled env",
+                                        "query_string": "split=test&_embed_model=fake/model"})
+    assert r.json()["query_string"] == "split=test"
+    v = [v for v in client.get("/api/views").json() if v["name"] == "smuggled env"][0]
+    assert v["stale_env"] is None
+
+
+def test_env_mismatch_is_flagged(client):
+    client.post("/api/views", json={"name": "stale", "query_string": "split=val"})
+    conn = db.connect()
+    conn.execute(
+        "UPDATE saved_views SET query_string = ? WHERE name = ?",
+        ("split=val&_embed_model=other/model&_corpus=12:deadbeefcafe", "stale"))
+    conn.commit()
+    conn.close()
+    v = [v for v in client.get("/api/views").json() if v["name"] == "stale"][0]
+    assert v["query_string"] == "split=val"      # env params stripped either way
+    assert v["stale_env"] is not None
+    assert "other/model" in v["stale_env"] and "12" in v["stale_env"]
+
+
+def test_pre_fingerprint_view_loads_as_before(client):
+    # A view saved before fingerprinting has nothing to compare — it must load
+    # exactly as it always did, with no warning invented for it.
+    conn = db.connect()
+    conn.execute(
+        "INSERT INTO saved_views(name, query_string, created_at) VALUES (?,?,?)",
+        ("ancient", "split=train&legibility_min=5", "2026-01-01T00:00:00+00:00"))
+    conn.commit()
+    conn.close()
+    v = [v for v in client.get("/api/views").json() if v["name"] == "ancient"][0]
+    assert v["query_string"] == "split=train&legibility_min=5"
+    assert v["stale_env"] is None
