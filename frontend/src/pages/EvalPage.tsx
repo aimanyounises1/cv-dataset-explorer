@@ -19,8 +19,20 @@ const MODE_COLORS: Record<string, string> = {
 
 /** Self-benchmark: each of the dataset's own captions should retrieve its own
  * image (standard Flickr8k text→image retrieval protocol). */
+/* The server caches a completed run and returns it instantly, but the page
+ * used to forget its own answer on every navigation and greet a returning
+ * user with a bare button implying an expensive operation. The last result
+ * rides in sessionStorage — ephemeral tab state, like scroll position — so
+ * coming back shows the table immediately and the button says "Re-run". */
+const EVAL_RESULT_KEY = "cvde-eval-result";
+
 export default function EvalPage() {
-  const [result, setResult] = useState<EvalResponse | null>(null);
+  const [result, setResult] = useState<EvalResponse | null>(() => {
+    try {
+      const raw = sessionStorage.getItem(EVAL_RESULT_KEY);
+      return raw ? (JSON.parse(raw) as EvalResponse) : null;
+    } catch { return null; }
+  });
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +40,10 @@ export default function EvalPage() {
     setRunning(true);
     setError(null);
     try {
-      setResult(await api.evalRetrieval(1000));
+      const res = await api.evalRetrieval(1000);
+      setResult(res);
+      try { sessionStorage.setItem(EVAL_RESULT_KEY, JSON.stringify(res)); }
+      catch { /* non-essential */ }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -83,6 +98,10 @@ export default function EvalPage() {
               published Flickr8k baselines rank against 1,000 candidates, so a
               number measured against the full corpus is a harder task and not
               comparable to them. State the pool next to the metric, always. */}
+          {/* One measure for every paragraph on the page: the intro wraps at
+              720px, and prose that suddenly runs ~200 characters wide past the
+              button reads as a different, less finished document. */}
+          <div style={{ maxWidth: 720 }}>
           <div className="meta-line" style={{ marginTop: 18 }}>
             {result.sample_size.toLocaleString()} caption queries, averaging{" "}
             {result.mean_query_words} words · higher recall is better
@@ -115,6 +134,7 @@ export default function EvalPage() {
               trained model's like-for-like gain.
             </div>
           )}
+          </div>
           <div className="panel" style={{ maxWidth: 720 }}>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={chartData}>
