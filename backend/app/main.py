@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from . import config, db
 from .api import (
     admin,
+    albums,
     attributes,
     chat,
     describe,
@@ -51,7 +52,7 @@ for router in (samples.router, search.router, stats.router, map_api.router,
                tags.router, qa.router, qa_run.router, attributes.router,
                describe.router, leakage.router,
                eval_api.router, admin.router, chat.router,
-               views.router):
+               views.router, albums.router):
     app.include_router(router, prefix="/api")
 
 # Local image/thumbnail serving.
