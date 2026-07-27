@@ -211,6 +211,12 @@ body {
   .rail-group-title { padding: 0 4px 0 0; }
   .rail-link { white-space: nowrap; margin: 0; }
   .rail-foot { display: none; }
+  /* The filter column has no honest home in a horizontal strip: as a flex
+     item it stretched the header to ~250px of dead space while itself sitting
+     off-screen to the right, reachable only by an unindicated sideways
+     scroll. Until a real phone layout exists for it, the strip holds
+     navigation only — filters still arrive via the URL and the palette. */
+  .rail-l .rail-filters { display: none; }
   .rail-r {
     position: static; width: auto; max-height: none;
     border-left: none; border-top: 1px solid var(--border);
