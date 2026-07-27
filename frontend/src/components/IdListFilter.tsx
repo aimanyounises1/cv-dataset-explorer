@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import "../styles/id-filter.css";
 import { MAX_ID_LIST } from "../api/types";
 
 interface Props {

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { AXES } from "../api/types";
 import AxisSparkline from "./AxisSparkline";
 import { AXIS_META } from "./AxisFilters";
-import "../styles/axis-legend.css";
 
 /** A worked example, not a diagram: ascending bars so "taller = harder" is
  * legible from the shape alone, and four distinct heights so each position is

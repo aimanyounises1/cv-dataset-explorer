@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { DescribeResponse, FacetLift } from "../api/types";
 import { AXIS_META } from "./AxisFilters";
-import "../styles/set-summary.css";
 
 /**
  * "What is this selection made of?" — the inverse of every other control here.
