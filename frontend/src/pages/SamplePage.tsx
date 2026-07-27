@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { SampleCard, SampleDetail } from "../api/types";
+import AxisBreakdown from "../components/AxisBreakdown";
 import AxisLegend from "../components/AxisLegend";
 import ImageCard from "../components/ImageCard";
+import ProvenanceBanner from "../components/ProvenanceBanner";
 import TagEditor from "../components/TagEditor";
 import { useNeighbours } from "../hooks/useResultOrder";
 
@@ -69,6 +71,7 @@ export default function SamplePage() {
 
   return (
     <div>
+      <ProvenanceBanner />
       <div className="detail-nav">
         <button className="ghost back-btn" onClick={back}>← Back</button>
         {neighbours.position != null && (
@@ -115,7 +118,19 @@ export default function SamplePage() {
               <dd>{detail.width ?? "?"} × {detail.height ?? "?"} px</dd>
               <dt>File size</dt>
               <dd>{detail.filesize ? `${(detail.filesize / 1024).toFixed(0)} KB` : "?"}</dd>
-              {detail.cluster != null && (<><dt>Cluster</dt><dd>#{detail.cluster}</dd></>)}
+              {/* Every identifier on this page that names a *set* is a link to
+                  that set. A cluster number the reader cannot open is trivia;
+                  one click away it is the answer to "is this whole group like
+                  that, or just this frame?". */}
+              {detail.cluster != null && (
+                <><dt>Cluster</dt>
+                <dd>
+                  <Link className="attr-link" to={`/?cluster=${detail.cluster}`}
+                        title="Open every image in this embedding cluster">
+                    #{detail.cluster}
+                  </Link>
+                </dd></>
+              )}
               {Object.entries(detail.attributes).map(([grp, label]) => (
                 <span key={grp} style={{ display: "contents" }}>
                   <dt>{grp.replace(/_/g, " ")}</dt>
@@ -128,11 +143,20 @@ export default function SamplePage() {
               ))}
             </dl>
           </div>
+          <div className="panel">
+            <h3>Difficulty</h3>
+            <AxisBreakdown axes={detail.axes} />
+          </div>
           {detail.vlm_tags.length > 0 && (
             <div className="panel">
               <h3>VLM tags</h3>
               <div className="tag-row">
-                {detail.vlm_tags.map((t) => <span className="tag vlm" key={t}>{t}</span>)}
+                {detail.vlm_tags.map((t) => (
+                  <Link className="tag vlm" key={t} to={`/?vlm_tag=${encodeURIComponent(t)}`}
+                        title={`Open every image tagged “${t}”`}>
+                    {t}
+                  </Link>
+                ))}
               </div>
             </div>
           )}
@@ -147,7 +171,20 @@ export default function SamplePage() {
           here. Without it the encoding is unexplained everywhere except the
           gallery — and a user can reach this page directly from a link. */}
       <div className="section-title similar-head">
-        Similar images
+        <span className="similar-title">
+          Similar images
+          {/* This grid is the only place the tool turns one frame into a class,
+              and until now the class died here: you could look at the twelve
+              neighbours but not filter, sort or export them. The gallery already
+              accepts an explicit id list, so hand it over — same construction the
+              map's lasso uses. */}
+          {similar.length > 0 && (
+            <Link className="open-all" to={`/?ids=${similar.map((s) => s.id).join(",")}`}
+                  title="Open exactly these neighbours in the gallery, where they can be filtered, sorted and exported">
+              Open all {similar.length} in gallery →
+            </Link>
+          )}
+        </span>
         {similar.some((s) => s.axes) && <AxisLegend />}
       </div>
       {similarError && <div className="notice">{similarError}</div>}

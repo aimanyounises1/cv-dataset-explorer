@@ -285,7 +285,14 @@ export default function GalleryPage() {
 
       <div className="grid"
            style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
-        {items.map((s) => <ImageCard key={s.id} sample={s} scoreBasis={meta.basis} />)}
+        {/* Each card links with the query, mode and score that put it here.
+            `items` accumulates every page loaded so far, so the array index is
+            already the rank within the whole result set: the first card on
+            page 3 is rank 121, not rank 1. */}
+        {items.map((s, i) => (
+          <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
+                     query={query} mode={mode} rank={i + 1} />
+        ))}
       </div>
 
       {loading && <div className="loading">Loading…</div>}
