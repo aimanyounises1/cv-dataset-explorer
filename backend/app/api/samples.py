@@ -147,12 +147,19 @@ def export_subset(
     The manifest records the query that produced it, including the embedding
     model, because a slice you cannot regenerate is not a curated dataset.
     """
+    # A filter export is complete; a search export stops where the fusion
+    # stopped ranking. The manifest says which one this file is, because a
+    # consumer cannot tell a full set from a truncated ranking by looking.
+    ranked_depth = None
+    truncated = None
     if q:
         from .search import run_search
 
         result = run_search(conn, q, mode=mode, top_k=top_k, split=split,
                             tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes, ids=ids,
                             max_agreement=max_agreement)
+        ranked_depth = result.depth_limit
+        truncated = bool(result.depth_reached)
         ids = [it.id for it in result.items]
         rows_by_id = {}
         if ids:
@@ -231,6 +238,11 @@ def export_subset(
              "corpus_samples": conn.execute(
                  "SELECT COUNT(*) FROM samples").fetchone()[0],
              "embeddings_fingerprint": embeddings_fingerprint(),
+             # Search exports only: how deep the ranking went, and whether more
+             # images matched than the depth could hold. Null for filter
+             # exports, which are complete by construction.
+             "ranked_depth": ranked_depth,
+             "truncated": truncated,
              "axis_semantics": "0-10 percentile ranks over this corpus; "
                                "not comparable across datasets"}
 

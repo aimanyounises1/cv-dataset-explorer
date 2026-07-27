@@ -64,7 +64,12 @@ export default function SelectionRail() {
             <a key={f} className="pill export-pill" href={sel.exportHref(f)}
                title={`Download this selection as ${f.toUpperCase()}, with the `
                       + `query recorded in the manifest and every computed score `
-                      + `on each row`}>
+                      + `on each row`
+                      + (sel.query
+                         ? ". A search export is the ranked results to the "
+                           + "fusion depth, not every match — the manifest "
+                           + "records the depth and a truncated flag"
+                         : "")}>
               {f}
             </a>
           ))}
