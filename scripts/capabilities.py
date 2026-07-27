@@ -224,8 +224,10 @@ def render() -> str:
     w("- `README.md` — setup, feature tour, the two limits worth knowing")
     w("- `docs/TECHNICAL.md` — layer-by-layer build: schema, the real SQL and "
       "query plans, retrieval maths, frontend, measured performance")
-    w("- `docs/DESIGN.md` — retrieval design and trade-offs")
-    w("- `docs/ARCHITECTURE.md` — how the pieces fit together")
+    w("- `docs/DESIGN.md` — retrieval design, trade-offs, and the production "
+      "scale path")
+    w("- `docs/PRISM.md` — the retrieval-accuracy research programme and the "
+      "method this project proposes")
     w("- `docs/AGENTS.md` — orchestration, the render-block contract, self-QA")
     w("- `docs/DEMO.md` — an eight-minute walkthrough")
     w("- `docs/screenshots/` — one image per view")

@@ -226,6 +226,3 @@ def tag_samples(sample_ids: list[int], tag: str) -> str:
         conn.close()
 
 
-RETRIEVAL_TOOLS = [search_images, find_similar, get_sample_details, tag_samples]
-INSIGHT_TOOLS = [dataset_overview, attribute_coverage, rare_slice_examples,
-                 suspect_captions, get_sample_details]

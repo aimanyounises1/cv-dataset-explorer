@@ -550,11 +550,6 @@ def _suspect_table(conn, limit: int = 10):
         note="Low agreement is a candidate annotation error, not a verdict: an "
              "unusual image scores low with a perfectly good caption. Click a row "
              "to judge it against the picture.")
-
-
-REPORT_SECTIONS = ("overview", "composition", "captions", "difficulty", "retrieval")
-
-
 @tool
 def build_dataset_report(title: str = "Flickr8k dataset report",
                          include_benchmark: bool = True) -> str:
