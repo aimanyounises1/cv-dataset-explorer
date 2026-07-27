@@ -368,6 +368,17 @@ FAISS `IndexIVFFlat`, `hnswlib`, or `sqlite-vec` can be dropped in behind it.
 Hosted vector databases are excluded by design — everything here runs on one
 machine.
 
+The index is one of two seams that scale would widen. The other is scoring: at
+fleet scale the per-sample signals worth ranking by stop being intrinsic (blur,
+rare words) and start coming from models — per-example loss, detector
+confidence, ensemble disagreement. Those would enter through a `ScoreProvider`
+protocol — `rank(query_vec, allowed_ids, k) → [(id, score, basis)]` — with the
+hubness penalty and PRISM as its first two implementations, and every score
+still arriving labelled with its basis. It is deliberately not implemented: at
+8,000 images with two ranking signals, the protocol would be abstraction with
+nothing to abstract over. A second dataset needs no new seam at all — it is one
+adapter class in `app/datasets/`.
+
 ## Reproducibility
 
 - **The figures.** Every screenshot in this README was captured from the running
