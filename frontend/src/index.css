@@ -571,6 +571,10 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 .detail-image {
   width: 100%; border-radius: var(--radius); border: 1px solid var(--border);
   background: var(--bg-inset);
+  /* The photograph is what the right column's numbers are about: it rides
+     along while reading captions, metadata and axis folds, instead of a black
+     hole opening under it whenever the right column runs longer. */
+  position: sticky; top: 16px;
 }
 .panel {
   background: var(--bg-raised); border: 1px solid var(--border);
