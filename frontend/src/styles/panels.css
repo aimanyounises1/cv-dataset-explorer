@@ -36,7 +36,7 @@
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 13.5px;
   font-family: var(--font-sans); color: var(--text-dim);
-  transition: border-color 0.12s;
+  transition: border-color var(--t-quick);
 }
 .filter-chip:hover { border-color: var(--border-strong); }
 
@@ -56,7 +56,7 @@
   width: 17px; height: 17px; padding: 0; flex-shrink: 0;
   background: none; border: none; border-radius: 999px;
   color: var(--text-faint); font-size: 13.5px; line-height: 1; cursor: pointer;
-  transition: color 0.12s, background 0.12s;
+  transition: color var(--t-quick), background var(--t-quick);
 }
 .filter-chip-remove:hover { color: var(--text); background: var(--bg-hover); }
 
@@ -70,7 +70,7 @@
   background: none; border: none; border-radius: var(--radius-sm);
   padding: 4px 6px; margin-left: 2px;
   color: var(--text-faint); font-family: var(--font-sans); font-size: 11.5px;
-  cursor: pointer; transition: color 0.12s;
+  cursor: pointer; transition: color var(--t-quick);
 }
 .filter-clear-all:hover { color: var(--accent); }
 
@@ -266,7 +266,7 @@
 .leak-rung:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .leak-bar {
   width: 100%; background: var(--amber); opacity: 0.45; border-radius: 3px 3px 0 0;
-  transition: opacity 0.12s;
+  transition: opacity var(--t-quick);
 }
 .leak-rung.active .leak-bar { opacity: 1; }
 .leak-rung.active .leak-rung-n, .leak-rung.active .leak-rung-th { color: var(--text); }
@@ -502,7 +502,7 @@
   border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
-  transition: border-color 0.12s;
+  transition: border-color var(--t-quick);
 }
 .saved-view:hover { border-color: var(--border-strong); }
 
@@ -517,7 +517,7 @@
   font-size: 13.5px;
   padding: 5px 4px 5px 13px;
   cursor: pointer;
-  transition: color 0.12s;
+  transition: color var(--t-quick);
 }
 .saved-view-restore:hover { color: var(--accent); }
 
@@ -556,7 +556,7 @@
   font-size: 13.5px;
   line-height: 1;
   padding: 0 11px 0 6px;
-  transition: color 0.12s;
+  transition: color var(--t-quick);
 }
 .saved-view-delete:hover:not(:disabled) { color: var(--red); }
 .saved-view-delete:disabled { opacity: 0.4; cursor: default; }

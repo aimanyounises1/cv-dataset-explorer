@@ -23,10 +23,13 @@
   --border: #242a5c;
   --border-strong: #363d78;
 
-  /* Ink: three tiers, so micro-labels can recede without vanishing. */
-  --text: #eceefa;
-  --text-dim: #a2a6c8;
-  --text-faint: #6f739a;
+  /* Ink: three tiers, so micro-labels can recede without vanishing. Warmed
+     toward neutral per the workspace redesign, and the faint tier sits at
+     5.05:1 on --bg-raised — receding must never mean failing AA, because the
+     faint tier carries real diagnostic text. */
+  --text: #edeef8;
+  --text-dim: #a6a7c4;
+  --text-faint: #8286ad;
 
   /* Mobileye's blues, read off Mobileye's own assets rather than approximated.
      #1f2eb8 is the logo itself — the single fill in new_logo.svg on
@@ -41,9 +44,19 @@
   --green: #3fcf9a;
   --amber: #f0b428;
   --red: #ff7f7a;
+  /* State, not data: teal marks "this worked / this is on" (Ready pill, ok
+     badges); --green stays the colour of *values* (scores, chart series), so
+     a success state and a good number never read as the same thing. */
+  --success: #35c9b2;
 
   --radius: 8px;
   --radius-sm: 5px;
+
+  /* Motion: one quick tick for hover/focus feedback, one move for things that
+     change place or appear. Transform/opacity only — never animate layout —
+     and the reduced-motion block at the end of this file flattens both. */
+  --t-quick: 120ms;
+  --t-move: 200ms;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -132,7 +145,7 @@ body {
   border-radius: var(--radius-sm);
   color: var(--text-dim); text-decoration: none;
   font-size: 13.5px; font-weight: 500;
-  transition: color 0.12s, background 0.12s;
+  transition: color var(--t-quick), background var(--t-quick);
 }
 .rail-link:hover { color: var(--text); background: var(--bg-hover); }
 /* The active marker is a left edge, not an underline: in a vertical list the
@@ -230,7 +243,7 @@ body {
   width: 100%; padding: 10px 14px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--bg-inset);
   color: var(--text); font-size: 13.5px; outline: none; font-family: var(--font-sans);
-  transition: border-color 0.12s;
+  transition: border-color var(--t-quick);
 }
 .search-box input::placeholder { color: var(--text-faint); }
 .search-box input:focus { border-color: var(--accent); }
@@ -253,7 +266,7 @@ select:hover { border-color: var(--border-strong); }
 .mode-toggle button {
   padding: 9px 15px; border: none; background: transparent;
   color: var(--text-dim); cursor: pointer; font-size: 13.5px; font-family: var(--font-sans);
-  transition: color 0.12s, background 0.12s;
+  transition: color var(--t-quick), background var(--t-quick);
 }
 .mode-toggle button:hover { color: var(--text); }
 .mode-toggle button.active { background: var(--accent-deep); color: #ffffff; font-weight: 600; }
@@ -294,7 +307,7 @@ select:hover { border-color: var(--border-strong); }
   font-family: var(--font-mono); font-size: 11.5px; text-decoration: none;
   padding: 3px 9px; border-radius: var(--radius-sm);
   background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-dim);
-  transition: color 0.12s, border-color 0.12s;
+  transition: color var(--t-quick), border-color var(--t-quick);
 }
 .export-pill:hover { color: var(--accent); border-color: var(--accent); }
 
@@ -405,7 +418,7 @@ select:hover { border-color: var(--border-strong); }
   display: flex; align-items: flex-end; gap: 2px; height: 88px;
   border-bottom: 1px solid var(--border); padding-bottom: 1px;
 }
-.dist-bar { flex: 1; min-width: 2px; border-radius: 1px 1px 0 0; transition: opacity 0.12s; }
+.dist-bar { flex: 1; min-width: 2px; border-radius: 1px 1px 0 0; transition: opacity var(--t-quick); }
 .dist-bar.out { opacity: 0.22; }
 .dist-axis {
   display: flex; justify-content: space-between; margin-top: 5px;
@@ -495,7 +508,7 @@ select:hover { border-color: var(--border-strong); }
 .card {
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden; cursor: pointer;
-  transition: border-color 0.14s, transform 0.14s, box-shadow 0.14s;
+  transition: border-color var(--t-quick), transform var(--t-quick), box-shadow var(--t-quick);
   text-decoration: none; color: inherit; display: block; position: relative;
 }
 .card:hover {
@@ -511,7 +524,7 @@ select:hover { border-color: var(--border-strong); }
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.02em;
   color: rgba(233, 236, 242, 0.82); background: rgba(8, 10, 14, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-sm);
-  padding: 1px 5px; backdrop-filter: blur(4px); transition: color 0.14s, border-color 0.14s;
+  padding: 1px 5px; backdrop-filter: blur(4px); transition: color var(--t-quick), border-color var(--t-quick);
 }
 .card-body { padding: 8px 9px 7px; }
 .card-caption {
@@ -551,7 +564,7 @@ select:hover { border-color: var(--border-strong); }
 button.primary, a.primary.button-link {
   background: var(--accent-deep); color: #ffffff; border: none; padding: 10px 22px;
   border-radius: var(--radius); font-size: 13.5px; font-weight: 650; cursor: pointer;
-  font-family: var(--font-sans); transition: filter 0.12s;
+  font-family: var(--font-sans); transition: filter var(--t-quick);
 }
 a.primary.button-link {
   display: inline-block; text-decoration: none; padding: 8px 16px; font-size: 13.5px;
@@ -561,7 +574,7 @@ button.primary:disabled { opacity: 0.45; cursor: default; }
 button.ghost {
   background: transparent; color: var(--text-dim); border: 1px solid var(--border);
   padding: 8px 15px; border-radius: var(--radius); cursor: pointer;
-  font-size: 13.5px; font-family: var(--font-sans); transition: color 0.12s, border-color 0.12s;
+  font-size: 13.5px; font-family: var(--font-sans); transition: color var(--t-quick), border-color var(--t-quick);
 }
 button.ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
 button.ghost:disabled { opacity: 0.4; cursor: default; }
@@ -615,7 +628,7 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
   color: var(--text-faint); font-size: 10.5px; margin-top: 5px;
   text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600;
 }
-.stat-card .value.ok { color: var(--green); }
+.stat-card .value.ok { color: var(--success); }
 .stat-card .value.warn { color: var(--amber); }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .charts .panel { margin-bottom: 0; }
@@ -693,7 +706,7 @@ mark {
 .chip {
   background: var(--bg-raised); border: 1px solid var(--border); color: var(--text-dim);
   border-radius: 999px; padding: 5px 13px; font-size: 13.5px; cursor: pointer;
-  font-family: var(--font-sans); transition: color 0.12s, border-color 0.12s;
+  font-family: var(--font-sans); transition: color var(--t-quick), border-color var(--t-quick);
 }
 .chip:hover { color: var(--accent); border-color: var(--accent); }
 
@@ -702,7 +715,7 @@ mark {
 .suspect-row {
   display: flex; gap: 12px; background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 10px; text-decoration: none; color: inherit;
-  transition: border-color 0.14s;
+  transition: border-color var(--t-quick);
 }
 .suspect-row:hover { border-color: var(--border-strong); }
 .suspect-row img { width: 108px; height: 82px; object-fit: cover; border-radius: var(--radius-sm); flex-shrink: 0; }
@@ -712,7 +725,7 @@ mark {
   font-size: 10.5px; padding: 1px 7px; border-radius: 999px; margin-left: 6px;
   border: 1px solid var(--border);
 }
-.agree-badge.ok { color: var(--green); border-color: rgba(62, 207, 142, 0.35); }
+.agree-badge.ok { color: var(--success); border-color: rgba(53, 201, 178, 0.35); }
 .agree-badge.mid { color: var(--amber); border-color: rgba(240, 180, 41, 0.35); }
 .agree-badge.warn { color: var(--red); border-color: rgba(255, 122, 122, 0.35); }
 .attr-link { color: var(--accent); text-decoration: none; }
@@ -797,7 +810,7 @@ mark {
 .axis-fold > summary::before, .axis-fold.flat::before {
   content: "›"; display: inline-block; flex-shrink: 0;
   color: var(--text-faint); font-size: 13.5px; line-height: 1;
-  transition: transform 0.12s;
+  transition: transform var(--t-quick);
 }
 .axis-fold.flat::before { visibility: hidden; }
 .axis-fold[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
@@ -886,5 +899,19 @@ a.tag:hover { filter: brightness(1.15); }
 .sim-divider::before, .sim-divider::after {
   content: ""; flex: 1; border-top: 1px dashed var(--border);
 }
-.grid.dim .card { opacity: 0.45; transition: opacity 0.14s; }
+.grid.dim .card { opacity: 0.45; transition: opacity var(--t-quick); }
 .grid.dim .card:hover { opacity: 1; }
+
+/* ---- Reduced motion ---------------------------------------------------
+   The tokens above are preferences, this is a contract: when the OS asks for
+   reduced motion, everything that moves stops moving — including the one
+   width animation in the chart blocks. Opacity changes survive; travel
+   does not. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
