@@ -25,6 +25,14 @@ export default function IdListFilter({ value, onChange, resolved }: Props) {
   const unique = new Set(entries).size;
   const overCap = unique > MAX_ID_LIST;
   const dirty = draft !== value;
+  /* The entry cap is not the only ceiling: the list travels as a GET query
+   * string, and the server's HTTP parser tops out at 64 KiB of request line —
+   * measured: 9,673 numeric ids apply, 9,674 die as an opaque "400 Invalid
+   * HTTP request". Refusing here, with the real reason, beats letting the
+   * transport answer with noise. Budget is the encoded bytes, with headroom
+   * for the path and the other params sharing the line. */
+  const encodedBytes = encodeURIComponent(draft).length;
+  const overWire = encodedBytes > 58_000;
 
   // 60,000 entries of "train_001722.jpg" is well under 2 MB, so anything much
   // larger is the wrong file. Checked before reading rather than after, because
@@ -62,7 +70,7 @@ export default function IdListFilter({ value, onChange, resolved }: Props) {
       />
 
       <div className="idlist-actions">
-        <button className="primary" disabled={overCap || !dirty}
+        <button className="primary" disabled={overCap || overWire || !dirty}
                 onClick={() => onChange(draft)}>
           Apply list
         </button>
@@ -88,6 +96,15 @@ export default function IdListFilter({ value, onChange, resolved }: Props) {
       {overCap && (
         <p className="idlist-note over">
           {unique.toLocaleString()} entries is over the {MAX_ID_LIST.toLocaleString()} limit.
+        </p>
+      )}
+
+      {!overCap && overWire && (
+        <p className="idlist-note over">
+          {unique.toLocaleString()} entries is {Math.round(encodedBytes / 1024)} KB
+          — more than a URL can carry (~58 KB, roughly 9,500 numeric ids).
+          Split the list, or narrow it upstream; a list this size is better
+          consumed via <code>POST /api/search</code>.
         </p>
       )}
 
