@@ -28,13 +28,15 @@
   --text-dim: #a2a6c8;
   --text-faint: #6f739a;
 
-  /* Mobileye's blue. The core #1637be is too dark to serve as an accent on a
-     near-black surface, so --accent is that same hue at the lightness this
-     design was already tuned for, and --accent-deep keeps the brand value
-     itself for solid fills that carry white text. */
-  --accent: #6f80ff;
+  /* Mobileye's blues, both read off mobileye.com's own styles rather than
+     approximated: #1637be is what their navigation paints link text with, and
+     #7883fd is the light companion their brand gradient pairs it with — the
+     right accent for a near-black surface (6.05:1 on --bg, past AA), where
+     the core blue alone would be too dark. --accent-deep keeps that core for
+     solid fills that carry white text. */
+  --accent: #7883fd;
   --accent-deep: #1637be;
-  --accent-soft: rgba(111, 128, 255, 0.20);
+  --accent-soft: rgba(120, 131, 253, 0.20);
   --green: #3fcf9a;
   --amber: #f0b428;
   --red: #ff7f7a;
