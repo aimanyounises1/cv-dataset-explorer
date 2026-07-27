@@ -12,6 +12,7 @@ export default function StatsPage() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);
   const [captions, setCaptions] = useState<CaptionStats | null>(null);
   const [dups, setDups] = useState<DuplicatePair[]>([]);
+  const [allDups, setAllDups] = useState(false);
   const [coverage, setCoverage] = useState<AttributeGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sectionErrors, setSectionErrors] = useState<string[]>([]);
@@ -222,15 +223,25 @@ export default function StatsPage() {
             : <>Requires embeddings — run <code>python -m app.ingest</code> first.</>}
         </div>
       ) : (
-        <div className="dup-list">
-          {dups.map((d, i) => (
-            <div className="dup-pair" key={i}>
-              <Link to={`/samples/${d.a.id}`}><img src={d.a.thumb_url} alt="" /></Link>
-              <Link to={`/samples/${d.b.id}`}><img src={d.b.thumb_url} alt="" /></Link>
-              <span className="pill score">{(d.similarity * 100).toFixed(1)}%</span>
-            </div>
-          ))}
-        </div>
+        <>
+          {/* The list arrives sorted by similarity, so the top rows are the
+              finding; two hundred rows of the same egret is scrolling, not
+              information. The rest stays one click away for auditing. */}
+          <div className="dup-list">
+            {(allDups ? dups : dups.slice(0, 9)).map((d, i) => (
+              <div className="dup-pair" key={i}>
+                <Link to={`/samples/${d.a.id}`}><img src={d.a.thumb_url} alt="" /></Link>
+                <Link to={`/samples/${d.b.id}`}><img src={d.b.thumb_url} alt="" /></Link>
+                <span className="pill score">{(d.similarity * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+          {dups.length > 9 && (
+            <button className="ghost dup-more" onClick={() => setAllDups(!allDups)}>
+              {allDups ? "Show only the top 9" : `Show all ${dups.length} pairs`}
+            </button>
+          )}
+        </>
       )}
     </div>
   );
