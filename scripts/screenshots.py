@@ -150,6 +150,16 @@ def _ask_assistant(page: Page) -> None:
         _drop_tag(name)
 
 
+def _show_floor(page: Page) -> None:
+    """Bring the similar grid into frame: section head at the top of the
+    viewport, so the above-floor cards, the divider and the greyed tail all
+    land inside the fixed 1600x1000 capture."""
+    page.wait_for_selector(".sim-divider")
+    page.eval_on_selector(".similar-head",
+                          "el => el.scrollIntoView({block: 'start'})")
+    page.wait_for_timeout(1200)          # lazy thumbnails below the fold
+
+
 # (filename, url, settle_ms, extra_action)
 SHOTS = [
     ("1-gallery.png", "/?q=a+crowded+street+at+night&mode=hybrid", 3000, None),
@@ -165,6 +175,15 @@ SHOTS = [
     ("9-sample.png", "/samples/1865", 3500, None),
     ("10-palette.png", "/", 1800, _open_palette),
     ("11-assistant.png", "/chat", 2500, _ask_assistant),
+    # A search click-through arrives carrying its provenance in the URL, so the
+    # banner in this figure is exactly what a pasted link reproduces.
+    ("12-provenance.png",
+     "/samples/6065?src=search&q=a+crowded+street+at+night&mode=hybrid&rank=1",
+     3500, None),
+    # A sample whose neighbours straddle the similarity floor: real class above
+    # the divider, greyed context below it. The grid sits below the inspector,
+    # so the shot scrolls to it — a figure about the floor must show the floor.
+    ("13-floor.png", "/samples/76", 3500, _show_floor),
 ]
 
 

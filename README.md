@@ -239,6 +239,19 @@ corpus-derived floor (the 10th percentile of nearest-neighbour similarity,
 when nothing clears it the page reports a possible coverage gap — the grid
 always returns k cards, so an absence has to be said, not padded over.
 
+![The similarity floor on a well-connected sample: two genuine neighbours above
+a dashed divider, ten greyed below it](docs/screenshots/13-floor.png)
+
+`/samples/76` — the floor separating a real class (two fire performers, cosine
+0.92 and 0.83) from ten greyed near-misses shown for context.
+
+![The provenance banner: "Surfaced by hybrid search 'a crowded street at night'
+— rank 1"](docs/screenshots/12-provenance.png)
+
+Reached from a search instead of a bookmark, the same inspector says *why* you
+are looking at it — query, mode, rank, score — read from the URL, so a pasted
+link carries the same answer.
+
 ### Command palette
 
 ![The command palette filtered on "night", offering tags, attributes, saved views
