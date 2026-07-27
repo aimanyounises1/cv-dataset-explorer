@@ -9,7 +9,7 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 35 HTTP endpoints · 4 agent specialists · 18 agent tools · 14 tested workflows
+- 35 HTTP endpoints · 4 agent specialists · 18 agent tools · 15 tested workflows
 
 ## Views
 
@@ -180,6 +180,7 @@ and by the assistant on request — one registry, three consumers.
 | Benchmark | 300s | The self-benchmark runs and reports all three retrieval modes. |
 | Sample detail | 150s | A card opens its sample, which shows every caption, similar images, and |
 | Assistant | 150s | The chat page states a definite state: ready, or unavailable with setup |
+| Axis legend | 60s | The key for the four-bar sparkline every card carries. |
 | Set description | 90s | The inversion: given a selection, what characterises it. |
 | Train/test leakage | 90s | Held-out images with a training near-duplicate. |
 | Data integrity | 45s | The embedding indexes and the database must still describe each other. |
@@ -202,10 +203,10 @@ and by the assistant on request — one registry, three consumers.
 
 - `README.md` — setup, feature tour, the two limits worth knowing
 - `docs/TECHNICAL.md` — layer-by-layer build: schema, the real SQL and query plans, retrieval maths, frontend, measured performance
-- `docs/DESIGN.md` — retrieval design and trade-offs
-- `docs/ARCHITECTURE.md` — how the pieces fit together
+- `docs/DESIGN.md` — retrieval design, trade-offs, and the production scale path
+- `docs/PRISM.md` — the retrieval-accuracy research programme and the method this project proposes
 - `docs/AGENTS.md` — orchestration, the render-block contract, self-QA
 - `docs/DEMO.md` — an eight-minute walkthrough
 - `docs/screenshots/` — one image per view
 
-<!-- generated 2026-07-26 -->
+<!-- generated 2026-07-27 -->
