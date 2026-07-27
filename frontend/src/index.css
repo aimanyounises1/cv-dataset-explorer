@@ -621,6 +621,7 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 }
 .dup-pair img { width: 118px; height: 88px; object-fit: cover; border-radius: var(--radius-sm); }
 .dup-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.dup-more { margin-top: 12px; }
 
 /* Map */
 .map-wrap { position: relative; }
