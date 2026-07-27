@@ -1,8 +1,9 @@
 # The agent layer: orchestration, canvas, and self-QA
 
 How the assistant is built, why it is built that way, and what it costs. This
-document covers the optional agent layer only; `docs/ARCHITECTURE.md` covers the
-platform it sits on and `docs/DESIGN.md` covers the retrieval stack.
+document covers the optional agent layer only; `docs/TECHNICAL.md` covers the
+platform it sits on and `docs/DESIGN.md` covers the retrieval stack and its
+scale path.
 
 Everything here runs on one machine. No hosted model, no managed database, no
 external vector store, no paid API. If Ollama is not running, the assistant is
