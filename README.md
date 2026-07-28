@@ -562,7 +562,7 @@ curl -sX POST localhost:8000/api/qa/run -H 'Content-Type: application/json' -d '
 A real Chrome drives every registered workflow, screenshots each, and compiles a
 pass/fail report plus a `.pptx` deck — including a degradation flow that injects
 500s and asserts the UI announces them. The last full sweep (2026-07-28) reported
-**104/104 checks across 17/17 workflows in 96 s**. Re-run it rather than quoting that
+**104/104 checks across 17/17 workflows in 91 s** (run `20260728-130140-8eff`). Re-run it rather than quoting that
 number: the flow registry grows, and the count is only true of the day it was taken.
 One sweep runs at a time; a second request attaches to the one in flight.
 Artifacts land in `backend/data/qa/<run_id>/` and are served at `/media/qa/`.
@@ -629,7 +629,7 @@ For the UI, `scripts/ui_smoke.py` drives real Chrome through every workflow (see
 step 6). It is the tier that catches what `tsc` cannot: a view that renders empty,
 a control that stopped filtering, a console error, a 404.
 
-The full local suite reports **338 passed** (2026-07-28). On the light install
+The full local suite reports **351 passed** (2026-07-28). On the light install
 CI uses (no torch, no transformers, no langgraph — see
 [docs/TESTING.md](docs/TESTING.md)) the modules needing `torch` or `langgraph`
 skip, so CI's number is lower; like the sweep count above, re-run rather than
