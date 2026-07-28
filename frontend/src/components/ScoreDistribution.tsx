@@ -49,11 +49,19 @@ export default function ScoreDistribution({ scores, basis, floor, threshold, onT
   }
   const peak = Math.max(...bins);
   const dimmed = scores.filter((s) => s < threshold).length;
+  const adjusted = basis === "cosine_adj";
+  /* The floor is a RAW-cosine statistic — the 10th percentile of every image's
+   * nearest-neighbour cosine — so it may only be drawn on a raw-cosine axis.
+   * `cosine_adj` is that cosine after the hubness penalty is subtracted, which
+   * moves every score by an amount that depends on the query bank: same units,
+   * different quantity. Drawing the raw floor across it would put two scales on
+   * one axis and invite exactly the comparison this app refuses everywhere
+   * else. So cos* gets the distribution and the threshold, and no floor. */
+  const floorApplies = !adjusted;
   // The floor only marks the chart when it falls inside what is on screen; a
   // line pinned to an edge would claim a precision the pixels do not have.
-  const floorIn = floor != null && floor > lo && floor < hi;
+  const floorIn = floorApplies && floor != null && floor > lo && floor < hi;
   const floorAt = floorIn ? Math.round(((floor - lo) / span) * DIST_BUCKETS) : -1;
-  const adjusted = basis === "cosine_adj";
 
   const bars: React.ReactNode[] = [];
   for (let i = 0; i < DIST_BUCKETS; i++) {
@@ -89,7 +97,8 @@ export default function ScoreDistribution({ scores, basis, floor, threshold, onT
             {scores.length.toLocaleString()} visible result
             {scores.length === 1 ? "" : "s"} ·{" "}
             {adjusted
-              ? "cosine similarity, hubness-adjusted ranking (cos*)"
+              ? "hubness-adjusted semantic score (cos*) — cosine minus a "
+                + "query-bank penalty, so not a raw cosine"
               : "cosine similarity"}{" "}
             · a view over this ranking — it re-ranks nothing and changes no link
           </div>
@@ -104,7 +113,8 @@ export default function ScoreDistribution({ scores, basis, floor, threshold, onT
       </div>
 
       <div className="dist-bars" role="img"
-           aria-label={`Histogram of ${scores.length} cosine scores from `
+           aria-label={`Histogram of ${scores.length} `
+                       + `${adjusted ? "hubness-adjusted (cos*)" : "cosine"} scores from `
                        + `${lo.toFixed(3)} to ${hi.toFixed(3)}; `
                        + (floorIn ? `measured floor at ${floor?.toFixed(4)}; ` : "")
                        + `${dimmed} dimmed below ${threshold.toFixed(3)}`}>
@@ -112,7 +122,7 @@ export default function ScoreDistribution({ scores, basis, floor, threshold, onT
       </div>
       <div className="dist-axis">
         <span>{lo.toFixed(3)}</span>
-        <span>less alike ← cosine → more alike</span>
+        <span>lower ← {adjusted ? "cos*" : "cosine"} → higher</span>
         <span>{hi.toFixed(3)}</span>
       </div>
 
@@ -127,7 +137,13 @@ export default function ScoreDistribution({ scores, basis, floor, threshold, onT
       {/* Where the line came from, in one sentence, every time. A floor
           nobody measured is worse than no floor at all. */}
       <div className="meta-line" style={{ marginTop: 8, marginBottom: 0 }}>
-        {floor === undefined
+        {adjusted
+          ? "No floor is drawn here. The corpus's measured floor is a RAW cosine "
+            + "(the 10th percentile of every image's nearest-neighbour cosine), "
+            + "and these scores are cos* — that cosine minus a query-bank hubness "
+            + "penalty. Same units, different quantity, so the two do not belong "
+            + "on one axis. Switch to a raw-cosine ranking to see the floor."
+          : floor === undefined
           ? "Reading this index's measured similarity floor…"
           : floor == null
             ? "This index publishes no measured similarity floor, so none is "
