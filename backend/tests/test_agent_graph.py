@@ -513,3 +513,31 @@ def test_tag_samples_proposes_and_never_writes():
         conn.execute("DELETE FROM samples WHERE id = ?", (sid,))
         conn.commit()
         conn.close()
+
+
+def test_system_diagram_names_the_active_provider(monkeypatch):
+    """The architecture diagram must credit whichever provider is actually
+    ranking — a hard-coded model name lies the moment the provider flips."""
+    import json as _json
+
+    from app.agent.viz_tools import system_diagram
+    from app.ml import providers
+
+    def fake_state(active):
+        return providers.ProviderState(
+            preferred=active, active=active,
+            model_id=providers.provider_model_id(active), dim=8,
+            index_ready=True, fallback_reason=None)
+
+    for active, expected in (("siglip2", "SigLIP 2"), ("qwen3_vl", "Qwen3-VL")):
+        monkeypatch.setattr(providers, "resolve", lambda a=active: fake_state(a))
+        out = _json.loads(system_diagram.func())
+        labels = " ".join(n["label"] for b in out.get("blocks", [])
+                          for n in b.get("nodes", []))
+        assert expected in labels, f"diagram must name {expected} when active"
+        wrong = "SigLIP" if active == "qwen3_vl" else "Qwen"
+        engine_labels = " ".join(
+            n["label"] for b in out.get("blocks", [])
+            for n in b.get("nodes", []) if n.get("group") == "engine")
+        assert wrong not in engine_labels, (
+            f"engine nodes must not credit {wrong} while {active} is active")
