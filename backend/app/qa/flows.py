@@ -796,6 +796,13 @@ def hero_journey(pg, ok):
            len(pg.query_selector_all(".compare-pane img")) >= 2)
         pg.go_back()
         pg.wait_for_selector(".grid .card", timeout=15000)
+        # Coming back must find the set intact. This used to be a re-pick
+        # guarded by "if the tray is gone", because Compare navigated away and
+        # took the selection with it — the flow had encoded the data loss as a
+        # workaround, which is how it stayed green while two hundred picks
+        # would have vanished.
+        ok("the picked set survives the trip to Compare and back",
+           "2" in (pg.text_content(".selection-tray") or ""))
 
     pg.hover(".grid .card")
     pg.wait_for_timeout(250)
@@ -806,6 +813,35 @@ def hero_journey(pg, ok):
     pg.wait_for_timeout(250)
     basis = (pg.text_content(".grid .card .ev-score") or "").strip()
     ok("composed ranking carries its basis", basis.startswith("composed"), basis)
+
+    # A set of two is the only size this flow used to reach, and the tray is
+    # built for two hundred. Shift extends from the last check clicked, so one
+    # modified click is the whole difference between "assemblable" and "two
+    # hundred clicks nobody performs". Dispatched as a real modified click,
+    # because a synthetic .click() carries no shiftKey and the range would
+    # quietly fall back to a plain toggle — which is exactly how the feature
+    # failed the first time it was written.
+    # Measured from a clean set and inside ONE ranking. "More like this" has
+    # just re-ranked the grid, so an anchor picked before it sits at an
+    # unrelated position afterwards — extending across that boundary counts a
+    # run nobody asked for. Clearing first makes the check about the range and
+    # nothing else.
+    checks = pg.query_selector_all(".grid .card .card-check")
+    if len(checks) > 12:
+        clear = pg.query_selector(".selection-tray .tray-clear")
+        if clear:
+            clear.click()
+            pg.wait_for_timeout(400)
+        checks[0].click()
+        checks[12].click(modifiers=["Shift"])
+        pg.wait_for_timeout(400)
+        picked = (pg.text_content(".select-n") or "").strip()
+        ok("shift-click extends the pick to a whole run", picked == "13", picked)
+        # Back to a pair: Compare is defined on two, and the album saved below
+        # is named for a two-image set.
+        for i in range(2, 13):
+            checks[i].click()
+        pg.wait_for_timeout(400)
 
     if not pg.query_selector(".selection-tray"):
         pg.evaluate("document.querySelectorAll('.grid .card .card-check')[0].click()")
