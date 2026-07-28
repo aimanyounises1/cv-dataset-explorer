@@ -765,8 +765,8 @@ backend fails `tsc` in the frontend until a renderer exists. See
 
 | Tier | What | Count |
 |---|---|---|
-| `backend/tests/` | API contracts, degraded modes, id-list limits, provider resolution/fallback, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **338 passed** locally (2026-07-28); CI's light install skips the torch/langgraph modules |
-| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **17 workflows registered**; the 2026-07-28 sweep passed 104/104 checks in 96 s |
+| `backend/tests/` | API contracts, degraded modes, id-list limits, provider resolution/fallback, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **351 passed** locally (2026-07-28); CI's light install skips the torch/langgraph modules |
+| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **17 workflows registered**; the 2026-07-28 sweep passed 104/104 checks in 91 s (run 20260728-130140-8eff) |
 | `python scripts/capabilities.py --check` | Fails when the docs drift from the running system | — |
 
 The backend figure is what GitHub Actions reports on the light install described
