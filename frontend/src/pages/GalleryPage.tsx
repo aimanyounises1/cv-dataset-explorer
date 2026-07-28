@@ -1010,7 +1010,8 @@ export default function GalleryPage() {
 
       {view === "grouped" && (
         <ScenarioGroups resultCount={items.length} hasMore={hasMore}
-                        answer={scenarios} busy={scenBusy} thumbs={groupThumbs}
+                        mode={mode} answer={scenarios} busy={scenBusy}
+                        thumbs={groupThumbs}
                         onBack={() => setView("ranked")}
                         onSaveGroup={saveGroupAsAlbum} />
       )}
