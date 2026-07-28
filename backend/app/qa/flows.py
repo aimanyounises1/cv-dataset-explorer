@@ -821,7 +821,11 @@ def hero_journey(pg, ok):
     if album_id:
         try:
             pg.wait_for_selector(".album-header", timeout=8000)
-            pg.click("button:has-text('Details & analysis')")
+            # The disclosure is named for what it holds — the member strip and
+            # the analysis — and carries the member count.
+            pg.click("button:has-text('Members & analysis')")
+            ok("the member strip is where membership is edited",
+               pg.query_selector(".ah-member-x") is not None)
             pg.click("button:has-text('Analyze')")
             pg.wait_for_selector(".ah-measured", timeout=10000)
             ok("analysis renders its measured half",

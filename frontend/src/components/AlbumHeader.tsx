@@ -179,8 +179,15 @@ export default function AlbumHeader({ albumId, onGone }:
         </span>
         <span className="ah-spacer" />
         <ShareMenu album={album} />
-        <button className="ghost" onClick={() => setOpen((o) => !o)}>
-          {open ? "Close details" : "Details & analysis"}
+        {/* Named for what is behind it. Removing an image, setting the cover
+            and reordering all live in this panel, and "Details & analysis"
+            promises reading rather than editing — so nobody looking to drop a
+            frame from the album had a reason to open it. */}
+        <button className="ghost" onClick={() => setOpen((o) => !o)}
+                title={open ? "Hide the member strip and analysis"
+                            : "Edit membership — remove, set the cover, reorder — and analyse the set"}>
+          {open ? "Close members"
+                : `Members & analysis${album.item_count ? ` (${album.item_count})` : ""}`}
         </button>
         {confirmDelete ? (
           <button className="danger"
