@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { QASelection, QASummary, SuspectCaption } from "../api/types";
+import { Segmented } from "../components/controls";
 import { SURFACE, sequential } from "../lib/viz";
 
 /** Where to put the review threshold before the user touches it.
@@ -65,6 +66,12 @@ function SuspectHead({ scoreLabel }: { scoreLabel: string }) {
  * scroll between the reviewer and the consistency section below. */
 const LIST_PAGE = 25;
 
+/** The two rankings this page offers. Both are "worst first" over the same
+ * corpus, but they answer different questions — one caption against its image,
+ * one sample's captions against each other — so neither is a mode of the
+ * other and the switch is a peer choice, not a setting. */
+type ListKind = "suspect" | "consistency";
+
 /** Annotation QA: CLIPScore-style ranking of captions least supported by
  * their image — the mislabel-hunting workflow. */
 export default function QualityPage() {
@@ -95,6 +102,7 @@ export default function QualityPage() {
   const [selection, setSelection] = useState<QASelection | null>(null);
   const [shownSuspects, setShownSuspects] = useState(LIST_PAGE);
   const [shownInconsistent, setShownInconsistent] = useState(LIST_PAGE);
+  const [list, setList] = useState<ListKind>("suspect");
 
   useEffect(() => {
     // On a QA page, a swallowed error rendering as "no problems found" is the
@@ -280,63 +288,88 @@ export default function QualityPage() {
         </div>
       )}
 
-      <div className="section-title tight">Most suspect captions</div>
-      {/* How to read a row and how to record a call: three lines at 1440 and
-          six at 390, between the reviewer and the rows they came for. Folded,
-          not cut — the verdict:* convention is the review workflow and has to
-          stay one click from the list it governs. */}
-      <details className="caveat review-guide">
-        <summary>How to read a row, and how to record your call</summary>
-        <p>
-          Lowest image-caption agreement first. Low score + high sibling mean ⇒
-          the caption is likely wrong; all-low ⇒ the image itself is unusual.
-          Record your call as a tag on the sample page —{" "}
-          <span className="mono">verdict:caption-error · scorer-error · ambiguous ·
-          duplicate · ok</span> — and the review session becomes a filterable,
-          exportable slice.
-        </p>
-      </details>
-      {suspects.length === 0 ? (
-        <div className="empty">No scored captions to show.</div>
-      ) : (
+      {/* Two rankings of the same corpus, and a reviewer reads one at a time.
+          Stacked, the second one began ~1,900px below the fold: to learn that
+          the consistency ranking existed you had to scroll past every row of
+          the first. They are peers, so they are tabs — and the list scrolls
+          inside its own frame, which keeps the distribution, the review line
+          and the export controls on screen while the rows move. */}
+      <div className="list-switch">
+        <div className="section-title tight" style={{ margin: 0 }}>
+          {list === "suspect" ? "Most suspect captions" : "Least consistent samples"}
+        </div>
+        {inconsistent.length > 0 && (
+          <Segmented
+            label="Which ranking to review"
+            value={list}
+            onChange={(v) => setList(v as ListKind)}
+            options={[
+              { value: "suspect", label: `Suspect captions${suspects.length ? ` (${suspects.length})` : ""}` },
+              { value: "consistency", label: `Least consistent (${inconsistent.length})` },
+            ]}
+          />
+        )}
+      </div>
+
+      {list === "suspect" ? (
         <>
-          <div className="suspect-list">
-            <SuspectHead scoreLabel="agreement" />
-            {suspects.slice(0, shownSuspects).map((s, i) => (
-              <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="agreement" />
-            ))}
-          </div>
-          {suspects.length > shownSuspects && (
-            <button className="ghost suspect-more"
-                    onClick={() => setShownSuspects(shownSuspects + LIST_PAGE)}>
-              Show {Math.min(LIST_PAGE, suspects.length - shownSuspects)} more
-              ({suspects.length - shownSuspects} loaded beyond this point)
-            </button>
+          {/* How to read a row and how to record a call: three lines at 1440 and
+              six at 390, between the reviewer and the rows they came for. Folded,
+              not cut — the verdict:* convention is the review workflow and has to
+              stay one click from the list it governs. */}
+          <details className="caveat review-guide">
+            <summary>How to read a row, and how to record your call</summary>
+            <p>
+              Lowest image-caption agreement first. Low score + high sibling mean ⇒
+              the caption is likely wrong; all-low ⇒ the image itself is unusual.
+              Record your call as a tag on the sample page —{" "}
+              <span className="mono">verdict:caption-error · scorer-error · ambiguous ·
+              duplicate · ok</span> — and the review session becomes a filterable,
+              exportable slice.
+            </p>
+          </details>
+          {suspects.length === 0 ? (
+            <div className="empty">No scored captions to show.</div>
+          ) : (
+            <div className="suspect-frame">
+              <div className="suspect-list">
+                <SuspectHead scoreLabel="agreement" />
+                {suspects.slice(0, shownSuspects).map((s, i) => (
+                  <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="agreement" />
+                ))}
+              </div>
+              {suspects.length > shownSuspects && (
+                <button className="ghost suspect-more"
+                        onClick={() => setShownSuspects(shownSuspects + LIST_PAGE)}>
+                  Show {Math.min(LIST_PAGE, suspects.length - shownSuspects)} more
+                  ({suspects.length - shownSuspects} loaded beyond this point)
+                </button>
+              )}
+            </div>
           )}
         </>
-      )}
-
-      {inconsistent.length > 0 && (
+      ) : (
         <>
-          <div className="section-title">Least consistent samples</div>
-          <p className="meta-line">
+          <p className="meta-line tight">
             Samples whose 5 captions disagree most with each other — ambiguous
             images or outlier annotations. The score is the sample's caption
             consistency, lowest first.
           </p>
-          <div className="suspect-list">
-            <SuspectHead scoreLabel="consistency" />
-            {inconsistent.slice(0, shownInconsistent).map((s, i) => (
-              <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="consistency" />
-            ))}
+          <div className="suspect-frame">
+            <div className="suspect-list">
+              <SuspectHead scoreLabel="consistency" />
+              {inconsistent.slice(0, shownInconsistent).map((s, i) => (
+                <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="consistency" />
+              ))}
+            </div>
+            {inconsistent.length > shownInconsistent && (
+              <button className="ghost suspect-more"
+                      onClick={() => setShownInconsistent(shownInconsistent + LIST_PAGE)}>
+                Show {Math.min(LIST_PAGE, inconsistent.length - shownInconsistent)} more
+                ({inconsistent.length - shownInconsistent} loaded beyond this point)
+              </button>
+            )}
           </div>
-          {inconsistent.length > shownInconsistent && (
-            <button className="ghost suspect-more"
-                    onClick={() => setShownInconsistent(shownInconsistent + LIST_PAGE)}>
-              Show {Math.min(LIST_PAGE, inconsistent.length - shownInconsistent)} more
-              ({inconsistent.length - shownInconsistent} loaded beyond this point)
-            </button>
-          )}
         </>
       )}
     </div>
