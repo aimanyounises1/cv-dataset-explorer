@@ -11,11 +11,11 @@ tests.
 ```mermaid
 flowchart TB
   subgraph fe["Frontend — React 18 + TypeScript, Vite"]
-    UI["Gallery · Sample · Map · Stats · Quality · Benchmark · Assistant<br/>all view state lives in the URL query string"]
+    UI["Gallery · Sample · Compare · Map · Stats · Quality · Benchmark · Assistant<br/>search and filter state lives in the URL query string"]
   end
 
   subgraph be["Backend — FastAPI, one process, sync endpoints on the threadpool"]
-    RT["Routers: samples · search · export · stats · map · tags · views<br/>describe · attributes · qa · eval · leakage · admin · chat"]
+    RT["Routers: samples · search · stats · map · tags · views · describe · attributes<br/>qa · qa_run · eval · leakage · admin · chat · albums · activity · annotations"]
     SV["Service layer: run_search · build_filters · filtered_id_set<br/>one implementation, shared by REST, export and the agent tools"]
   end
 
@@ -27,7 +27,7 @@ flowchart TB
   end
 
   subgraph st["Local state — all of it under backend/data, gitignored"]
-    DB[("SQLite in WAL mode<br/>samples · captions · FTS5 porter · tags · attributes · axes · saved_views")]
+    DB[("SQLite in WAL mode<br/>samples · captions · FTS5 porter · tags · attributes · axes · saved_views<br/>albums · album_items · annotations · activity_events")]
     NP[["embeddings/*.npy — image, caption, PRISM mu and log-sigma, hubness penalty"]]
     IM[["images/ and thumbs/ on disk, served read-only under /media"]]
     CA[["cache/ — benchmark results, keyed by protocol version and artifact stamps"]]
@@ -66,6 +66,26 @@ flowchart TB
 
 Solid edges are always present; dotted edges are the optional layers, and every
 one of them has a defined behaviour when it is missing (below).
+
+The workspace surfaces added in the 2026-07-28 wave — albums (ordered
+collections with provenance), region annotations (rows over immutable images),
+the activity log (rides the caller's transaction), composed retrieval with
+scenario grouping, and the compare canvas — are all additive tables and routers
+over the same service layer: no new processes, no schema migrations, and the
+degradation rule below applies to each of them.
+
+**Retrieval providers.** One active provider supplies both the query encoder
+and the vector index: `qwen3_vl` (Qwen3-VL-Embedding-2B, in-process through
+sentence-transformers — Ollama serves language models only and cannot host it)
+is preferred, `siglip2` is the automatic fallback, and every step down the
+chain carries a named reason that the status API and the rail surface. Each
+provider owns its index directory with a manifest (model id, measured
+dimension, prompt version, similarity floor), so two embedding spaces can
+never mix; fingerprints, saved-view provenance, the hubness penalty and the
+benchmark cache are all provider-scoped. The UMAP map, clusters, caption
+agreement and difficulty axes are computed in the SigLIP space at ingest time
+and are deliberately not re-derived by a provider switch — they are stored,
+SigLIP-derived signals and the docs say so.
 
 ## What the request path is allowed to do
 
@@ -109,7 +129,9 @@ under the same label.
 
 | Layer | Probe | Behaviour when absent |
 | --- | --- | --- |
+| Preferred retrieval provider (qwen3_vl) | provider probe: stack imports, cached weights, index manifest | falls back to SigLIP 2 with the named reason and the rerun command; the flat SigLIP index is never touched |
 | Semantic and hybrid search | `get_index()` and `get_embedder()` | ranks by BM25 instead, sets `degraded`, `mode_used: keyword`, and a message naming the command to run |
+| Composed search (`?like=`/`?unlike=`) | index + encoder presence | ranks the steering text by keyword instead, says so, and reports the references as ignored |
 | Boosted search | `get_prism_index(index)` | falls back to semantic, names `python -m app.train_prism`, and publishes a cosine basis rather than `prism_ll` |
 | Embedding map, duplicates, similar images | index presence | the view states what to run |
 | Caption QA, attributes, difficulty axes | analysis columns | the view states what to run |
