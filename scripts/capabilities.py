@@ -179,7 +179,8 @@ def render() -> str:
     w("")
     w(f"Model `{agents['model']}` via local Ollama. The orchestrator selects up to")
     w(f"{agents['max_parallel_lanes']} specialists per request and runs them in")
-    w(f"parallel; each lane is bounded at {agents['lane_timeout_s']:.0f}s.")
+    w(f"parallel; LangGraph bounds each lane at {agents['lane_timeout_s']:.0f}s and "
+      f"the API bounds the complete turn at {agents['turn_budget_s']:.0f}s.")
     w("")
     for spec in agents["specialists"]:
         cost = " *(expensive — runs alone)*" if spec["cost"] == "expensive" else ""

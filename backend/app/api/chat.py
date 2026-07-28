@@ -174,6 +174,12 @@ def agent_topology():
         "max_parallel_lanes": registry.MAX_PARALLEL_LANES,
         "model": config.CHAT_MODEL,
         "lane_timeout_s": config.AGENT_LANE_TIMEOUT,
+        # Both bounds, because quoting the lane alone understates what a
+        # waiting person is promised: the lane bound is per-specialist, the
+        # turn bound is the one they actually experience. The capabilities doc
+        # is generated from this payload, so a bound it cannot read is a bound
+        # the documentation cannot state.
+        "turn_budget_s": config.AGENT_TURN_BUDGET,
     }
 
 
