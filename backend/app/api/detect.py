@@ -24,7 +24,7 @@ def detect_status():
     """Availability probe, so the UI can offer the control only when it works."""
     ok, reason = detect_ml.detect_ready()
     return {"ready": ok, "reason": reason, "model": detect_ml.DETECT_MODEL,
-            "measured": "256 ms/image on the reference M4 Max (MPS)"}
+            "measured": "~330 ms/image warm on the reference M4 Max (MPS)"}
 
 
 class DetectRequest(BaseModel):
