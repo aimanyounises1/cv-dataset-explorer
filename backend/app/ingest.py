@@ -96,6 +96,110 @@ def compute_embeddings(conn) -> None:
     logger.info("Saved %d embeddings (dim=%d)", len(ids), embeddings.shape[1])
 
 
+def compute_embeddings_provider(conn, provider: str) -> None:
+    """Embed the corpus with a non-default provider into its own index dir.
+
+    Images and captions both: the retrieval benchmark's row selection needs a
+    caption index in the active space. Arrays are written atomically and the
+    manifest last, so an interrupted run can never masquerade as a complete
+    index — a directory without a complete manifest is reported as such and the
+    fix is simply to re-run this command. UMAP, clusters, caption agreement and
+    the difficulty axes are deliberately NOT recomputed here: those stored
+    signals are SigLIP-derived and documented as such.
+    """
+    import hashlib
+    import time as _time
+    from datetime import datetime, timezone
+
+    from .ml import providers as prov
+
+    encoder = prov.load_encoder_for(provider)  # raises with the real error
+    emb_dir = config.emb_dir_for(provider)
+    emb_dir.mkdir(parents=True, exist_ok=True)
+    # A previous manifest must not vouch for arrays about to be replaced.
+    (emb_dir / prov.MANIFEST_NAME).unlink(missing_ok=True)
+
+    rows = conn.execute("SELECT id, filename FROM samples ORDER BY id").fetchall()
+    if not rows:
+        logger.warning("No samples in DB; nothing to embed.")
+        return
+
+    ids, chunks = [], []
+    batch_ids, batch_imgs = [], []
+    t0 = _time.perf_counter()
+
+    def flush():
+        if batch_imgs:
+            chunks.append(encoder.encode_images(batch_imgs))
+            ids.extend(batch_ids)
+            batch_ids.clear()
+            batch_imgs.clear()
+
+    for row in tqdm(rows, desc=f"Embedding images [{provider}]"):
+        batch_ids.append(row["id"])
+        batch_imgs.append(Image.open(config.IMAGES_DIR / row["filename"]).convert("RGB"))
+        if len(batch_imgs) >= config.QWEN_EMBED_BATCH:
+            flush()
+    flush()
+    embs = np.concatenate(chunks, axis=0)
+    image_seconds = _time.perf_counter() - t0
+    prov.atomic_save_npy(emb_dir / "sample_ids.npy", np.array(ids, dtype=np.int64))
+    prov.atomic_save_npy(emb_dir / "image_embeddings.npy", embs)
+
+    cap_rows = conn.execute("SELECT id, text FROM captions ORDER BY id").fetchall()
+    cvecs = []
+    t1 = _time.perf_counter()
+    for i in tqdm(range(0, len(cap_rows), 256), desc=f"Embedding captions [{provider}]"):
+        cvecs.append(encoder.encode_texts(
+            [r["text"] for r in cap_rows[i:i + 256]], kind="document"))
+    caps = (np.concatenate(cvecs, axis=0) if cvecs
+            else np.zeros((0, embs.shape[1]), np.float32))
+    caption_seconds = _time.perf_counter() - t1
+    prov.atomic_save_npy(emb_dir / "caption_ids.npy",
+                         np.array([r["id"] for r in cap_rows], dtype=np.int64))
+    prov.atomic_save_npy(emb_dir / "caption_embeddings.npy", caps)
+
+    def _ver(pkg):
+        try:
+            from importlib.metadata import version
+            return version(pkg)
+        except Exception:
+            return None
+
+    prov.write_manifest(
+        emb_dir,
+        provider=provider,
+        model_id=prov.provider_model_id(provider),
+        dim=int(embs.shape[1]),  # measured from the arrays, never assumed
+        prompt_version=prov.PROMPT_VERSION,
+        normalized=True,
+        corpus_count=len(ids),
+        caption_count=len(cap_rows),
+        ids_sha1=hashlib.sha1(np.array(ids, dtype=np.int64).tobytes()).hexdigest()[:12],
+        # Same derivation as the documented SigLIP similarity floor: measured
+        # 10th percentile of each image's self-excluded top-1 cosine.
+        sim_floor_p10=_sim_floor_p10(embs),
+        image_encode_seconds=round(image_seconds, 1),
+        caption_encode_seconds=round(caption_seconds, 1),
+        created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        versions={p: _ver(p) for p in
+                  ("sentence-transformers", "torch", "transformers")},
+        status="complete",
+    )
+    logger.info("Saved %d image + %d caption embeddings (dim=%d) under %s",
+                len(ids), len(cap_rows), embs.shape[1], emb_dir)
+
+
+def _sim_floor_p10(embs: np.ndarray, chunk: int = 1024) -> float:
+    top1 = np.empty(len(embs), dtype=np.float32)
+    for s in range(0, len(embs), chunk):
+        block = embs[s:s + chunk] @ embs.T
+        for bi in range(block.shape[0]):
+            block[bi, s + bi] = -np.inf
+        top1[s:s + block.shape[0]] = block.max(axis=1)
+    return round(float(np.percentile(top1, 10)), 4)
+
+
 def compute_projection(conn) -> None:
     from .ml.index import EmbeddingIndex
     from .ml.projection import cluster, project_2d
@@ -122,6 +226,10 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="Cap sample count (dev runs)")
     parser.add_argument("--skip-embeddings", action="store_true",
                         help="Skip SigLIP embeddings (disables semantic search/map)")
+    parser.add_argument("--provider", choices=["siglip2", "qwen3_vl"], default="siglip2",
+                        help="Retrieval provider to embed for. qwen3_vl builds an "
+                             "additive index under data/embeddings/qwen3_vl/ and "
+                             "leaves the SigLIP index untouched.")
     args = parser.parse_args()
 
     config.ensure_dirs()
@@ -132,7 +240,13 @@ def main() -> int:
     total = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
     logger.info("Ingested %d new samples (%d total).", n_new, total)
 
-    if not args.skip_embeddings:
+    if args.provider != "siglip2":
+        # Additive provider index; the SigLIP artifacts (and the SigLIP-derived
+        # UMAP/clusters/agreement/axes) are left exactly as they are.
+        compute_embeddings_provider(conn, args.provider)
+        logger.info("Activate it with CVDE_EMBED_PROVIDER=%s (the default) and "
+                    "POST /api/admin/reload.", args.provider)
+    elif not args.skip_embeddings:
         compute_embeddings(conn)
         compute_projection(conn)
         from .analyze import run_all
