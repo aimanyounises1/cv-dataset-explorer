@@ -753,13 +753,20 @@ export default function GalleryPage() {
     && Math.max(...distScores) > Math.min(...distScores);
   /* The line: wherever the reader put it, else the measured floor when it
    * falls inside these scores, else the bottom of the range — which dims
-   * nothing, because the corpus never said where the line belongs. */
+   * nothing, because the corpus never said where the line belongs.
+   *
+   * The floor may only seed a RAW-cosine ranking. `cosine_adj` is that cosine
+   * minus a query-bank hubness penalty, so the corpus's image-to-image floor
+   * measures a different quantity and would start the line at a number that
+   * means nothing on this axis. cos* therefore opens at its own minimum, which
+   * dims nothing until the reader moves it. */
   const dimLine = (() => {
     if (!showDist) return 0;
     const lo = Math.min(...distScores);
     const hi = Math.max(...distScores);
-    const fallback = simFloor != null && simFloor > lo && simFloor < hi ? simFloor : lo;
-    return Math.min(hi, Math.max(lo, dimBelow ?? fallback));
+    const floorSeeds = meta.basis === "cosine"
+      && simFloor != null && simFloor > lo && simFloor < hi;
+    return Math.min(hi, Math.max(lo, dimBelow ?? (floorSeeds ? (simFloor as number) : lo)));
   })();
 
 
