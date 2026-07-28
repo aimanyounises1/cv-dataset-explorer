@@ -1537,6 +1537,33 @@ mark {
    (ellipsized; full text on the title), then figures in aligned mono columns.
    The card grid this replaces spent ~120px of height per suspect and put the
    consistency section thousands of pixels downpage. */
+/* Title on the left, the ranking switch on the right, on one line above the
+   rows they govern. */
+.list-switch {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap;
+  max-width: 860px; margin: 16px 0 10px;
+}
+/* The switch is two peers, not a rail row: it takes its content's width and
+   sits inline instead of filling the column. */
+.list-switch .segmented { width: auto; flex: 0 0 auto; margin: 0; }
+
+/* The rows scroll, the page does not. A reviewer moving the review line wants
+   the distribution and the export controls to stay put while the list under
+   them changes — stacked full-height, every list-length change pushed the
+   controls off screen. The floor keeps the frame useful on a short window. */
+.suspect-frame {
+  max-width: 860px;
+  max-height: calc(100vh - 430px); min-height: 300px;
+  overflow-y: auto; overscroll-behavior: contain;
+  padding-right: 4px;
+  /* `overflow-y: auto` clips what you see but does NOT stop the clipped rows
+     from counting towards the root scroller: measured, the page still scrolled
+     807px into empty canvas below the frame. Layout containment is what keeps
+     the subtree's height its own business — with it the document is 974px and
+     the only thing that scrolls the rows is the frame. */
+  contain: layout;
+}
 .suspect-list {
   display: flex; flex-direction: column; gap: 3px;
   max-width: 860px;   /* a caption line, not a wall — prose measure rules */
@@ -1586,7 +1613,18 @@ mark {
 .suspect-head .suspect-score, .suspect-head .suspect-sib { width: 78px; }
 .suspect-head .suspect-split { font-family: var(--font-sans); font-size: 9.5px; }
 .suspect-more { margin-top: 10px; }
+/* Inside a scrolling frame the column labels are the one row that must not
+   leave — without this the figures lose their names after the first screen. */
+.suspect-frame .suspect-head {
+  position: sticky; top: 0; z-index: 2;
+  background: var(--bg); padding-top: 2px; padding-bottom: 4px;
+}
 @media (max-width: 700px) {
+  /* One scroll on a phone. A frame inside the page scroll means a thumb has to
+     find which of two surfaces it is on, so the page takes the whole job back. */
+  .suspect-frame { max-height: none; min-height: 0; overflow: visible; }
+  .list-switch { margin-top: 12px; }
+  .list-switch .segmented { width: 100%; }
   .suspect-sib, .suspect-head .suspect-sib { display: none; }
   /* 64px, because "validation" is the widest split name and a 46px column had
      it spilling past the row's right edge; the caption column absorbs the
