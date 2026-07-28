@@ -9,7 +9,7 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 49 HTTP endpoints · 4 agent specialists · 18 agent tools · 16 tested workflows
+- 51 HTTP endpoints · 4 agent specialists · 18 agent tools · 16 tested workflows
 
 ## Views
 
@@ -132,6 +132,8 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `DELETE /api/albums/{album_id}` | |
 | `GET /api/albums/{album_id}` | |
 | `PATCH /api/albums/{album_id}` | |
+| `GET /api/albums/{album_id}/analysis` | |
+| `POST /api/albums/{album_id}/analysis/summary` | |
 | `POST /api/albums/{album_id}/items` | |
 | `PUT /api/albums/{album_id}/items/order` | |
 | `DELETE /api/albums/{album_id}/items/{sample_id}` | |
