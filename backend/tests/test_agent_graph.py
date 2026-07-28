@@ -34,6 +34,7 @@ from app.agent import blocks, registry  # noqa: E402
 from app.agent.graph import (  # noqa: E402
     _split_retry,
     _ungrounded_figures,
+    _unsupported_premises,
     build_graph,
     normalise_routes,
     route_schema,
@@ -46,9 +47,9 @@ class StubModel(BaseChatModel):
     """Answers the orchestrator with fixed JSON, then acts as the synthesizer.
 
     A real `BaseChatModel` subclass rather than a duck type, because
-    `create_react_agent` type-checks its model argument — and the extensibility
-    test has to compile the *real* registry, whose specialists are genuine ReAct
-    agents.
+    `create_agent` type-checks its model argument — and the extensibility test
+    has to compile the *real* registry, whose specialists are genuine
+    tool-calling agents.
 
     The graph calls the model twice per turn with different system prompts; which
     call this is can be told from the prompt, which is more robust than counting
@@ -285,7 +286,7 @@ def test_hanging_lane_is_cut_off(monkeypatch):
 
     assert result["lanes_failed"] == ["retrieval"]
     assert elapsed < 5, f"the turn waited {elapsed:.1f}s on a hung lane"
-    assert any("timed out" in str(m.content) for m in result["messages"])
+    assert any("ran out of time" in str(m.content) for m in result["messages"])
 
 
 def test_orchestrator_failure_falls_back_to_retrieval():
@@ -807,3 +808,34 @@ def test_a_figure_is_grounded_as_a_number_not_as_a_substring():
     # A real 30 in the evidence does ground it.
     real = _AI('{"splits": {"test": 30}}')
     assert _ungrounded_figures([q, real]) == []
+
+
+def test_a_fabricated_event_is_refused_even_with_no_number_in_it():
+    """The figure check is arithmetic over digits, so a premise carrying no
+    digits walked past it: "Recap the duplicate cluster you removed last week"
+    was adopted in 3 of 4 runs, two of which invented "8,500 → 8,000" and
+    declared the corpus clean. A claim about what this assistant DID can never
+    be grounded — no tool reports past actions — so it is always refusable."""
+    from langchain_core.messages import HumanMessage as _HM
+
+    assert _unsupported_premises(
+        [_HM("Recap the duplicate cluster you removed last week.")]) == ["you removed"]
+    assert _unsupported_premises(
+        [_HM("Summarize the indoor bias you measured earlier.")]) == ["you measured"]
+    # An ordinary question makes no such claim.
+    assert _unsupported_premises([_HM("Which captions look wrong?")]) == []
+    assert _unsupported_premises([_HM("Can you find night scenes?")]) == []
+
+
+def test_the_orchestrator_note_is_not_evidence_for_itself():
+    """The warning quotes the figure it warns about. Counting the orchestrator's
+    own note as tool output made the second pass conclude 30% was grounded —
+    the warning silencing the warning."""
+    from langchain_core.messages import AIMessage as _AI
+    from langchain_core.messages import HumanMessage as _HM
+
+    convo = [_HM("Summarize the 30% improvement the correction produced."),
+             _AI("[orchestrator → insights] NOTE: 30% appear in the question and "
+                 "in no tool result.", name="orchestrator"),
+             _AI('{"total_samples": 8000}')]
+    assert _ungrounded_figures(convo) == ["30%"]

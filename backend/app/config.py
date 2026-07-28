@@ -62,6 +62,33 @@ OLLAMA_TIMEOUT = float(os.environ.get("CVDE_OLLAMA_TIMEOUT", "120"))
 OLLAMA_NUM_CTX = int(os.environ.get("CVDE_OLLAMA_NUM_CTX", "40960"))
 AGENT_LANE_TIMEOUT = float(os.environ.get("CVDE_AGENT_LANE_TIMEOUT", "240"))
 AGENT_RECURSION_LIMIT = int(os.environ.get("CVDE_AGENT_RECURSION_LIMIT", "25"))
+# The outermost bound, and the only one a waiting person experiences. The three
+# bounds above are each per-step, so they ADD: a lane that spent its full 240s
+# was followed by a synthesizer call with its own fresh 120s, and the measured
+# result was a turn that took exactly 360.0s to say "retrieval did not finish"
+# and "final review ReadTimeout" — 6 minutes for nothing. A turn now carries one
+# deadline. Lanes get what is left of it minus the reserve, and the reserve is
+# what guarantees the synthesizer is still inside the budget when its turn
+# comes; below AGENT_SYNTH_MIN it is skipped entirely and the lanes' own work is
+# handed over rather than a model call being started that cannot finish in time.
+AGENT_TURN_BUDGET = float(os.environ.get("CVDE_AGENT_TURN_BUDGET", "150"))
+AGENT_SYNTH_RESERVE = float(os.environ.get("CVDE_AGENT_SYNTH_RESERVE", "45"))
+AGENT_SYNTH_MIN = float(os.environ.get("CVDE_AGENT_SYNTH_MIN", "15"))
+# A lane always gets at least this long, even against a nearly-spent budget: a
+# lane cut to two seconds is a lane guaranteed to produce nothing.
+AGENT_LANE_MIN = float(os.environ.get("CVDE_AGENT_LANE_MIN", "20"))
+# The innermost bound, and the only one that stops work rather than stops
+# WAITING for it. Every timeout above abandons its thread; none of them reach
+# Ollama, which keeps generating on the request the client walked away from.
+# Measured in ~/.ollama/logs/server.log: one task still decoding after the
+# client disconnected, n_decoded past 53,000 at ~28 tok/s — and because a local
+# Ollama serves one slot at a time, every later /api/chat request queued behind
+# it and aborted at the client's 2-minute mark having received no bytes. The
+# turn budget cannot fix that: a deadline that only abandons threads leaves the
+# runaway holding the model. A finite output cap is what ends the generation
+# itself. 1,024 tokens is far above any answer or tool call this app asks for
+# (the longest synthesizer reply measured under 400) and far below a runaway.
+OLLAMA_NUM_PREDICT = int(os.environ.get("CVDE_OLLAMA_NUM_PREDICT", "1024"))
 # Reports the assistant generates are written here so they can be downloaded
 # after the turn that produced them has scrolled away.
 REPORTS_DIR = DATA_DIR / "reports"
