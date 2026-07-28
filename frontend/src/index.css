@@ -312,6 +312,64 @@ body {
 .flow-hint { color: var(--text-faint); font-size: 12px; }
 @media (max-width: 1100px) { .hero { grid-template-columns: 1fr; } }
 
+/* ---- Reference chips + scenario proposals ------------------------------
+   The chips ARE the similarity trail: each one is a step the URL remembers,
+   sage ring pulls, red ring pushes, and Back walks the trail. Scenario cards
+   are proposals — three at most, temporary until saved as an album. */
+.ref-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 12px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.ref-chip { position: relative; width: 40px; height: 32px; flex-shrink: 0; }
+.ref-chip img, .ref-ph {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  border-radius: 7px; background: var(--bg-inset);
+}
+.ref-chip.like img { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ref-chip.unlike img { outline: 2px solid var(--red); outline-offset: 1px; }
+.ref-chip button {
+  position: absolute; top: -7px; right: -7px; width: 17px; height: 17px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--border-strong);
+  background: var(--bg-raised); color: var(--text-dim);
+  font-size: 11px; line-height: 1; cursor: pointer; padding: 0;
+}
+.ref-chip button:hover { color: var(--red); border-color: var(--red); }
+.ref-hint { font-size: 12px; color: var(--text-faint); }
+.link-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--accent); font-size: inherit; font-family: inherit;
+}
+.link-btn:hover { text-decoration: underline; }
+.scenario-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.scenario-card {
+  padding: 12px 14px;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.scenario-head { display: flex; align-items: baseline; gap: 8px; }
+.scenario-count {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-faint);
+}
+.scenario-evidence { font-size: 11.5px; color: var(--text-faint); margin: 3px 0 8px; }
+.scenario-actions { display: flex; align-items: center; gap: 10px; }
+
+/* Steering buttons inside the hover overlay: the overlay itself ignores the
+   pointer so the card stays a link, but these two act. */
+.card-actions { display: flex; gap: 6px; pointer-events: auto; }
+.card-actions button {
+  padding: 2px 8px; font-size: 11px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-raised); color: var(--text-dim);
+  transition: color var(--t-quick), border-color var(--t-quick);
+}
+.card-actions button:hover { color: var(--accent-deep); border-color: var(--accent); }
+
 /* ---- Card hover details ------------------------------------------------
    The images lead; the diagnostics wait. The strips live in an overlay that
    paints on hover or keyboard focus — still in the DOM for tests and

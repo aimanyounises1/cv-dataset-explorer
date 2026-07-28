@@ -319,3 +319,31 @@ export interface AlbumDetail extends AlbumSummary {
   updated_at: string;
   items: SampleCard[];                 // in album order
 }
+
+/** One explainable scenario group: a k-means cluster over the top of a
+ * ranking, labelled from measured attributes — templated, never generated. */
+export interface ScenarioGroup {
+  label: string;
+  evidence: string;
+  count: number;
+  sample_ids: number[];
+}
+export interface ScenarioResponse {
+  groups: ScenarioGroup[];
+  basis: string;
+}
+
+/** Composed search body: text and reference images pull, negatives push. */
+export interface ComposedQuery {
+  text?: string;
+  positive_ids?: number[];
+  negative_ids?: number[];
+  top_k?: number;
+  offset?: number;
+  split?: string;
+  tag?: string;
+  vlm_tag?: string;
+  attr?: string[];
+  album?: number;
+  max_agreement?: number;
+}

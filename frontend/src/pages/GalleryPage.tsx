@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { AXES, AlbumSummary, SampleCard, SearchMode, TermStat } from "../api/types";
+import { AXES, AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat } from "../api/types";
 import { AXIS_META } from "../components/AxisFilters";
 import AxisLegend from "../components/AxisLegend";
 import { albumsChanged } from "../components/AlbumShelf";
@@ -44,6 +44,21 @@ export default function GalleryPage() {
   const mode = (searchParams.get("mode") ?? "hybrid") as SearchMode;
   const page = Math.max(1, Number(searchParams.get("page")) || 1);
   const sort = searchParams.get("sort") ?? "";
+  const navigate = useNavigate();
+  /* Reference images live in the URL (?like=76,2259&unlike=13): a composed
+   * search is a search, and a colleague must be able to open the same one
+   * from a pasted link. The similarity trail IS these chips plus the
+   * browser's own history — stepping back is Back, narrowing is a chip. */
+  const likeIds = useMemo(() => (searchParams.get("like") ?? "")
+    .split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0), [searchParams]);
+  const unlikeIds = useMemo(() => (searchParams.get("unlike") ?? "")
+    .split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0), [searchParams]);
+  const composed = likeIds.length > 0 || unlikeIds.length > 0;
+  const [refThumbs, setRefThumbs] = useState<Record<number, string>>({});
+  /* Scenario groups are proposals, not state: at most three, on demand,
+   * temporary until "Save as album" makes one durable. */
+  const [scenarios, setScenarios] = useState<ScenarioGroup[] | null>(null);
+  const [scenBusy, setScenBusy] = useState(false);
   // Every membership constraint — split, tag, attribute, axes, id list, the
   // quality threshold, the cluster — is now owned by the rail and read back
   // from the URL. The gallery keeps only what orders or renders the view.
@@ -76,6 +91,36 @@ export default function GalleryPage() {
   const [albumName, setAlbumName] = useState("");
   const [albumBusy, setAlbumBusy] = useState(false);
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
+
+  useEffect(() => {
+    const missing = [...likeIds, ...unlikeIds].filter((id) => !refThumbs[id]);
+    missing.forEach((id) => {
+      api.getSample(id)
+        .then((d) => setRefThumbs((prev) => ({ ...prev, [id]: d.thumb_url })))
+        .catch(() => {});
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [likeIds, unlikeIds]);
+
+  const editRef = (id: number, role: "like" | "unlike", add: boolean) => {
+    const read = (k: string) => new Set((searchParams.get(k) ?? "").split(",").filter(Boolean));
+    const mine = read(role);
+    const other = role === "like" ? "unlike" : "like";
+    const theirs = read(other);
+    if (add) { mine.add(String(id)); theirs.delete(String(id)); }
+    else mine.delete(String(id));
+    // Adding a reference PUSHES history — each step of the similarity trail
+    // is a place Back can return to. Removing one replaces, because undoing
+    // a removal is just adding again.
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      const write = (k: string, v: string) => { if (v) p.set(k, v); else p.delete(k); };
+      write(role, [...mine].join(","));
+      write(other, [...theirs].join(","));
+      p.delete("page");
+      return p;
+    }, { replace: !add });
+  };
 
   useEffect(() => {
     if (!selecting) return;
@@ -216,7 +261,8 @@ export default function GalleryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInput]);
 
-  const filterKey = [query, mode, sort, JSON.stringify(selection.params)].join("|");
+  const filterKey = [query, mode, sort, searchParams.get("like") ?? "",
+    searchParams.get("unlike") ?? "", JSON.stringify(selection.params)].join("|");
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -225,13 +271,37 @@ export default function GalleryPage() {
       setError(null);
       // One page of whichever ranking is active. Search pages by offset into a
       // fusion held at a fixed depth, so pages partition one stable ranking.
+      // Set when composed search falls back: the branch that ultimately
+      // serves the request must carry this message instead of clearing it.
+      let fallbackMsg: string | null = null;
       const fetchPage = async (p: number) => {
+        if (composed) {
+          try {
+            const res = await api.composedSearch({
+              text: query || undefined,
+              positive_ids: likeIds, negative_ids: unlikeIds,
+              top_k: PER_PAGE, offset: (p - 1) * PER_PAGE,
+              ...(selection.params as object),
+            }, ctrl.signal);
+            setNotice(res.degraded ? res.message ?? null : null);
+            setMeta({ basis: res.score_basis, rrfK: null, terms: [],
+                      depthLimit: res.depth_limit, depthReached: res.depth_reached });
+            return { items: res.items, total: null as number | null, more: res.has_more };
+          } catch (e) {
+            if (e instanceof Error && e.message.startsWith("404")) {
+              // The endpoint ships in a parallel lane: degrade honestly to the
+              // text ranking rather than a blank page, and say so.
+              fallbackMsg = "Composed search is not available on this backend yet — "
+                          + "showing the unsteered ranking; reference chips are kept.";
+            } else { throw e; }
+          }
+        }
         if (query) {
           const res = await api.search(
             query, mode,
             { ...selection.params, sort: sort || undefined,
               top_k: PER_PAGE, offset: (p - 1) * PER_PAGE }, ctrl.signal);
-          setNotice(res.degraded ? res.message ?? null : null);
+          setNotice(res.degraded ? res.message ?? null : fallbackMsg);
           setMeta({ basis: res.score_basis, rrfK: res.rrf_k, terms: res.term_stats ?? [],
                     idsResolved: res.ids_resolved, depthLimit: res.depth_limit,
                     depthReached: res.depth_reached });
@@ -240,7 +310,7 @@ export default function GalleryPage() {
         const res = await api.listSamples(
           { page: p, per_page: PER_PAGE, ...selection.params,
             sort: sort || undefined }, ctrl.signal);
-        setNotice(null);
+        setNotice(fallbackMsg);
         setMeta({ terms: [] });
         return { items: res.items, total: res.total, more: p * PER_PAGE < res.total };
       };
@@ -293,7 +363,29 @@ export default function GalleryPage() {
 
   // The URL remains the source of truth: touching any filter, query or page
   // dismisses the in-memory image results rather than competing with them.
-  useEffect(() => { setImageQuery(null); }, [filterKey, page]);
+  useEffect(() => { setImageQuery(null); setScenarios(null); }, [filterKey, page]);
+
+  const suggestGroups = () => {
+    setScenBusy(true);
+    api.scenarioGroups({
+      text: query || undefined,
+      positive_ids: likeIds, negative_ids: unlikeIds,
+      ...(selection.params as object),
+    })
+      .then((r) => setScenarios(r.groups))
+      .catch((e) => showToast(e instanceof Error && e.message.startsWith("404")
+        ? "Scenario groups need the updated backend — not available yet"
+        : "Could not group these results"))
+      .finally(() => setScenBusy(false));
+  };
+
+  const saveGroupAsAlbum = (gr: ScenarioGroup) => {
+    api.createAlbum(gr.label)
+      .then((a) => api.addToAlbum(a.id, gr.sample_ids).then(() => a))
+      .then((a) => { albumsChanged(); showToast(`Saved “${gr.label}” (${gr.sample_ids.length})`);
+                     setParams({ album: String(a.id), q: "", like: "", unlike: "", page: "" }); })
+      .catch((e) => showToast(e instanceof Error ? e.message : "Could not save album"));
+  };
 
   const common = meta.terms.filter((t) => t.common);
   const missing = meta.terms.filter((t) => t.images === 0);
@@ -428,6 +520,16 @@ export default function GalleryPage() {
                   onClick={() => setPicked(new Set())}>
             Clear
           </button>
+          {picked.size === 2 && (
+            <button className="ghost"
+                    title="Open these two side by side with synchronized zoom"
+                    onClick={() => {
+                      const [a, b] = [...picked];
+                      navigate(`/compare?a=${a}&b=${b}`);
+                    }}>
+              Compare
+            </button>
+          )}
           <button className="ghost"
                   onClick={() => { setSelecting(false); setPicked(new Set()); }}>
             Done
@@ -440,10 +542,37 @@ export default function GalleryPage() {
 
 
 
+      {composed && (
+        <div className="ref-row" aria-label="Reference images steering this search">
+          {likeIds.map((id) => (
+            <span className="ref-chip like" key={`l${id}`}
+                  title="Positive reference — results should feel like this">
+              {refThumbs[id] ? <img src={refThumbs[id]} alt="" /> : <span className="ref-ph" />}
+              <button aria-label={`Remove reference ${id}`}
+                      onClick={() => editRef(id, "like", false)}>×</button>
+            </span>
+          ))}
+          {unlikeIds.map((id) => (
+            <span className="ref-chip unlike" key={`u${id}`}
+                  title="Negative example — push results away from this">
+              {refThumbs[id] ? <img src={refThumbs[id]} alt="" /> : <span className="ref-ph" />}
+              <button aria-label={`Remove exclusion ${id}`}
+                      onClick={() => editRef(id, "unlike", false)}>×</button>
+            </span>
+          ))}
+          <span className="ref-hint">
+            {query ? `steered by “${query}”` : "type to steer — “but at night”, “in a village”…"}
+          </span>
+          <button className="ghost" onClick={() => setParams({ like: "", unlike: "", page: "" })}>
+            Clear references
+          </button>
+        </div>
+      )}
+
       {/* The hero exists only on the bare gallery — the workspace's front
           door. The moment a query, filter or image lands, it yields the room
           back to results. Its h1 is also the page's heading. */}
-      {!query && !selection.active && !imageQuery && (
+      {!query && !selection.active && !imageQuery && !composed && (
         <section className="hero">
           <div className="hero-copy">
             <p className="eyebrow">Local visual intelligence</p>
@@ -553,12 +682,43 @@ export default function GalleryPage() {
             : `${total.toLocaleString()} samples`}
           {query && meta.basis === "rrf" && meta.rrfK != null &&
             ` · fused by reciprocal rank, k=${meta.rrfK}`}
+          {(query || composed) && items.length >= 8 && (
+            <>
+              {" · "}
+              <button className="link-btn" onClick={suggestGroups} disabled={scenBusy}>
+                {scenBusy ? "grouping…" : "suggest groups"}
+              </button>
+            </>
+          )}
         </div>
         {/* The key for the sparkline every card carries. Only shown when the
             cards actually have axes — a legend for an absent encoding is
             noise, and axes are absent until `python -m app.analyze` has run. */}
         {items.some((s) => s.axes) && <AxisLegend />}
       </div>
+
+      {scenarios && scenarios.length > 0 && (
+        <div className="scenario-row">
+          {scenarios.map((gr) => (
+            <div className="scenario-card" key={gr.label}>
+              <div className="scenario-head">
+                <strong>{gr.label}</strong>
+                <span className="scenario-count">{gr.count}</span>
+              </div>
+              <div className="scenario-evidence">{gr.evidence}</div>
+              <div className="scenario-actions">
+                <Link className="open-all"
+                      to={`/?ids=${gr.sample_ids.join(",")}`}>
+                  Open {gr.count} →
+                </Link>
+                <button className="ghost" onClick={() => saveGroupAsAlbum(gr)}>
+                  Save as album
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="grid"
            style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
@@ -570,7 +730,9 @@ export default function GalleryPage() {
           <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
                      query={query} mode={mode} rank={i + 1}
                      selectMode={selecting} selected={picked.has(s.id)}
-                     onToggleSelect={togglePick} getDragIds={getDragIds} />
+                     onToggleSelect={togglePick} getDragIds={getDragIds}
+                     onLike={(id) => editRef(id, "like", true)}
+                     onExclude={(id) => editRef(id, "unlike", true)} />
         ))}
       </div>
 
