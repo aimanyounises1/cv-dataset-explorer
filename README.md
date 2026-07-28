@@ -600,6 +600,19 @@ cd backend && python -m app.enrich
 Runtime is roughly 1–3 s/image locally; `--limit 500` enriches a subset. The
 app is fully functional without either optional step.
 
+### 9. (Optional) The container path
+
+```bash
+docker compose up --build                    # API :8000 + UI :5173
+docker compose --profile ollama up --build   # ... plus a local Ollama
+```
+
+Same ports, same `backend/data` state as the host workflow — one ingest serves
+both. In-container inference is CPU-only (no MPS/CUDA), so semantic queries run
+slower than on the host; [docs/DEPLOY.md](docs/DEPLOY.md) carries first-run
+ingest, health checks, resource expectations and what deliberately stays
+outside the containers.
+
 ## Tests
 
 ```bash

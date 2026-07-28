@@ -1,0 +1,17 @@
+# Build context for docker/backend.Dockerfile. BuildKit reads the ignore file
+# named after the Dockerfile before falling back to the context root's, which
+# is what lets the two images share the repository root as their context and
+# still exclude different things.
+#
+# Without this, the context is the ~1.6 GB of gitignored corpus under
+# backend/data and every build re-uploads it.
+
+*
+
+!backend/requirements.txt
+!backend/pyproject.toml
+!backend/app/
+!backend/tests/
+
+backend/**/__pycache__/
+backend/**/*.pyc

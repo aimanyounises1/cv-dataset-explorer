@@ -1,0 +1,15 @@
+# Build context for docker/frontend.Dockerfile — see the note in
+# docker/backend.Dockerfile.dockerignore for why this is per-Dockerfile.
+#
+# node_modules and dist are excluded deliberately: `npm ci` inside the image
+# builds them from the lockfile, and a host node_modules built on macOS carries
+# the wrong platform binaries for a linux image.
+
+*
+
+!frontend/
+!docker/nginx.conf
+
+frontend/node_modules/
+frontend/dist/
+frontend/.omc/
