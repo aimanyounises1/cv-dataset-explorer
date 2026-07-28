@@ -185,6 +185,13 @@ class MapPoint(BaseModel):
     rarity: Optional[int] = None
     difficulty: Optional[int] = None
     clutter: Optional[int] = None
+    # Mean cosine *distance* to the 10 nearest images in the 768-D SigLIP space
+    # (`analyze._embedding_isolation`, stored per sample). The one signal the map
+    # cannot derive from what it already sends: 2-D UMAP distance is not a
+    # similarity, so "which images sit in a sparse region of the corpus?" has to
+    # be answered from the original space or not at all. `rarity` will not do —
+    # it is a percentile that averages this with caption word rarity.
+    isolation: Optional[float] = None
 
 
 class TagInfo(BaseModel):
@@ -479,8 +486,12 @@ class RegionSearchRequest(BaseModel):
 
 
 class ScenarioGroup(BaseModel):
-    label: str                # templated, e.g. "night · street · people — 43 images"
-    evidence: str             # the measured counts behind the label, e.g. "38/43 time_of_day:night"
+    # Templated from what makes this group DIFFERENT from the rest of the results,
+    # e.g. "street · people — 43 images"; "mixed" when nothing distinguishes it.
+    label: str
+    # The measurement behind every part, in-group and background both stated so the
+    # label is checkable: "24/61 caption:people — 39% here vs 12% across the results".
+    evidence: str
     count: int                # always equals len(sample_ids)
     # ALL member ids, in ranking order — a group is saved whole (as an album),
     # so this is the full membership, never a preview.

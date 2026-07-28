@@ -705,8 +705,38 @@ def search_composed(body: ComposedSearchRequest,
 
 SCENARIO_DEPTH = 200
 SCENARIO_MIN_RESULTS = 8
-SCENARIO_BASIS = ("k-means over the top-200 composed ranking; labels are "
-                  "templated from measured attributes, not generated")
+# A label part must describe at least this share of its group, so a title still
+# describes the group rather than a corner of it: a trait carried by 3 of 60
+# members (5%) can never head a group. Chosen, not tuned.
+SCENARIO_MIN_SHARE = 0.35
+# ...and it must be at least this much more common here than across the whole
+# ranked pool. Being *any* more common (lift > 1) is the honest minimum, but a
+# part claiming "49% here vs 48% across the results" names nothing a reader can
+# use, so a naming margin is required. Chosen, not tuned.
+SCENARIO_MIN_LIFT = 1.1
+SCENARIO_MAX_PARTS = 3
+SCENARIO_BASIS = ("k-means over the top-200 composed ranking; each label names the traits most "
+                  "over-represented in its group versus the whole result set — counted, "
+                  "never generated")
+
+
+# Grammar, not scenery. These pass db.STOPWORDS on purpose — that list serves
+# SEARCH, where "through" is a legitimate query term and dropping it would
+# change what the FTS index answers. Titling a group is a different job:
+# "through · running · grass" names a preposition, not a scenario. Label-only,
+# so no search behaviour moves. Content words a caption uses to describe a
+# scene (running, grass, snowy) are deliberately absent.
+SCENARIO_LABEL_SKIP = frozenset("""
+    through across around along past against among amid behind beside between
+    beyond during under above below within without toward towards upon
+    while when where which who whom whose what because although though unless
+    until whether and but nor yet
+    are was were been being have has had does did doing will would can could
+    should may might must
+    his her its their our your my this that these those some any each every
+    another other both few more most much such
+    very just also then than only even still back again
+""".split())
 
 
 def _kmeans_assign(X: np.ndarray, k: int, seed: int = 0, iters: int = 20) -> np.ndarray:
@@ -729,56 +759,117 @@ def _kmeans_assign(X: np.ndarray, k: int, seed: int = 0, iters: int = 20) -> np.
     return assign
 
 
-def _majority_parts(conn, member_ids: list[int]) -> tuple[list[str], str]:
-    """(label parts, evidence) for one group — counted, never generated.
+def _stem(value: str) -> str:
+    """The first three letters of a value, used only to keep one label from
+    saying the same word twice ("runs · running", "child · children")."""
+    return "".join(ch for ch in value.lower() if ch.isalnum())[:3]
 
-    A candidate part is an attribute label, a VLM tag, or a caption content
-    word, and it qualifies only when a majority of the group carries it.
-    Candidates rank by (count desc, source: attributes before VLM tags before
-    caption words, name asc), so the same members always template the same
-    label."""
-    count = len(member_ids)
-    qmarks = ",".join("?" * count)
-    cands: list[tuple[int, int, str, str]] = []   # (n, source_rank, name, value)
-    dominant: dict[str, tuple[int, str]] = {}
+
+def _pool_terms(conn, pool_ids: list[int]) -> dict[str, tuple[int, str, str, set[int]]]:
+    """Every candidate trait over the whole pool being grouped, measured once:
+    `name -> (source rank, facet, display value, the samples carrying it)`.
+
+    A trait is an attribute label, a VLM tag, or a caption content word. Every
+    attribute label counts, not just its group's dominant one — which label is
+    over-represented is precisely what distinguishes one cluster from another.
+    The facet is the attribute group (so a label never reads "field/park ·
+    street") or the word stem for the rest."""
+    qmarks = ",".join("?" * len(pool_ids))
+    terms: dict[str, tuple[int, str, str, set[int]]] = {}
+
+    def add(name: str, src: int, facet: str, value: str, sid: int) -> None:
+        terms.setdefault(name, (src, facet, value, set()))[3].add(sid)
+
     for r in conn.execute(
-            f"SELECT grp, label, COUNT(*) AS n FROM attributes "
-            f"WHERE sample_id IN ({qmarks}) GROUP BY grp, label", member_ids):
-        best = dominant.get(r["grp"])
-        if (best is None or r["n"] > best[0]
-                or (r["n"] == best[0] and r["label"] < best[1])):
-            dominant[r["grp"]] = (r["n"], r["label"])
-    for grp, (n, label) in dominant.items():
-        cands.append((n, 0, f"{grp}:{label}", label))
+            f"SELECT sample_id, grp, label FROM attributes WHERE sample_id IN ({qmarks})",
+            pool_ids):
+        add(f"{r['grp']}:{r['label']}", 0, r["grp"], r["label"], r["sample_id"])
     for r in conn.execute(
-            f"SELECT tag, COUNT(*) AS n FROM vlm_tags "
-            f"WHERE sample_id IN ({qmarks}) GROUP BY tag", member_ids):
-        cands.append((r["n"], 1, f"vlm:{r['tag']}", r["tag"]))
-    term_samples: dict[str, set[int]] = {}
+            f"SELECT sample_id, tag FROM vlm_tags WHERE sample_id IN ({qmarks})", pool_ids):
+        add(f"vlm:{r['tag']}", 1, _stem(r["tag"]), r["tag"], r["sample_id"])
     for r in conn.execute(
-            f"SELECT sample_id, text FROM captions WHERE sample_id IN ({qmarks})",
-            member_ids):
+            f"SELECT sample_id, text FROM captions WHERE sample_id IN ({qmarks})", pool_ids):
         for tok in set(r["text"].split()):
             bare = "".join(ch for ch in tok.lower() if ch.isalnum())
-            if len(bare) >= 3 and bare not in db.STOPWORDS:
-                term_samples.setdefault(bare, set()).add(r["sample_id"])
-    for term, sids in term_samples.items():
-        cands.append((len(sids), 2, f"caption:{term}", term))
+            if (len(bare) >= 3 and bare not in db.STOPWORDS
+                    and bare not in SCENARIO_LABEL_SKIP):
+                add(f"caption:{bare}", 2, _stem(bare), bare, r["sample_id"])
+    return terms
 
-    majority = sorted((c for c in cands if 2 * c[0] >= count),
-                      key=lambda c: (-c[0], c[1], c[2]))
-    parts, evidence, seen = [], [], set()
-    for n, _src, name, value in majority:
-        if value in seen:
+
+def _distinctive_candidates(terms: dict[str, tuple[int, str, str, set[int]]],
+                            member_ids: list[int],
+                            pool_size: int) -> list[tuple]:
+    """The group's traits ranked by over-representation, most distinctive first.
+
+    A trait qualifies when it describes at least `SCENARIO_MIN_SHARE` of the
+    group (a handful of members never titles it) *and* is at least
+    `SCENARIO_MIN_LIFT` times as common inside the group as across the whole
+    ranked pool — a trait no more common here than everywhere else
+    distinguishes nothing at all. Ranking is by lift (p_in / p_bg), so the
+    traits the whole result set shares — "dog" under a dog query — score ~1
+    and lose to whatever is peculiar to this group.
+    Ties break on (in-group count, source, name): fully deterministic.
+
+    Each entry is (lift, n_in, p_in, n_bg, p_bg, source, name, facet, value).
+    """
+    count = len(member_ids)
+    members = set(member_ids)
+    cands: list[tuple] = []
+    for name, (src, facet, value, sids) in terms.items():
+        n_in = len(members & sids)
+        p_in = n_in / count
+        if p_in < SCENARIO_MIN_SHARE:
             continue
-        seen.add(value)
+        n_bg = len(sids)
+        p_bg = n_bg / pool_size
+        lift = p_in / p_bg
+        if lift < SCENARIO_MIN_LIFT:
+            continue
+        cands.append((lift, n_in, p_in, n_bg, p_bg, src, name, facet, value))
+    cands.sort(key=lambda c: (-c[0], -c[1], c[5], c[6]))
+    return cands
+
+
+def _evidence_for(cand: tuple, count: int) -> str:
+    """One checkable claim: both counts and both shares, e.g.
+    "24/61 caption:people — 39% here vs 12% across the results"."""
+    _lift, n_in, p_in, _n_bg, p_bg, _src, name, _facet, _value = cand
+    return f"{n_in}/{count} {name} — {p_in:.0%} here vs {p_bg:.0%} across the results"
+
+
+def _label_parts(cands: list[tuple], count: int,
+                 taken_leads: set[str]) -> tuple[list[str], str]:
+    """(label parts, evidence) for one group, given the leads other groups
+    already claimed.
+
+    The leading part must be a trait no other group is titled with, so two
+    groups can never read the same: the list is descended until an unclaimed
+    lead is found. A group whose every distinctive trait already heads another
+    group — or which has none at all — is called "mixed", with the measurement
+    that says why. Later parts only avoid repeating this label's own facets."""
+    parts: list[str] = []
+    evidence: list[str] = []
+    used: set[str] = set()
+    for cand in cands:
+        facet, value = cand[7], cand[8]
+        keys = {facet, _stem(value)}
+        if keys & used:
+            continue
+        if not parts and _stem(value) in taken_leads:
+            continue          # another group is already titled with this trait
+        used |= keys
         parts.append(value)
-        evidence.append(f"{n}/{count} {name}")
-        if len(parts) == 3:
+        evidence.append(_evidence_for(cand, count))
+        if len(parts) == SCENARIO_MAX_PARTS:
             break
-    if not parts:
-        return [], "no attribute, tag or caption term shared by a majority"
-    return parts, "; ".join(evidence)
+    if parts:
+        return parts, "; ".join(evidence)
+    if cands:
+        return [], ("every trait over-represented here already titles another group "
+                    f"(strongest: {_evidence_for(cands[0], count)})")
+    return [], (f"no trait describes {SCENARIO_MIN_SHARE:.0%} of these {count} images "
+                f"and is {SCENARIO_MIN_LIFT}x as common here as across the results")
 
 
 @router.post("/search/scenarios", response_model=ScenarioResponse)
@@ -791,6 +882,13 @@ def search_scenarios(body: ComposedSearchRequest,
     grouping is only offered when groups would average eight members, and
     fewer than eight results yields no groups at all. The fixed seed makes the
     whole pipeline deterministic: same query, same groups, byte for byte.
+
+    Labels answer "how is this group different from the rest of the results",
+    not "what is in it": a trait is scored by how over-represented it is in the
+    group against the same ranked pool (see `_distinctive_candidates`), so the
+    query's own subject cannot title all three groups. The most distinctive
+    group names itself first and reserves its leading trait, which is what
+    keeps the labels apart.
     """
     ranked, _qvec, down = _composed_ranking(conn, body)
     if ranked is None:
@@ -807,13 +905,31 @@ def search_scenarios(body: ComposedSearchRequest,
     k = min(3, n // SCENARIO_MIN_RESULTS)
     X = np.stack([index.vector_of(sid) for sid, _ in top])
     assign = _kmeans_assign(X, k)
-    groups = []
+    pool_ids = [sid for sid, _ in top]
+    terms = _pool_terms(conn, pool_ids)          # the background, measured once
+    clusters = []
     for c in range(k):
         members = [top[i] for i in range(n) if assign[i] == c]  # score order
         if not members:
             continue
         ids = [sid for sid, _ in members]
-        parts, evidence = _majority_parts(conn, ids)
+        clusters.append((ids, _distinctive_candidates(terms, ids, len(pool_ids))))
+    # Strongest lift first, so the group with the clearest identity claims its
+    # trait before a weaker group can; size then first id keep it deterministic.
+    order = sorted(range(len(clusters)),
+                   key=lambda i: (-(clusters[i][1][0][0] if clusters[i][1] else 0.0),
+                                  -len(clusters[i][0]), clusters[i][0][0]))
+    labelled: dict[int, tuple[list[str], str]] = {}
+    taken_leads: set[str] = set()
+    for i in order:
+        ids, cands = clusters[i]
+        parts, evidence = _label_parts(cands, len(ids), taken_leads)
+        if parts:
+            taken_leads.add(_stem(parts[0]))
+        labelled[i] = (parts, evidence)
+    groups = []
+    for i, (ids, _cands) in enumerate(clusters):
+        parts, evidence = labelled[i]
         label = (" · ".join(parts) if parts else "mixed") + f" — {len(ids)} images"
         # The FULL membership, in ranking order: "save this group as an album"
         # files every member, so a preview here would silently truncate it.
