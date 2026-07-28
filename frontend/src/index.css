@@ -671,12 +671,11 @@ select:hover { border-color: var(--border-strong); }
 .listbox-caret { color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
 .listbox-pop {
   position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 50;
-  margin: 0; padding: 5px; list-style: none;
+  margin: 0; padding: 5px;
   max-height: 260px; overflow-y: auto;
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
 }
-.listbox-pop li { margin: 0; }
 .listbox-group {
   padding: 7px 8px 3px; font-size: 9.5px; text-transform: uppercase;
   letter-spacing: 0.07em; font-weight: 600; color: var(--text-faint);

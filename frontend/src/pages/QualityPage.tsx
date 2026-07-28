@@ -31,13 +31,19 @@ function SuspectRow({ item, scoreLabel }: { item: SuspectCaption; scoreLabel: st
           title={`“${item.caption}” — ${scoreLabel} ${item.agreement.toFixed(3)}`}>
       <img src={item.sample.thumb_url} alt="" loading="lazy" />
       <span className="suspect-caption">“{item.caption}”</span>
+      {/* The column labels live in the (aria-hidden) header, which a screen
+          reader never reaches — each figure carries its own, off-screen, so the
+          row is read as named values and not as four bare numbers. */}
       <span className="suspect-score" title={`${scoreLabel} score`}>
-        {item.agreement.toFixed(3)}
+        <span className="sr-only">{scoreLabel}&nbsp;</span>{item.agreement.toFixed(3)}
       </span>
       <span className="suspect-sib" title="Mean agreement of the sample's other captions">
+        <span className="sr-only">siblings&nbsp;</span>
         {item.sibling_mean != null ? item.sibling_mean.toFixed(3) : "—"}
       </span>
-      <span className="suspect-split">{item.sample.split}</span>
+      <span className="suspect-split">
+        <span className="sr-only">split&nbsp;</span>{item.sample.split}
+      </span>
     </Link>
   );
 }
@@ -120,6 +126,11 @@ export default function QualityPage() {
   useEffect(() => {
     if (threshold == null) return;
     setListLoading(true);
+    // Paging describes one cut of the corpus: when the review line moves, the
+    // "show 25 more" the reviewer clicked no longer refers to this list. (The
+    // consistency list below is ranked independently of the threshold, so its
+    // own paging is not this effect's to reset.)
+    setShownSuspects(LIST_PAGE);
     const ctrl = new AbortController();
     const t = setTimeout(() => {
       api.suspectCaptions({ limit: 100, max_agreement: threshold })
