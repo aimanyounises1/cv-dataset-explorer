@@ -521,10 +521,18 @@ export default function MapPage() {
         </summary>
         <ul>
           <li>
+            {/* An earlier version added "published measurements find that well
+                over half of a point's true neighbours are missing here" — no
+                citation, no author, and nothing in this repo measures it. On a
+                panel where every other figure is computed from this corpus, an
+                appeal to unnamed literature was the one unverifiable line. It
+                is gone rather than dressed up: the neighbour statistics below
+                are measured, and they make the point without borrowing. */}
             <strong>Distances are not similarities.</strong> UMAP preserves local
-            neighbourhoods approximately and distorts distance by orders of magnitude.
-            At this scale, published measurements find that well over half of a point's
-            true high-dimensional neighbours are missing from its 2-D neighbourhood.
+            neighbourhoods approximately and distorts distance by orders of
+            magnitude. Two points sitting together here are a hypothesis to
+            check against the measured neighbours on a sample's own page, never
+            a result.
           </li>
           <li>
             <strong>Blob size and spacing mean nothing.</strong> The algorithm

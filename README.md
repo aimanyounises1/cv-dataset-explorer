@@ -216,8 +216,8 @@ most one text-encoder forward pass. Retrieval is an exact NumPy cosine scan —
 measured at ~0.2 ms against the 7–8 ms encode it waits behind, so at this size
 an approximate index would trade recall to speed up the fastest stage of the
 query. The seam is there rather than the machinery: `EmbeddingIndex.search`
-takes a candidate mask, so an ANN index drops in behind the same signature when
-the corpus earns one — worth *benchmarking* around 100k vectors, with an
+takes a candidate mask, so an ANN index drops in behind the same signature for
+text search — worth *benchmarking* around 100k vectors, with an
 *estimated* crossover near 400k that is extrapolation, not permission: adoption
 waits on a real FAISS recall-and-latency benchmark against the exact scan. A
 hosted vector database is not
@@ -237,7 +237,7 @@ measurements) · [DESIGN](docs/DESIGN.md) (decisions and trade-offs) ·
 frontend/src/
   pages/          Gallery · Sample · Compare · Map · Stats · Quality · Benchmark · Assistant
   components/     rail, cards, album shelf/header, share menu, render blocks
-  api/            typed client — the only fetch layer
+  api/            typed client — every route the pages call through
 backend/app/
   api/            18 routers over one service layer (run_search is the one ranking impl)
   ml/             providers (SigLIP 2 / Qwen3-VL) · exact index · hubness correction · detector
@@ -251,12 +251,12 @@ scripts/        benchmarks, screenshots, capabilities/link checks
 ## Test evidence
 
 ```bash
-cd backend && pytest                  # 352 passed (2026-07-28)
+cd backend && pytest                  # 369 passed (2026-07-28)
 cd frontend && npx tsc --noEmit && npm run build
 cd backend && python ../scripts/ui_smoke.py   # real-Chrome sweep, 17 workflows
 ```
 
-The last full sweep at this commit: **104/104 checks across 17/17 workflows**
+The last full sweep at this commit: **106/106 checks across 17/17 workflows**
 (run id in `backend/data/qa/`). Re-run rather than quote — the registry grows,
 and every number above is only true of the day it was measured. CI runs the
 light install (no torch/langgraph — those modules skip), ruff, tsc, the build,
@@ -270,16 +270,21 @@ the link check and the capabilities contract.
 - The composed (reference-steered) ranking is unmeasured — the benchmark
   covers the text modes only; its blend weight is chosen, not tuned, and the
   code says so.
-- The keyword benchmark row is flattered by construction (query captions are
-  indexed); the benchmark page states this where the number appears.
+- The keyword benchmark row is *understated*, not flattered: the query caption's
+  own row is excluded from the FTS scan (otherwise it would measure nothing but
+  self-retrieval), and the strict AND conjunction then leaves 90.6% of candidate
+  lists empty, so keyword R@10 reads 3.6%. OR-ing the terms takes it to 53.0%
+  but lowers fused MRR on short queries, which is why the conjunction stays —
+  measured in `api/eval.py` and stated on the page where the number appears.
 - The assistant needs Ollama and a ~5 GB model; step transitions stream live,
   but the reply text itself arrives whole at the end of the run.
-- Detection is boxes only. SAM 2.1 tiny runs here at 69 ms/mask warm (p50 on an
-  otherwise idle machine, box or point prompt, 0.63 GB, 120 interleaved calls
-  with no crash or leak) and its masks are accurate, but it stays future work:
-  a background-erased cut-out changes 63% of the top-10 while a caption-word
-  proxy moves the on-target share by +0.01 — a different ranking, not a better
-  one. `scripts/bench_sam2.py` re-measures all of it.
+- Detection is boxes only. SAM 2.1 tiny runs here at 72 ms/mask warm (box-prompt
+  p50; 73 ms by point prompt, 1.5 GB peak, 60 interleaved calls with no crash
+  and 2 MB of drift) and its masks are accurate, but it stays future work: a
+  background-erased cut-out changes 63% of the top-10 while a caption-word proxy
+  moves the on-target share by +0.009 — a different ranking, not a better one,
+  and 16 regions is too few to call it worse. `scripts/bench_sam2.py` re-measures
+  every figure here into `backend/data/cache/bench_sam2.json`.
 - MCP is stateless JSON (no SSE streaming, no sessions); it binds to the same
   local server and adds no authentication — a local, single-user tool by the
   assignment's constraint.

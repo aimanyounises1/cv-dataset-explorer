@@ -110,7 +110,7 @@ The `qa` specialist runs alone (it is marked expensive, so it is never chosen
 speculatively alongside another lane). It drives real Chrome over every registered
 workflow and returns a status block inline:
 
-- a `DONE` badge and the pass count — **104/104 checks · 17/17 workflows** on run
+- a `DONE` badge and the pass count — **106/106 checks · 17/17 workflows** on run
   `20260728-155424-154f`, the last full sweep recorded in `backend/data/qa/`;
   the registry grows, so expect a different denominator;
 - one row per workflow — Routes, Gallery, Similarity map, Statistics, Quality,
@@ -123,7 +123,7 @@ workflow and returns a status block inline:
   (18 slides, ~12 MB on that run): a title slide with the tally, then one slide
   per workflow with its status, screenshot and checks.
 
-Observed on that run: 79 s wall clock, 104/104 checks, 17/17 flows, no console
+Observed on that run: 106/106 checks, 17/17 flows, no console
 errors. A good chunk of that is the *Assistant canvas* flow, which waits on the
 local model to route a request and produce a chart.
 
@@ -154,7 +154,7 @@ cd backend && uv run --with playwright --with python-pptx \
     --python .venv/bin/python python ../scripts/ui_smoke.py
 #   PASS  route /
 #   ...
-#   104/104 checks passed in 91s
+#   106/106 checks passed
 ```
 
 ---
