@@ -39,6 +39,11 @@ QWEN_EMBED_BATCH = int(os.environ.get("CVDE_QWEN_EMBED_BATCH", "8"))
 # are fetched explicitly, never on the request path.
 DETECT_MODEL = os.environ.get("CVDE_DETECT_MODEL", "IDEA-Research/grounding-dino-tiny")
 
+# Optional promptable segmenter. SAM2 is provided by the base transformers
+# dependency and its tiny checkpoint was measured by scripts/bench_sam2.py.
+# Weights are fetched explicitly; request handlers only use the local cache.
+SEGMENT_MODEL = os.environ.get("CVDE_SEGMENT_MODEL", "facebook/sam2.1-hiera-tiny")
+
 
 def emb_dir_for(provider: str) -> Path:
     """siglip2 keeps the original flat embeddings layout (an existing install

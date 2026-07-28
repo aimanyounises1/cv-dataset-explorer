@@ -161,24 +161,19 @@ from one click. What remains, in order:
    (`POST /api/chat/stream`, rendered live), but the reply text and the render
    blocks arrive whole at the end of the run. Emitting each block as its lane
    finishes is the version worth building.
-4. **A review gate over the annotations that already persist.** Annotations are
-   stored today — `annotations(sample_id, kind, geometry, label, created_at)`
-   with list/create at `/api/samples/{id}/annotations`, drawn and listed on the
-   compare canvas. `DELETE /api/annotations/{id}` exists and is tested, but no
-   UI path calls it — a box can be drawn and saved, not taken back. What is
-   missing is everything that turns a drawing into a *reviewed* record:
-   * **provenance** — the row cannot say whether a person drew the box, the
-     detector proposed it, or an agent did; a reviewed annotation layer is worth
-     little if you cannot tell who claimed what;
-   * **status and a review action** — there is no proposed/approved/rejected
-     state, so approve/reject has nothing to write to;
-   * **an update endpoint** — the API can create and delete but not amend, so
-     "nudge that box and keep it" means delete and redraw, and *edit* is the
-     verb a reviewer uses most;
-   * **proposals across a set** — the detector runs per image on request; the
-     useful shape is proposing over a whole album and reviewing the batch.
-   None of that is in this pass because a proposal that writes itself is worse
-   than no proposal: the review surface, not the storage, is the work.
+4. **A review lifecycle over the annotations that now persist.** The sample
+   editor can propose a Grounding DINO box, refine it with SAM2 points/boxes,
+   accept a mask with model/prompt/IoU provenance, search from it, list it and
+   delete it. The remaining production step is review workflow rather than
+   segmentation plumbing:
+   * **status and review identity** — proposed/approved/rejected plus who made
+     that decision;
+   * **an update endpoint** — "nudge that mask and keep it" should preserve the
+     record's history rather than delete and recreate it;
+   * **proposals across a set** — run the detector over an album and review the
+     batch instead of invoking it one image at a time.
+   Agents remain read-only: they can inspect masks and search from an accepted
+   annotation, but a human owns every curation write.
 5. **Scale path**: benchmark FAISS behind `EmbeddingIndex` once the corpus is
    near 100k vectors and adopt it around the measured ~400k crossover, move
    ingestion/analysis to a job queue, virtualized grid rendering, multi-worker

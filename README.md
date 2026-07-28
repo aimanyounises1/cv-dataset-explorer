@@ -42,6 +42,7 @@ Optional layers, each honest about its absence:
 | Self-QA browser sweep | `pip install -r requirements-qa.txt` (Playwright + real Chrome) |
 | Qwen3-VL retrieval provider | `pip install -r requirements-qwen.txt`, then `python -m app.ingest --provider qwen3_vl` |
 | Region suggestions (zero-shot detector) | `python -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny')"` |
+| Promptable object masks (SAM 2.1 tiny) | `python -c "from huggingface_hub import snapshot_download; snapshot_download('facebook/sam2.1-hiera-tiny')"` |
 | Container path | `docker compose up --build` — see [docs/DEPLOY.md](docs/DEPLOY.md) |
 
 ## The model decision, measured
@@ -148,12 +149,17 @@ similarity floor (the measured 10th percentile of nearest-neighbour cosine in
 the active index; `?min_sim=` overrides) grey out rather than posing as a
 class — and when nothing clears it, the page says "possible coverage gap"
 instead of padding. A sample reached from a search says *why* it surfaced.
-Mark a rectangle on the image itself — or accept a zero-shot box proposal
-(Grounding DINO tiny, measured before it was allowed in: ~330 ms/image warm
-on the reference machine, `scripts/bench_detector.py` re-measures it) — and
-search **toward or away from that region**:
-the server crops the original from the request's normalized geometry, so the
-evidence reproduces from the URL-free request alone.
+Mark a rectangle on the image itself, add keep/remove points, or accept a
+zero-shot Grounding DINO box proposal. SAM 2.1 turns that prompt into a visible,
+refinable mask; the editor keeps the leaf class and explicit parent separate
+(`dog` inside `animal`), and a human click accepts the mask as an annotation
+with model, prompt and predicted-IoU provenance. Search can use that saved
+object rather than the full source frame. Today the masked-object vector and
+optional leaf-label vector rank the existing full-image index, and the result
+header states that boundary rather than implying an object-patch index.
+Rectangle search **toward or away from the region** remains available as the
+fast fallback. `scripts/bench_detector.py` and `scripts/bench_sam2.py`
+re-measure both optional models.
 
 ### Compare two frames
 
@@ -207,10 +213,10 @@ named reason when one is missing.
 
 ### Let other agents in, read-only
 
-A local [MCP server](docs/MCP.md) at `POST /mcp` exposes six strictly
-read-only tools (search, sample inspection, similar images, dataset stats,
-caption audit, album inspection) over the same service layer — any local MCP
-client, LangGraph included, can investigate the corpus and cannot curate it.
+A local [MCP server](docs/MCP.md) at `POST /mcp` exposes eight strictly
+read-only tools, including saved-mask inspection and object-specific retrieval,
+over the same service layer — any local MCP client, LangGraph included, can
+investigate the corpus and cannot curate it.
 
 ## Architecture
 
@@ -245,8 +251,8 @@ frontend/src/
   components/     rail, cards, album shelf/header, share menu, render blocks
   api/            typed client — every route the pages call through
 backend/app/
-  api/            18 routers over one service layer (run_search is the one ranking impl)
-  ml/             providers (SigLIP 2 / Qwen3-VL) · exact index · hubness correction · detector
+  api/            19 routers over one service layer (run_search is the one ranking impl)
+  ml/             providers (SigLIP 2 / Qwen3-VL) · exact index · detector · SAM2 segmenter
   agent/          LangGraph graph, tools, render-block contract
   qa/             flow registry + real-Chrome runner (one definition, three consumers)
   ingest/analyze/enrich    idempotent batch CLIs
@@ -286,13 +292,13 @@ the link check and the capabilities contract.
   appears.
 - The assistant needs Ollama and a ~5 GB model; step transitions stream live,
   but the reply text itself arrives whole at the end of the run.
-- Detection is boxes only. SAM 2.1 tiny runs here at 72 ms/mask warm (box-prompt
-  p50; 73 ms by point prompt, 1.5 GB peak, 60 interleaved calls with no crash
-  and 2 MB of drift) and its masks are accurate, but it stays future work: a
-  background-erased cut-out changes 63% of the top-10 while a caption-word proxy
-  moves the on-target share by +0.009 — a different ranking, not a better one,
-  and 16 regions is too few to call it worse. `scripts/bench_sam2.py` re-measures
-  every figure here into `backend/data/cache/bench_sam2.json`.
+- SAM 2.1 tiny runs here at 72 ms/mask warm (box-prompt p50; 73 ms by point
+  prompt, 1.5 GB peak, 60 interleaved calls with no crash and 2 MB of drift).
+  The retrieval benchmark is deliberately modest: background removal changed
+  63% of the top-10 while a caption-word proxy moved only +0.009 over 16
+  regions. Masks therefore ship for interaction, annotation and an explicit
+  object-search mode—not as a claimed universal ranking improvement.
+  `scripts/bench_sam2.py` records the full measurement.
 - MCP is stateless JSON (no SSE streaming, no sessions); it binds to the same
   local server and adds no authentication — a local, single-user tool by the
   assignment's constraint.

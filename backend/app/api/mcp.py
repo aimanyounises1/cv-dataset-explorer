@@ -98,6 +98,52 @@ def _t_similar(conn, args: dict) -> dict:
         for i, s in hits]}
 
 
+def _t_annotations(conn, args: dict) -> dict:
+    from .annotations import _row_out
+
+    sid = int(args["sample_id"])
+    if conn.execute("SELECT 1 FROM samples WHERE id = ?", (sid,)).fetchone() is None:
+        return {"error": f"sample {sid} does not exist"}
+    limit = max(1, min(int(args.get("limit", 20)), 50))
+    offset = max(0, int(args.get("offset", 0)))
+    total = conn.execute(
+        "SELECT COUNT(*) FROM annotations WHERE sample_id = ?", (sid,)
+    ).fetchone()[0]
+    rows = conn.execute(
+        "SELECT * FROM annotations WHERE sample_id = ? ORDER BY id "
+        "LIMIT ? OFFSET ?",
+        (sid, limit, offset),
+    )
+    annotations = [_row_out(conn, row).model_dump() for row in rows]
+    next_offset = offset + len(annotations)
+    return {
+        "sample_id": sid,
+        "total": total,
+        "offset": offset,
+        "next_offset": next_offset if next_offset < total else None,
+        "annotations": annotations,
+    }
+
+
+def _t_similar_annotation(conn, args: dict) -> dict:
+    from ..schemas import AnnotationSearchRequest
+    from .search import run_annotation_search
+
+    body = AnnotationSearchRequest(
+        annotation_id=int(args["annotation_id"]),
+        top_k=min(int(args.get("top_k", 8)), 30))
+    try:
+        result = run_annotation_search(conn, body)
+    except Exception as exc:
+        return {"error": str(getattr(exc, "detail", exc))}
+    return {
+        "mode_used": result.mode_used,
+        "score_basis": result.score_basis,
+        "message": result.message,
+        "results": _cards(result.items),
+    }
+
+
 def _t_stats(conn, args: dict) -> dict:
     from ..ml import providers
 
@@ -162,6 +208,22 @@ TOOLS: dict[str, dict] = {
         "schema": {"type": "object", "required": ["sample_id"], "properties": {
             "sample_id": {"type": "integer"},
             "top_k": {"type": "integer", "minimum": 1, "maximum": 30}}}},
+    "list_annotations": {
+        "fn": _t_annotations, "readonly": True,
+        "description": "Saved regions and object masks for one sample, with "
+                       "explicit label ancestry and mask URLs. Paginated.",
+        "schema": {"type": "object", "required": ["sample_id"], "properties": {
+            "sample_id": {"type": "integer", "minimum": 1},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            "offset": {"type": "integer", "minimum": 0}}}},
+    "find_similar_to_annotation": {
+        "fn": _t_similar_annotation, "readonly": True,
+        "description": "Images resembling one saved object mask. If present, "
+                       "the leaf label is blended with masked image evidence.",
+        "schema": {
+            "type": "object", "required": ["annotation_id"], "properties": {
+                "annotation_id": {"type": "integer", "minimum": 1},
+                "top_k": {"type": "integer", "minimum": 1, "maximum": 30}}}},
     "dataset_stats": {
         "fn": _t_stats, "readonly": True,
         "description": "Corpus counts, splits, and the ACTIVE retrieval "

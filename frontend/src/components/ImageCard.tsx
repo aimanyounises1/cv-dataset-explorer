@@ -24,6 +24,8 @@ const SCORE_LABEL: Record<string, string> = {
   // Spelled out, not abbreviated: a blended-query score has no everyday name,
   // and "cmp"-style shorthand would only pretend it has one.
   composed: "composed",
+  segment_cosine: "object cos",
+  segment_composed: "object+label",
 };
 
 const SCORE_HELP: Record<string, string> = {
@@ -35,6 +37,11 @@ const SCORE_HELP: Record<string, string> = {
   composed: "Cosine to the blended query (steering text averaged with the positive "
           + "reference images), minus half the strongest negative-example cosine. "
           + "Only comparable within this result list.",
+  segment_cosine: "Cosine from the accepted masked object to the full-image index. "
+                  + "It is not an object-to-object index.",
+  segment_composed: "Normalized mean of the accepted masked-object vector and its "
+                    + "leaf-label text vector, ranked against the full-image index. "
+                    + "Only comparable within this result list.",
 };
 
 const PATH_LABEL: Record<string, string> = { keyword: "kw", semantic: "sem" };

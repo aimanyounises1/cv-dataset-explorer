@@ -5,6 +5,9 @@ and never returns its own source image.
 
     cd backend && pytest tests/test_region_search.py
 """
+import sys
+from types import ModuleType
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -123,3 +126,37 @@ def test_detect_validates_input(ctx):
     assert client.post("/api/detect", json={"sample_id": 0}).status_code == 422
     assert client.post("/api/detect",
                        json={"sample_id": sids[0], "queries": ""}).status_code == 422
+
+
+def test_detector_model_load_is_offline_only(monkeypatch):
+    """A request may load cached weights, but must never fetch a checkpoint."""
+    from app.ml import detect as detect_ml
+
+    calls = []
+
+    class ProcessorFactory:
+        @classmethod
+        def from_pretrained(cls, model_id, **kwargs):
+            calls.append(("processor", model_id, kwargs))
+            return object()
+
+    class LoadedModel:
+        def to(self, _device):
+            return self
+
+        def eval(self):
+            return self
+
+    class ModelFactory:
+        @classmethod
+        def from_pretrained(cls, model_id, **kwargs):
+            calls.append(("model", model_id, kwargs))
+            return LoadedModel()
+
+    fake_transformers = ModuleType("transformers")
+    fake_transformers.AutoProcessor = ProcessorFactory
+    fake_transformers.GroundingDinoForObjectDetection = ModelFactory
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    detect_ml._Detector()
+    assert len(calls) == 2
+    assert all(call[2]["local_files_only"] is True for call in calls)

@@ -15,6 +15,20 @@ from . import config
 # analyze.compute_axes for what that costs.
 AXES = ("legibility", "rarity", "difficulty", "clutter")
 
+# Flickr-relevant subset of the COCO 2017 instance categories and their
+# official ``supercategory`` values. This is reference data, not a model guess:
+# COCO stores category ``name`` and ``supercategory`` in its annotation JSON and
+# the official cocoapi exposes those fields through ``loadCats``/``getCatIds``.
+# https://github.com/cocodataset/cocoapi
+COCO_OBJECT_TAXONOMY = {
+    "animal": ("bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
+               "bear", "zebra", "giraffe"),
+    "vehicle": ("bicycle", "car", "motorcycle", "airplane", "bus", "train",
+                "truck", "boat"),
+    "sports": ("sports ball", "kite", "skateboard", "surfboard"),
+}
+COCO_ROOT_LABELS = ("person",)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (
     id INTEGER PRIMARY KEY,
@@ -129,12 +143,46 @@ CREATE TABLE IF NOT EXISTS activity_events (
 CREATE TABLE IF NOT EXISTS annotations (
     id INTEGER PRIMARY KEY,
     sample_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,                   -- 'rect' | 'polygon'
-    geometry TEXT NOT NULL,               -- JSON: rect {x,y,w,h} | polygon {points}
+    kind TEXT NOT NULL,                   -- 'rect' | 'polygon' | 'mask'
+    geometry TEXT NOT NULL,               -- normalized rect/polygon or mask bbox
     label TEXT,
     created_at TEXT NOT NULL              -- ISO-8601 UTC
 );
 CREATE INDEX IF NOT EXISTS idx_annotations_sample ON annotations(sample_id);
+
+-- Pixel masks are separate from annotation metadata so listing ordinary
+-- rectangles never reads a BLOB. SQLite keeps mask bytes and their row in one
+-- crash-consistent local database; the source image remains immutable.
+CREATE TABLE IF NOT EXISTS annotation_masks (
+    annotation_id INTEGER PRIMARY KEY
+        REFERENCES annotations(id) ON DELETE CASCADE,
+    png BLOB NOT NULL,
+    width INTEGER NOT NULL,
+    height INTEGER NOT NULL,
+    model_id TEXT NOT NULL,
+    prompt_json TEXT NOT NULL,
+    predicted_iou REAL NOT NULL
+);
+
+-- A semantic object label names one node in an explicit user-curated tree.
+-- Names are globally unique (case-insensitive), preventing two incompatible
+-- meanings of "dog" from silently entering different branches.
+CREATE TABLE IF NOT EXISTS object_labels (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    parent_id INTEGER REFERENCES object_labels(id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_object_labels_name
+    ON object_labels(lower(name));
+CREATE INDEX IF NOT EXISTS idx_object_labels_parent ON object_labels(parent_id);
+
+CREATE TABLE IF NOT EXISTS annotation_object_labels (
+    annotation_id INTEGER PRIMARY KEY
+        REFERENCES annotations(id) ON DELETE CASCADE,
+    label_id INTEGER NOT NULL REFERENCES object_labels(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_annotation_object_labels_label
+    ON annotation_object_labels(label_id);
 """
 
 
@@ -152,7 +200,29 @@ def connect() -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     _migrate(conn)
+    _seed_object_labels(conn)
     conn.commit()
+
+
+def _seed_object_labels(conn: sqlite3.Connection) -> None:
+    """Install the compact COCO label tree without changing user-created rows."""
+    roots = (*COCO_ROOT_LABELS, *COCO_OBJECT_TAXONOMY)
+    for name in roots:
+        conn.execute(
+            "INSERT INTO object_labels(name, parent_id) "
+            "SELECT ?, NULL WHERE NOT EXISTS "
+            "(SELECT 1 FROM object_labels WHERE lower(name) = lower(?))",
+            (name, name))
+    for parent, children in COCO_OBJECT_TAXONOMY.items():
+        parent_id = conn.execute(
+            "SELECT id FROM object_labels WHERE lower(name) = lower(?)",
+            (parent,)).fetchone()["id"]
+        for name in children:
+            conn.execute(
+                "INSERT INTO object_labels(name, parent_id) "
+                "SELECT ?, ? WHERE NOT EXISTS "
+                "(SELECT 1 FROM object_labels WHERE lower(name) = lower(?))",
+                (name, parent_id, name))
 
 
 def _migrate(conn: sqlite3.Connection) -> None:

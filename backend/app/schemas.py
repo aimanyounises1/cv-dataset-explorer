@@ -2,7 +2,7 @@
 import math
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AxisScores(BaseModel):
@@ -485,6 +485,13 @@ class RegionSearchRequest(BaseModel):
         return self
 
 
+class AnnotationSearchRequest(BaseModel):
+    """A persisted object mask used as image evidence."""
+    annotation_id: int = Field(..., ge=1, le=2**63 - 1)
+    top_k: int = Field(24, ge=1, le=100)
+    offset: int = Field(0, ge=0, le=100_000)
+
+
 class ScenarioGroup(BaseModel):
     # Templated from what makes this group DIFFERENT from the rest of the results,
     # e.g. "street · people — 43 images"; "mixed" when nothing distinguishes it.
@@ -552,6 +559,8 @@ class AnnotationCreate(BaseModel):
                 raise ValueError("rect coordinates must be numbers in [0, 1]")
             if g["w"] <= 0 or g["h"] <= 0:
                 raise ValueError("rect width and height must be > 0")
+            if g["x"] + g["w"] > 1.0001 or g["y"] + g["h"] > 1.0001:
+                raise ValueError("rect extends outside the image")
             self.geometry = {k: float(g[k]) for k in ("x", "y", "w", "h")}
         else:
             points = g.get("points")
@@ -574,6 +583,122 @@ class AnnotationOut(BaseModel):
     geometry: dict
     label: Optional[str] = None
     created_at: str
+    label_name: Optional[str] = None
+    parent_name: Optional[str] = None
+    label_path: list[str] = Field(default_factory=list)
+    points: list[dict] = Field(default_factory=list)
+    box: Optional[dict] = None
+    bbox: Optional[dict] = None
+    mask_data_url: Optional[str] = None
+    mask_url: Optional[str] = None
+    mask_width: Optional[int] = None
+    mask_height: Optional[int] = None
+    model_id: Optional[str] = None
+    prompt: Optional[dict] = None
+    predicted_iou: Optional[float] = None
+
+
+class SegmentPoint(BaseModel):
+    x: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    y: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    label: Literal[0, 1]
+
+    @field_validator("label", mode="before")
+    @classmethod
+    def _label_is_an_integer(cls, value):
+        if isinstance(value, bool):
+            raise ValueError("point label must be 0 (background) or 1 (foreground)")
+        return value
+
+
+class SegmentBox(BaseModel):
+    x: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    y: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    w: float = Field(..., gt=0.0, le=1.0, allow_inf_nan=False)
+    h: float = Field(..., gt=0.0, le=1.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _fits(self):
+        if self.x + self.w > 1.0001 or self.y + self.h > 1.0001:
+            raise ValueError("segment box extends outside the image")
+        return self
+
+
+class SegmentPrompt(BaseModel):
+    points: list[SegmentPoint] = Field(default_factory=list, max_length=16)
+    box: Optional[SegmentBox] = None
+
+    @model_validator(mode="after")
+    def _has_foreground(self):
+        if self.box is None and not any(p.label == 1 for p in self.points):
+            raise ValueError("Provide a box or at least one foreground point")
+        return self
+
+
+def _clean_label(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = " ".join(value.strip().lower().split())
+    if not cleaned:
+        raise ValueError("label names cannot be blank")
+    return cleaned
+
+
+class SegmentRequest(SegmentPrompt):
+    sample_id: int = Field(..., ge=1, le=2**63 - 1)
+    label_name: Optional[str] = Field(None, max_length=100)
+    parent_name: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("label_name", "parent_name")
+    @classmethod
+    def _normalize_labels(cls, value):
+        return _clean_label(value)
+
+    @model_validator(mode="after")
+    def _valid_label_pair(self):
+        if self.parent_name and not self.label_name:
+            raise ValueError("parent_name requires label_name")
+        if self.parent_name == self.label_name and self.parent_name is not None:
+            raise ValueError("an object label cannot be its own parent")
+        return self
+
+
+class SegmentAcceptRequest(SegmentPrompt):
+    label_name: str = Field(..., min_length=1, max_length=100)
+    parent_name: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("label_name", "parent_name")
+    @classmethod
+    def _normalize_labels(cls, value):
+        return _clean_label(value)
+
+    @model_validator(mode="after")
+    def _not_its_own_parent(self):
+        if self.parent_name == self.label_name:
+            raise ValueError("an object label cannot be its own parent")
+        return self
+
+
+class SegmentPreview(BaseModel):
+    sample_id: int
+    model: str
+    prompt: dict
+    predicted_iou: float
+    bbox: dict
+    area_fraction: float
+    mask_width: int
+    mask_height: int
+    mask_data_url: str
+    label_name: Optional[str] = None
+    parent_name: Optional[str] = None
+    label_path: list[str] = Field(default_factory=list)
+
+
+class ObjectLabelOut(BaseModel):
+    id: int
+    name: str
+    parent_id: Optional[int] = None
+    path: list[str] = Field(default_factory=list)
 
 
 class ChatMessage(BaseModel):

@@ -93,6 +93,132 @@ export interface SearchResponse {
   depth_reached: boolean;
 }
 
+// ---- Promptable segmentation ------------------------------------------------
+
+/** Normalized image-space geometry. A point label follows the SAM convention:
+ * 1 keeps the clicked area, 0 removes it from the current mask. */
+export interface SegmentPoint {
+  x: number;
+  y: number;
+  label: 0 | 1;
+}
+
+export interface SegmentBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface SegmentPrompt {
+  points: SegmentPoint[];
+  box?: SegmentBox;
+}
+
+export interface SegmentRequest extends SegmentPrompt {
+  sample_id: number;
+  label_name?: string;
+  parent_name?: string;
+}
+
+export interface RegionSearchRequest extends SegmentBox {
+  sample_id: number;
+  role: "positive" | "negative";
+  text?: string;
+  top_k?: number;
+  offset?: number;
+}
+
+export interface SegmentStatus {
+  ready: boolean;
+  reason?: string | null;
+  model?: string | null;
+}
+
+/** A mask is returned either inline or as a same-origin URL. Keeping both
+ * optional lets the service choose the cheaper transport without branching in
+ * the editor. */
+export interface SegmentResult {
+  sample_id: number;
+  prompt: {
+    points: SegmentPoint[];
+    box?: SegmentBox | null;
+  };
+  mask_data_url: string;
+  mask_url?: string | null;
+  bbox: SegmentBox;
+  area_fraction: number;
+  predicted_iou: number;
+  model: string;
+  mask_width: number;
+  mask_height: number;
+  label_name?: string | null;
+  parent_name?: string | null;
+  label_path?: string[];
+}
+
+export interface SegmentAnnotation {
+  id: number;
+  sample_id: number;
+  kind: string;
+  geometry: SegmentBox;
+  label?: string | null;
+  created_at: string;
+  label_name?: string | null;
+  parent_name?: string | null;
+  label_path?: string[];
+  points: SegmentPoint[];
+  box?: SegmentBox | null;
+  bbox?: SegmentBox | null;
+  mask_data_url?: string | null;
+  mask_url?: string | null;
+  mask_width?: number | null;
+  mask_height?: number | null;
+  model_id?: string | null;
+  prompt?: {
+    points: SegmentPoint[];
+    box?: SegmentBox | null;
+  } | null;
+  predicted_iou?: number | null;
+  provenance?: string | null;
+}
+
+export interface SegmentAnnotationCreate extends SegmentPrompt {
+  label_name: string;
+  parent_name?: string | null;
+}
+
+export interface ObjectLabel {
+  id: number;
+  name: string;
+  parent_id?: number | null;
+  path: string[];
+}
+
+export interface DetectStatus {
+  ready: boolean;
+  reason?: string | null;
+  model?: string | null;
+}
+
+export interface DetectBox extends SegmentBox {
+  label: string;
+  /** Optional taxonomy resolution supplied by the detector service. The client
+   * never guesses a parent from the leaf text. */
+  label_name?: string | null;
+  parent_name?: string | null;
+  label_path?: string[] | null;
+  score: number;
+}
+
+export interface DetectResponse {
+  sample_id: number;
+  model?: string | null;
+  queries?: string | null;
+  boxes: DetectBox[];
+  note?: string | null;
+}
+
 export interface StatsOverview {
   total_samples: number;
   total_captions: number;

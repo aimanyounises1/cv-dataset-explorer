@@ -1,38 +1,404 @@
-/* Region search on the sample page: mark, suggest, retrieve. */
-.region-search { margin-top: 18px; }
-.rs-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin-bottom: 10px; }
-.rs-steer { flex: 0 1 220px; padding: 7px 10px; border: 1px solid var(--border);
-  border-radius: 999px; background: var(--bg-inset); color: var(--text);
-  font: inherit; font-size: 13px; }
-/* The stage is the sample page's ONE photograph, so it wears the frame the
-   standalone .detail-image used to wear and fills the column instead of
-   sitting at its intrinsic size. The frame lives on the stage rather than on
-   the <img>: the marking rectangle and the detector boxes are positioned in
-   percentages of the stage, and a border between the two would offset every
-   box by its own width. */
-.rs-stage { position: relative; display: block; width: 100%; max-width: 100%;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--bg-inset); overflow: hidden; }
-.rs-stage img { display: block; width: 100%; height: auto; }
-/* .detail-image is sticky (top: 16px) from when it stood alone above this
-   stage. Inside it, it must not be: a picture that slid within the stage would
-   leave the overlay that marks it behind, and the buttons that act on the mark
-   sit above the stage — marking correctness outranks the ride-along. */
-.rs-stage .detail-image { position: static; border: 0; border-radius: 0; }
-.rs-stage.marking { cursor: crosshair; }
-.rs-rect { position: absolute; border: 2px solid var(--accent);
-  background: rgba(33, 109, 80, 0.12); pointer-events: none;
-  border-radius: 4px; }
-.rs-box { position: absolute; border: 2px dashed var(--accent);
-  background: transparent; cursor: pointer; padding: 0;
-  border-radius: 4px; }
-.rs-box:hover { background: rgba(33, 109, 80, 0.10); }
-.rs-box span { position: absolute; left: -2px; top: -22px; padding: 2px 6px;
-  border-radius: 5px 5px 5px 0; background: var(--accent); color: #fff;
-  font-size: 11px; white-space: nowrap; }
-.rs-error { color: var(--red); font-size: 13px; margin: 8px 0 0; }
-.rs-results { margin-top: 12px; }
-.rs-note { color: var(--text-dim); font-size: 12.5px; margin: 0 0 8px; }
-.rs-grid { --thumb: 150px; }
-@media (max-width: 700px) { .rs-steer { flex-basis: 100%; } }
+/* Promptable segmentation and rectangle-search fallback on the sample page. */
+.region-search {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.rs-head,
+.rs-saved-head,
+.rs-results-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.rs-head h2,
+.rs-saved-head h3,
+.rs-results-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.rs-head .rs-note { margin: 4px 0 0; }
+.rs-status {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+.rs-status.ready {
+  color: var(--green);
+  border-color: var(--green);
+}
+.rs-model-note { margin: 0; }
+
+.rs-toolbar,
+.rs-detector,
+.rs-primary-actions,
+.rs-region-fallback {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rs-toolbar .segmented { flex: 0 0 auto; }
+.rs-toolbar .ghost,
+.rs-detector .ghost,
+.rs-primary-actions .ghost,
+.rs-region-fallback .ghost {
+  padding: 7px 11px;
+  font-size: 12.5px;
+}
+.rs-tool-help,
+.rs-inline-note {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.rs-detector {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+}
+.rs-detector label,
+.rs-region-fallback label {
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.rs-detector input,
+.rs-region-fallback input {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* The stage border box is the image content box, keeping all normalized
+   coordinates aligned with the original image at every responsive width. */
+.rs-stage {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  touch-action: none;
+  outline: none;
+}
+.rs-stage:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.rs-stage.tool-positive,
+.rs-stage.tool-negative,
+.rs-stage.tool-box { cursor: crosshair; }
+.rs-stage[aria-disabled="true"] { cursor: wait; }
+.rs-stage img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.rs-stage .detail-image {
+  position: static;
+  border: 0;
+  border-radius: 0;
+}
+
+/* mask-mode luminance supports both transparent-alpha masks and black/white
+   PNG masks while painting the product accent rather than the model's pixels. */
+.rs-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--accent);
+  opacity: 0.48;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: 100% 100%;
+  mask-mode: luminance;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: 100% 100%;
+}
+.rs-rect {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  pointer-events: none;
+}
+.rs-point,
+.rs-key-cursor {
+  position: absolute;
+  z-index: 4;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--bg-raised);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: var(--shadow-sm);
+}
+.rs-point.positive { background: var(--accent); }
+.rs-point.negative {
+  background: var(--red);
+}
+.rs-point.negative::before,
+.rs-point.negative::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 4px;
+  height: 1.5px;
+  background: var(--bg-raised);
+}
+.rs-key-cursor {
+  width: 18px;
+  height: 18px;
+  border-color: var(--text);
+  background: transparent;
+  box-shadow: 0 0 0 2px var(--bg-inset);
+}
+.rs-key-cursor::before,
+.rs-key-cursor::after {
+  content: "";
+  position: absolute;
+  background: var(--text);
+}
+.rs-key-cursor::before { left: 7px; top: -5px; width: 1px; height: 24px; }
+.rs-key-cursor::after { left: -5px; top: 7px; width: 24px; height: 1px; }
+.rs-key-cursor.anchored { border-color: var(--accent); }
+
+.rs-box {
+  position: absolute;
+  z-index: 5;
+  padding: 0;
+  border: 2px dashed var(--accent);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+.rs-box:hover,
+.rs-box:focus-visible {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.rs-box span {
+  position: absolute;
+  left: -2px;
+  top: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 0 0 4px 0;
+  background: var(--accent-deep);
+  color: var(--bg-raised);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-busy {
+  position: absolute;
+  z-index: 7;
+  right: 10px;
+  bottom: 10px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+}
+
+.rs-live {
+  min-height: 18px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+.rs-error {
+  color: var(--red);
+  font-size: 12.5px;
+}
+.rs-note {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.rs-workbench,
+.rs-saved {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-raised);
+}
+.rs-workbench {
+  display: grid;
+  gap: 11px;
+}
+.rs-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.rs-fields .combo,
+.rs-fields .combo input { width: 100%; min-width: 0; }
+.rs-fields .combo input {
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.rs-hierarchy-mark {
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+.rs-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.rs-metrics div {
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.rs-metrics dt {
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+.rs-metrics dd {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-primary-actions .primary {
+  padding: 8px 14px;
+  font-size: 12.5px;
+}
+.rs-region-fallback {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.rs-saved-head,
+.rs-results-head {
+  align-items: center;
+  margin-bottom: 9px;
+}
+.rs-saved-head > span,
+.rs-results-head > span {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.rs-empty {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.rs-saved ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rs-saved li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.rs-saved li.selected { border-color: var(--accent); }
+.rs-ann-main {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(80px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.rs-ann-main:hover,
+.rs-ann-main:focus-visible { background: var(--bg-hover); }
+.rs-ann-name,
+.rs-ann-parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rs-ann-name { font-size: 12.5px; }
+.rs-ann-parent {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.rs-ann-score {
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.rs-saved li > .ghost {
+  margin-right: 3px;
+  padding: 5px 8px;
+  font-size: 11.5px;
+}
+.rs-saved li > .danger { color: var(--red); }
+
+.rs-results { margin-top: 4px; }
+.rs-grid { --frame-min: 150px; }
+
+@media (max-width: 760px) {
+  .rs-tool-help { flex-basis: 100%; }
+  .rs-detector label,
+  .rs-region-fallback label { flex-basis: 100%; }
+  .rs-fields { grid-template-columns: 1fr; }
+  .rs-hierarchy-mark { padding-left: 4px; }
+  .rs-metrics { grid-template-columns: 1fr 1fr; }
+  .rs-metrics div:last-child { grid-column: 1 / -1; }
+  .rs-saved li { grid-template-columns: minmax(0, 1fr) auto; }
+  .rs-ann-main { grid-column: 1 / -1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rs-stage *, .rs-stage *::before, .rs-stage *::after { transition: none; }
+}

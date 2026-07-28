@@ -117,9 +117,20 @@ CREATE TABLE activity_events (            -- append-only workspace trail
     created_at TEXT NOT NULL);
 CREATE TABLE annotations (                -- regions as rows; images stay immutable
     id INTEGER PRIMARY KEY, sample_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,                   -- 'rect' | 'polygon'
+    kind TEXT NOT NULL,                   -- 'rect' | 'polygon' | 'mask'
     geometry TEXT NOT NULL,               -- JSON, normalized 0..1 coordinates
     label TEXT, created_at TEXT NOT NULL);
+CREATE TABLE annotation_masks (           -- only mask rows pay the BLOB cost
+    annotation_id INTEGER PRIMARY KEY REFERENCES annotations(id) ON DELETE CASCADE,
+    png BLOB NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+    model_id TEXT NOT NULL, prompt_json TEXT NOT NULL,
+    predicted_iou REAL NOT NULL);
+CREATE TABLE object_labels (               -- explicit application-owned taxonomy
+    id INTEGER PRIMARY KEY, name TEXT NOT NULL,
+    parent_id INTEGER REFERENCES object_labels(id) ON DELETE RESTRICT);
+CREATE TABLE annotation_object_labels (
+    annotation_id INTEGER PRIMARY KEY REFERENCES annotations(id) ON DELETE CASCADE,
+    label_id INTEGER NOT NULL REFERENCES object_labels(id) ON DELETE RESTRICT);
 ```
 
 Four decisions worth defending:

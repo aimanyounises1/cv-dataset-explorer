@@ -29,6 +29,7 @@ from .api import (
     qa_run,
     samples,
     search,
+    segment,
     stats,
     tags,
     views,
@@ -83,6 +84,7 @@ app.add_middleware(
 for router in (samples.router, search.router, stats.router, map_api.router,
                tags.router, qa.router, qa_run.router, attributes.router,
                describe.router, detect.router, leakage.router,
+               segment.router,
                eval_api.router, admin.router, chat.router,
                views.router, albums.router, activity.router,
                annotations.router):
