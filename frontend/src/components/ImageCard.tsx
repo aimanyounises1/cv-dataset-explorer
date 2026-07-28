@@ -45,10 +45,9 @@ interface Props {
    * result set. The card cannot infer any of the three, and without them the
    * sample page cannot say why the researcher is looking at this frame. */
   query?: string;
-  /** Gallery select-mode: clicking toggles membership in the picked set
-   * instead of navigating. The card stays a link underneath, so middle-click
-   * and "open in new tab" keep working even while picking. */
-  selectMode?: boolean;
+  /** Modeless picking: when the caller can absorb a picked set, every card
+   * carries its own check control, and the card itself stays a plain link —
+   * click, middle-click and "open in new tab" always navigate. */
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
   /** What a drag from this card carries. Defaults to just this sample; the
@@ -70,7 +69,7 @@ interface Props {
 const TERM_SEP = "|";
 
 export default function ImageCard({ sample, scoreBasis, query, mode, rank,
-                                    selectMode, selected, onToggleSelect,
+                                    selected, onToggleSelect,
                                     getDragIds, onLike, onExclude }: Props) {
   const caption = sample.match_caption ?? sample.caption ?? sample.filename;
   const basis = scoreBasis ?? undefined;
@@ -137,10 +136,6 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
   return (
     <Link className={`card${selected ? " picked" : ""}`}
           to={search ? `/samples/${sample.id}?${search}` : `/samples/${sample.id}`}
-          aria-pressed={selectMode ? Boolean(selected) : undefined}
-          onClick={selectMode
-            ? (e) => { e.preventDefault(); onToggleSelect?.(sample.id); }
-            : undefined}
           /* An anchor drags its URL by default; overriding the payload with
              sample ids is what lets the album shelf receive a drop. The
              custom MIME type keeps a stray drop into a text field from
@@ -155,7 +150,25 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
         {/* Frame number, as on a contact sheet — cite or find a sample without
             opening it. */}
         <span className="frame-no">{sample.id}</span>
-        {selected && <span className="pick-mark" aria-hidden="true">✓</span>}
+        {/* The check waits like the diagnostics do — invisible until hover,
+            keyboard focus, or membership — but stays clickable the whole
+            time, so a sweep of picks never waits on a fade-in. */}
+        {onToggleSelect && (
+          <button type="button"
+                  className={`card-check${selected ? " picked" : ""}`}
+                  aria-pressed={selected}
+                  aria-label={selected
+                    ? `Remove image ${sample.id} from the picked set`
+                    : `Pick image ${sample.id}`}
+                  title={selected ? "Picked — click to remove" : "Pick this image"}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onToggleSelect(sample.id);
+                  }}>
+            ✓
+          </button>
+        )}
         {/* The images lead; the diagnostics wait. Everything below stays in
             the DOM (tests count it, keyboard focus reveals it) but paints
             only on hover — the mock's rule: hide secondary detail until it

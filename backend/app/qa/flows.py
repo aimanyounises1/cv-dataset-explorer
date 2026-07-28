@@ -157,9 +157,12 @@ def gallery(pg, ok):
              for c in pg.query_selector_all(".active-filters .filter-chip")]
     ok("active filter chip shown for axis",
        any("Difficulty" in c for c in chips), "; ".join(chips)[:100])
-    ok("sort select reflects URL",
-       "clutter" in (pg.eval_on_selector("select[aria-label='Sort results']",
-                                         "e=>e.value") or ""))
+    # The order dial is a listbox the design system owns, not a native select;
+    # its trigger mirrors the value into data-value, and lives in the DOM even
+    # while the settings panel is collapsed.
+    ok("sort control reflects URL",
+       "clutter" in (pg.eval_on_selector(".sort-trigger",
+                                         "e=>e.dataset.value") or ""))
 
     # density control — now a dial inside the collapsed search-settings panel
     # (one command bar; the query's dials open on demand), so open it first.
@@ -762,9 +765,11 @@ def hero_journey(pg, ok):
     score = (pg.text_content(".grid .card .ev-score") or "").strip()
     ok("evidence shows the score and its basis", bool(score), score[:40])
 
-    pg.click("button:has-text('Select')")
-    pg.evaluate("document.querySelectorAll('.grid .card')[0].click()")
-    pg.evaluate("document.querySelectorAll('.grid .card')[1].click()")
+    # Picking is modeless: every card carries its own ✓, so a click on the card
+    # always navigates and only the check toggles membership. There is no mode
+    # to enter first.
+    pg.evaluate("document.querySelectorAll('.grid .card .card-check')[0].click()")
+    pg.evaluate("document.querySelectorAll('.grid .card .card-check')[1].click()")
     pg.wait_for_selector(".selection-tray", timeout=5000)
     ok("tray appears with two picked",
        "2" in (pg.text_content(".selection-tray") or ""))
@@ -789,9 +794,8 @@ def hero_journey(pg, ok):
     ok("composed ranking carries its basis", basis.startswith("composed"), basis)
 
     if not pg.query_selector(".selection-tray"):
-        pg.click("button:has-text('Select')")
-        pg.evaluate("document.querySelectorAll('.grid .card')[0].click()")
-        pg.evaluate("document.querySelectorAll('.grid .card')[1].click()")
+        pg.evaluate("document.querySelectorAll('.grid .card .card-check')[0].click()")
+        pg.evaluate("document.querySelectorAll('.grid .card .card-check')[1].click()")
         pg.wait_for_selector(".selection-tray", timeout=5000)
     pg.fill(".selection-tray input", "hero-journey-flow")
     pg.click(".selection-tray .primary")

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { AXES, AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat } from "../api/types";
-import { AXIS_META } from "../components/AxisFilters";
+import { AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat } from "../api/types";
 import AxisLegend from "../components/AxisLegend";
+import SearchSettings from "../components/SearchSettings";
 import { albumsChanged } from "../components/AlbumShelf";
 import AlbumHeader from "../components/AlbumHeader";
 import ImageCard from "../components/ImageCard";
@@ -23,12 +23,39 @@ interface SearchMeta {
 }
 
 const PER_PAGE = 60;
-const MODES: SearchMode[] = ["hybrid", "semantic", "keyword"];
 
 /** Frame width per density. Scanning thousands of thumbnails for one anomaly
  * and reading a handful of captions closely are different jobs. */
 const DENSITY: Record<string, string> = { S: "128px", M: "190px", L: "280px" };
 const DENSITY_KEY = "cvde-density";
+
+/** Recent queries, most recent first. Local recency is per-browser scan state
+ * (like density), not shareable selection state — the URL owns the latter. */
+const HISTORY_KEY = "cvde-search-history";
+const HISTORY_SHOWN = 8;   // merged dropdown cap
+const HISTORY_KEPT = 20;   // stored recency list cap
+
+const readLocalHistory = (): string[] => {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];
+  } catch { return []; }
+};
+
+/** A server search_snapshot payload is opaque JSON with two writers — read
+ * defensively, taking whichever field carries the query text. */
+const snapshotQuery = (payload: Record<string, unknown>): string | null => {
+  for (const k of ["q", "query", "text"]) {
+    const v = payload[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  const qs = payload["query_string"];
+  if (typeof qs === "string" && qs) {
+    const q = new URLSearchParams(qs.replace(/^\?/, "")).get("q");
+    if (q?.trim()) return q.trim();
+  }
+  return null;
+};
 const SUGGESTIONS = [
   "a dog jumping into water",
   "children playing soccer",
@@ -69,11 +96,6 @@ export default function GalleryPage() {
   const unlikeIds = useMemo(() => (searchParams.get("unlike") ?? "")
     .split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0), [searchParams]);
   const composed = likeIds.length > 0 || unlikeIds.length > 0;
-  /* The server's validity rule, mirrored: a composed query needs text or at
-   * least one positive reference. An exclusion alone has nothing to steer, so
-   * the UI never sends that request — it shows the plain ranking with the
-   * chip kept and says inline what would make the exclusion take effect. */
-  const composedValid = likeIds.length > 0 || query.trim() !== "";
   const albumId = Number(searchParams.get("album")) || null;
   // Labels naming the ACTIVE embedding model read the one truth source.
   const providerName = useActiveProviderName();
@@ -105,15 +127,23 @@ export default function GalleryPage() {
     useState<{ name: string; items: SampleCard[] } | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  /* Select mode only changes what a click means: the picked set is
-   * transient, and the album it feeds is the durable thing — a first-class
-   * ordered collection with provenance, no longer a tag. Tags remain labels;
-   * converting one into an album is an explicit act elsewhere. */
-  const [selecting, setSelecting] = useState(false);
+  /* Picking is modeless: every card carries its own check control, so a click
+   * on the card always navigates and a click on the check always picks. The
+   * picked set is transient — the album it feeds is the durable thing, a
+   * first-class ordered collection with provenance, no longer a tag. Tags
+   * remain labels; converting one into an album is an explicit act elsewhere. */
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [albumName, setAlbumName] = useState("");
   const [albumBusy, setAlbumBusy] = useState(false);
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
+  /* Search history: a local recency list merged with the workspace trail's
+   * search snapshots. Both are reads — the dropdown never writes the URL
+   * until an entry is chosen. */
+  const [localHist, setLocalHist] = useState<string[]>(readLocalHistory);
+  const [serverHist, setServerHist] = useState<string[]>([]);
+  const [histOpen, setHistOpen] = useState(false);
+  const [histIdx, setHistIdx] = useState(-1);
+  const histFetched = useRef(false);
 
   useEffect(() => {
     const missing = [...likeIds, ...unlikeIds].filter((id) => !refThumbs[id]);
@@ -145,16 +175,17 @@ export default function GalleryPage() {
     }, { replace: !add });
   };
 
+  const anyPicked = picked.size > 0;
   useEffect(() => {
-    if (!selecting) return;
+    if (!anyPicked) return;
     // Existing albums feed the datalist so "add to an existing album" is one
     // keystroke, not a memory test.
     api.listAlbums().then(setAlbums).catch(() => {});
-  }, [selecting]);
+  }, [anyPicked]);
 
   /** A drag from a picked card carries the whole picked set — a selection is
    * one object, and dragging it should feel like moving that object. An
-   * unpicked card drags alone even in select mode. */
+   * unpicked card drags alone. */
   const getDragIds = (id: number) =>
     picked.has(id) && picked.size > 0 ? [...picked] : [id];
 
@@ -188,7 +219,6 @@ export default function GalleryPage() {
           : `Added ${added} to “${name}” — ${ids.length - added} already there`);
         // Land inside the album, where the set is revisitable, shareable and
         // exportable like any other slice.
-        setSelecting(false);
         setPicked(new Set());
         setAlbumName("");
         setInput("");
@@ -202,8 +232,15 @@ export default function GalleryPage() {
     if (!file.type.startsWith("image/")) return;
     setImageBusy(true);
     setError(null);
+    const name = file.name || "pasted image";
     api.searchByImage(file)
-      .then((cards) => setImageQuery({ name: file.name || "pasted image", items: cards }))
+      .then((cards) => {
+        setImageQuery({ name, items: cards });
+        // The image itself is never stored — the trail records that a picture
+        // was used and what it was called, which is what a person retracing
+        // the session needs.
+        api.recordActivity("image_search", { name, n: cards.length }).catch(() => {});
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setImageBusy(false));
   };
@@ -284,8 +321,118 @@ export default function GalleryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInput]);
 
+  const rememberSearch = (q: string) => {
+    const list = [q, ...readLocalHistory().filter((s) => s !== q)].slice(0, HISTORY_KEPT);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); }
+    catch { /* non-essential */ }
+    setLocalHist(list);
+  };
+
+  /** Local recency first (it is this person's own trail), then the workspace
+   * snapshots; deduplicated case-insensitively; narrowed by whatever is
+   * already typed, minus the exact query already on screen. */
+  const historyItems = useMemo(() => {
+    const needle = input.trim().toLowerCase();
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of [...localHist, ...serverHist]) {
+      const t = s.trim();
+      const key = t.toLowerCase();
+      if (!t || seen.has(key) || key === needle) continue;
+      if (needle && !key.includes(needle)) continue;
+      seen.add(key);
+      out.push(t);
+      if (out.length === HISTORY_SHOWN) break;
+    }
+    return out;
+  }, [input, localHist, serverHist]);
+
+  // A shorter list can strand the highlight past the end; a changed list
+  // makes the old position meaningless either way.
+  useEffect(() => { setHistIdx(-1); }, [historyItems.length]);
+
+  const applyHistory = (q: string) => {
+    setInput(q);
+    setParams({ q, page: "" });   // immediate — a chosen entry shouldn't wait out the debounce
+    setHistOpen(false);
+    setHistIdx(-1);
+  };
+
+  const onSearchFocus = () => {
+    setHistOpen(true);
+    setHistIdx(-1);
+    if (histFetched.current) return;
+    histFetched.current = true;
+    // The workspace trail arrives lazily, on first focus: the dropdown is the
+    // only reader, and most gallery visits never open it.
+    api.listActivity(100).then((events) => {
+      const qs: string[] = [];
+      for (const ev of events) {
+        if (ev.kind === "search_snapshot") {
+          const q = snapshotQuery(ev.payload ?? {});
+          if (q) qs.push(q);
+        }
+      }
+      setServerHist(qs);
+    }).catch(() => {});
+  };
+
+  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" && !histOpen && historyItems.length > 0) {
+      e.preventDefault();
+      setHistOpen(true);
+      setHistIdx(0);
+      return;
+    }
+    if (!histOpen || historyItems.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHistIdx((i) => (i + 1) % historyItems.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHistIdx((i) => (i <= 0 ? historyItems.length - 1 : i - 1));
+    } else if (e.key === "Enter" && histIdx >= 0) {
+      e.preventDefault();
+      applyHistory(historyItems[histIdx]);
+    } else if (e.key === "Escape") {
+      setHistOpen(false);
+      setHistIdx(-1);
+    }
+  };
+
   const filterKey = [query, mode, sort, searchParams.get("like") ?? "",
     searchParams.get("unlike") ?? "", JSON.stringify(selection.params)].join("|");
+
+  /** How a ranking names itself in one line: the words, then the pictures it
+   * was steered by. An exclusion-only search has no words at all, so without
+   * this it would name itself nothing — the album it becomes and the row it
+   * leaves in the trail both need the references spoken aloud. */
+  const rankingLabel = () => [
+    query.trim(),
+    likeIds.length ? `like #${likeIds.join(" #")}` : "",
+    unlikeIds.length ? `unlike #${unlikeIds.join(" #")}` : "",
+  ].filter(Boolean).join(" · ");
+
+  /** A committed search joins the same activity trail the album lifecycle
+   * writes to. That trail is what the History drawer shows and what carries a
+   * search past this browser's localStorage — until now the drawer could only
+   * ever list tag approvals, because nothing wrote the search kinds it labels.
+   * Recorded once per distinct search: paging is the same search, seen further
+   * down. The query string travels with it, so a row in the drawer is a link
+   * back into the exact view (the URL is the shareable state). */
+  const loggedSearch = useRef("");
+  const recordSearchActivity = () => {
+    const q = query.trim();
+    const kind = composed ? "composed_search" : q ? "search_snapshot" : null;
+    if (!kind || loggedSearch.current === filterKey) return;
+    loggedSearch.current = filterKey;
+    api.recordActivity(kind, {
+      // A plain search is its words; a composed one is its words AND its
+      // reference pictures, so it carries the fuller label instead.
+      ...(composed ? { label: rankingLabel(), like: likeIds, unlike: unlikeIds } : { q }),
+      query_string: searchParams.toString(),
+    }).catch(() => {});   // a trail that fails to record must not fail the search
+  };
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -298,11 +445,10 @@ export default function GalleryPage() {
       // serves the request must carry this message instead of clearing it.
       let fallbackMsg: string | null = null;
       const fetchPage = async (p: number) => {
-        if (composed && !composedValid) {
-          fallbackMsg = "An exclusion alone can\u2019t steer a search \u2014 type a phrase, "
-                      + "or add \u201cMore like this\u201d on a result. The excluded image "
-                      + "is kept as a chip.";
-        } else if (composed) {
+        if (composed) {
+          // Every composed shape goes to the server, exclusion-only included \u2014
+          // the backend answers that one with a ranking pushed away from the
+          // excluded images and says so in `message`, rendered as the notice.
           try {
             const res = await api.composedSearch({
               text: query || undefined,
@@ -310,7 +456,7 @@ export default function GalleryPage() {
               top_k: PER_PAGE, offset: (p - 1) * PER_PAGE,
               ...(selection.params as object),
             }, ctrl.signal);
-            setNotice(res.degraded ? res.message ?? null : null);
+            setNotice(res.message ?? null);
             setMeta({ basis: res.score_basis, rrfK: null, terms: [],
                       depthLimit: res.depth_limit, depthReached: res.depth_reached });
             return { items: res.items, total: null as number | null, more: res.has_more };
@@ -370,6 +516,10 @@ export default function GalleryPage() {
           setTotal(count ?? all.length);
           setHasMore(more);
         }
+        // Only a query that answered joins the history — a search that threw
+        // never reaches this line.
+        if (query.trim()) rememberSearch(query.trim());
+        recordSearchActivity();
         setLoading(false);
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return; // superseded
@@ -410,6 +560,29 @@ export default function GalleryPage() {
       .finally(() => setScenBusy(false));
   };
 
+  /** The whole ranking, kept: an album named after the query, from the ids on
+   * screen. Capped at 200 — an album is a curated set a person will actually
+   * revisit, not an export; the full fusion depth stays available as the
+   * rail's csv/jsonl/json downloads. The name is editable later in the album
+   * header, like any album's. */
+  const [savingAlbum, setSavingAlbum] = useState(false);
+  const saveResultsAsAlbum = () => {
+    const name = rankingLabel();
+    const ids = items.slice(0, 200).map((s) => s.id);
+    if (!name || ids.length === 0) return;
+    setSavingAlbum(true);
+    api.createAlbum(name)
+      .then((a) => api.addToAlbum(a.id, ids).then((r) => ({ id: a.id, added: r.added })))
+      .then(({ id, added }) => {
+        albumsChanged();
+        showToast(`Saved ${added} to “${name}”`);
+        // Land inside the album, like every other path that makes one.
+        setParams({ album: String(id), q: "", like: "", unlike: "", page: "" });
+      })
+      .catch((e) => showToast(e instanceof Error ? e.message : "Could not save album"))
+      .finally(() => setSavingAlbum(false));
+  };
+
   const saveGroupAsAlbum = (gr: ScenarioGroup) => {
     api.createAlbum(gr.label)
       .then((a) => api.addToAlbum(a.id, gr.sample_ids).then(() => a))
@@ -440,96 +613,75 @@ export default function GalleryPage() {
           <input
             ref={searchRef}
             aria-label="Search images"
+            role="combobox"
+            aria-expanded={histOpen && historyItems.length > 0}
+            aria-controls="search-history-list"
+            aria-autocomplete="list"
+            aria-activedescendant={histIdx >= 0 ? `search-hist-${histIdx}` : undefined}
             placeholder='Search images… e.g. "dog jumping into water", "crowded market at night"'
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => { setInput(e.target.value); setHistOpen(true); }}
+            onFocus={onSearchFocus}
+            onBlur={() => { setHistOpen(false); setHistIdx(-1); }}
+            onKeyDown={onSearchKeyDown}
           />
+          {/* The image affordance lives where the query goes: dropping a
+              picture on the results or pasting one is the primary path, and
+              this small control both says so and offers the file picker. */}
+          <button type="button" className="by-image-hint" disabled={imageBusy}
+                  aria-label="Search by image"
+                  title="Search by image — drop a picture anywhere on the results, paste a copied image, or click to choose a file"
+                  onClick={() => fileRef.current?.click()}>
+            {imageBusy
+              ? <span className="busy-dot" aria-hidden="true" />
+              : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"
+                     strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
+              )}
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
+                 onChange={(e) => {
+                   const f = e.target.files?.[0];
+                   if (f) runImageSearch(f);
+                   e.target.value = "";   // the same file, picked twice, still fires
+                 }} />
+          {histOpen && historyItems.length > 0 && (
+            <ul className="search-history" id="search-history-list" role="listbox"
+                aria-label="Recent searches">
+              {historyItems.map((s, i) => (
+                <li key={s} id={`search-hist-${i}`} role="option"
+                    aria-selected={i === histIdx}
+                    className={i === histIdx ? "active" : ""}
+                    // preventDefault keeps the input focused through the
+                    // press, so blur cannot close the list before click lands.
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => applyHistory(s)}
+                    onMouseEnter={() => setHistIdx(i)}>
+                  {s}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-        <button className="ghost by-image" disabled={imageBusy}
-                onClick={() => fileRef.current?.click()}
-                title="Rank the corpus against a picture: pick a file, drop one anywhere on this page, or paste a copied image">
-          {imageBusy ? "Embedding…" : "By image…"}
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
-               onChange={(e) => {
-                 const f = e.target.files?.[0];
-                 if (f) runImageSearch(f);
-                 e.target.value = "";   // the same file, picked twice, still fires
-               }} />
-        {/* One command bar: the query's dials live behind a single quiet
-            button — the spec's own rule (advanced controls hidden until
-            requested). The dot marks a non-default dial, so collapsing never
-            silently hides a live choice. */}
-        <details className="search-settings">
-          <summary title="Mode, ordering and density">
-            Search settings
-            {(mode !== "hybrid" || sort !== "") && (
-              <span className="settings-dot" aria-hidden="true" />
-            )}
-          </summary>
-          <div className="search-settings-pop">
-            <div className="setting-row">
-              <span className="eyebrow">Mode</span>
-        <div className="mode-toggle" role="group" aria-label="Search mode">
-          {MODES.map((m) => (
-            <button
-              key={m}
-              className={mode === m ? "active" : ""}
-              aria-pressed={mode === m}
-              onClick={() => setParams({ mode: m === "hybrid" ? "" : m, page: "" })}
-              title={
-                m === "semantic" ? `${providerName} text-to-image similarity`
-                : m === "keyword" ? "BM25 full-text over captions + VLM tags (Porter-stemmed)"
-                : "Reciprocal-rank fusion of semantic + keyword"
-              }
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-            </div>
-            <div className="setting-row">
-              <span className="eyebrow">Order</span>
-        <select value={sort} aria-label="Sort results"
-                onChange={(e) => setParams({ sort: e.target.value, page: "" })}>
-          <option value="">Sort: relevance</option>
-          {AXES.map((a) => [
-            <option key={`${a}_desc`} value={`${a}_desc`}>
-              Sort: {AXIS_META[a].label} — hardest first
-            </option>,
-            <option key={`${a}_asc`} value={`${a}_asc`}>
-              Sort: {AXIS_META[a].label} — easiest first
-            </option>,
-          ])}
-        </select>
-            </div>
-            <div className="setting-row">
-        <div className="density">
-          <span className="density-label">Size</span>
-          <div className="density-group" role="group" aria-label="Thumbnail size">
-            {Object.keys(DENSITY).map((d) => (
-              <button key={d} className={density === d ? "active" : ""}
-                      aria-pressed={density === d}
-                      onClick={() => setDensity(d)}>{d}</button>
-            ))}
-          </div>
-        </div>
-            </div>
-          </div>
-        </details>
-        <button className={`ghost${selecting ? " select-on" : ""}`}
-                aria-pressed={selecting}
-                onClick={() => { setSelecting(!selecting); setPicked(new Set()); }}
-                title="Hand-pick images into an album — a tag you can filter by, revisit and export">
-          {selecting ? "Done picking" : "Select"}
-        </button>
+        <SearchSettings
+          mode={mode} sort={sort} density={density}
+          densities={Object.keys(DENSITY)} providerName={providerName}
+          onMode={(m) => setParams({ mode: m, page: "" })}
+          onSort={(s) => setParams({ sort: s, page: "" })}
+          onDensity={setDensity}
+        />
       </div>
 
       {/* The tray exists only while something is picked — a tray of zero
           would be furniture. Fixed to the viewport bottom so the running
           count and the album action stay in reach however deep the scroll,
           which is exactly when hand-picking happens. */}
-      {selecting && picked.size > 0 && (
+      {picked.size > 0 && (
         <div className="selection-tray" role="toolbar" aria-label="Selected images">
           <span className="select-count" aria-live="polite">
             {picked.size} picked
@@ -545,10 +697,6 @@ export default function GalleryPage() {
                   onClick={saveAlbum}>
             {albumBusy ? "Saving…" : `Add ${picked.size || ""} to album`}
           </button>
-          <button className="ghost" disabled={!picked.size}
-                  onClick={() => setPicked(new Set())}>
-            Clear
-          </button>
           {picked.size === 2 && (
             <button className="ghost"
                     title="Open these two side by side with synchronized zoom"
@@ -559,9 +707,10 @@ export default function GalleryPage() {
               Compare
             </button>
           )}
-          <button className="ghost"
-                  onClick={() => { setSelecting(false); setPicked(new Set()); }}>
-            Done
+          {/* Clearing the set is also how the tray leaves: with no mode to
+              exit, an emptied selection has nothing left to dismiss. */}
+          <button className="ghost" onClick={() => setPicked(new Set())}>
+            Clear
           </button>
         </div>
       )}
@@ -626,7 +775,10 @@ export default function GalleryPage() {
               <span className="flow-hint">Words, an image, or both — every score labelled.</span>
             </button>
             <button type="button" className="flow-card"
-                    onClick={() => { setSelecting(true); window.scrollTo({ top: 0 }); }}>
+                    onClick={() => {
+                      window.scrollTo({ top: 0 });
+                      showToast("Hover any image and click its ✓ to start picking");
+                    }}>
               <span className="flow-no">02</span>
               <span className="flow-name">Curate</span>
               <span className="flow-hint">Pick images into albums; drag a card to file it.</span>
@@ -704,7 +856,7 @@ export default function GalleryPage() {
                style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
             {imageQuery.items.map((s) => (
               <ImageCard key={s.id} sample={s} scoreBasis="cosine"
-                         selectMode={selecting} selected={picked.has(s.id)}
+                         selected={picked.has(s.id)}
                          onToggleSelect={togglePick} getDragIds={getDragIds} />
             ))}
           </div>
@@ -724,6 +876,16 @@ export default function GalleryPage() {
               {" · "}
               <button className="link-btn" onClick={suggestGroups} disabled={scenBusy}>
                 {scenBusy ? "grouping…" : "suggest groups"}
+              </button>
+            </>
+          )}
+          {(query || composed) && items.length > 0 && (
+            <>
+              {" · "}
+              <button className="link-btn" onClick={saveResultsAsAlbum} disabled={savingAlbum}
+                      title={`Save the top ${Math.min(items.length, 200)} ranked results `
+                             + "as an album named after this query — rename it in the album header"}>
+                {savingAlbum ? "saving…" : "save as album"}
               </button>
             </>
           )}
@@ -766,7 +928,7 @@ export default function GalleryPage() {
         {items.map((s, i) => (
           <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
                      query={query} mode={mode} rank={i + 1}
-                     selectMode={selecting} selected={picked.has(s.id)}
+                     selected={picked.has(s.id)}
                      onToggleSelect={togglePick} getDragIds={getDragIds}
                      onLike={(id) => editRef(id, "like", true)}
                      onExclude={(id) => editRef(id, "unlike", true)} />
