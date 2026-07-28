@@ -164,6 +164,19 @@ class ImagesBlock(_Base):
     drill: Optional[str] = None
 
 
+class TagProposalBlock(_Base):
+    """A mutation the assistant WANTS but cannot perform: tagging these samples
+    waits for the user's explicit approval in the UI. The agent tool that
+    builds this never writes — the browser performs the tag call only when the
+    user clicks approve, which keeps every curation row a human decision."""
+    kind: Literal["tag_proposal"] = "tag_proposal"
+    tag: str
+    sample_ids: list[int]
+    reason: Optional[str] = None
+    # Requested ids that do not exist — reported, never silently dropped.
+    missing: list[int] = []
+
+
 class ReportSection(BaseModel):
     heading: str
     text: Optional[str] = None
@@ -204,7 +217,7 @@ class QABlock(_Base):
 
 Block = Annotated[
     Union[BarBlock, LineBlock, PieBlock, HistogramBlock, TableBlock, StatBlock,
-          FlowBlock, ImagesBlock, ReportBlock, QABlock],
+          FlowBlock, ImagesBlock, ReportBlock, QABlock, TagProposalBlock],
     Field(discriminator="kind"),
 ]
 
@@ -213,7 +226,7 @@ ReportSection.model_rebuild()
 # Every kind the union admits. Tests assert the frontend registry covers exactly
 # this set, so a new block type cannot ship without a renderer.
 BLOCK_KINDS = ("bar", "line", "pie", "histogram", "table", "stat", "flow",
-               "images", "report", "qa")
+               "images", "report", "qa", "tag_proposal")
 
 
 # --------------------------------------------------------------------- builders
