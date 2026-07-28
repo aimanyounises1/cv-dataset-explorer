@@ -22,7 +22,7 @@ capability the code does not have.
 | Audit | `/quality` | Caption quality | Caption agreement distribution with a review threshold; the selection can leave as a gallery filter or an export. |
 | Trust | `/eval` | Retrieval benchmark | The tool measuring its own retrieval accuracy — R@1/5/10 for all three search modes. |
 | Ask | `/chat` | Assistant | Multi-agent assistant. Answers render as interactive charts, tables and reports, not prose about data. |
-| — | `/compare` | Compare | Two images under one synchronized zoom; deterministic shared/different panel; draw a region to search or save it. |
+| Find | `/compare` | Compare two | Two images under one synchronized zoom; deterministic shared/different panel; draw a region to search or save it. |
 
 Navigation is grouped by job in a persistent left rail; the current selection has a permanent home in a right rail that appears whenever something is selected. Plus **⌘K** anywhere: a command palette over routes, samples, tags, attribute slices, saved views and search.
 
