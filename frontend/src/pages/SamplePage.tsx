@@ -10,13 +10,23 @@ import TagEditor from "../components/TagEditor";
 import { useNeighbours } from "../hooks/useResultOrder";
 
 /** The 10th percentile of nearest-neighbour similarity across this corpus: for
- * every image, the cosine to its closest other image, self excluded — measured
- * offline from the shipped embeddings (8,000 × SigLIP 2). The similar grid
- * always returns k cards, so k alone cannot tell a real class from padding;
- * this is the line between "similar images" and "the least dissimilar of
- * 8,000". Overridable per-URL with ?min_sim= (0 disables). Recompute if the
- * embedding model changes. */
+ * every image, the cosine to its closest other image, self excluded. The
+ * similar grid always returns k cards, so k alone cannot tell a real class
+ * from padding; this is the line between "similar images" and "the least
+ * dissimilar of 8,000". Provider-aware: an index whose manifest publishes its
+ * own measured floor (stats/overview `sim_floor` — e.g. 0.5069 for the Qwen
+ * space) uses it; the constant below is the SigLIP-measured fallback for the
+ * legacy layout. Overridable per-URL with ?min_sim= (0 disables). */
 const DEFAULT_SIM_FLOOR = 0.76;
+
+/* One fetch per page load lifetime — the floor is corpus-wide, not per-sample. */
+let floorPromise: Promise<number> | null = null;
+const activeSimFloor = () => {
+  floorPromise ??= api.overview()
+    .then((o) => (typeof o.sim_floor === "number" ? o.sim_floor : DEFAULT_SIM_FLOOR))
+    .catch(() => DEFAULT_SIM_FLOOR);
+  return floorPromise;
+};
 
 function AgreementBadge({ value }: { value?: number | null }) {
   if (value == null) return null;
@@ -103,13 +113,18 @@ export default function SamplePage() {
   const back = () =>
     window.history.length > 1 ? navigate(-1) : navigate("/");
 
+  // The active index's own measured floor, fetched once; the SigLIP constant
+  // covers the legacy layout and the fetch-failed path.
+  const [measuredFloor, setMeasuredFloor] = useState(DEFAULT_SIM_FLOOR);
+  useEffect(() => { activeSimFloor().then(setMeasuredFloor); }, []);
+
   // The floor arrives from the URL so a pasted link carries the same cutoff its
   // author saw; anything unparseable falls back to the measured default rather
   // than to "no floor", which would silently upgrade padding to neighbours.
   const rawFloor = searchParams.get("min_sim");
   const parsedFloor = rawFloor === null ? NaN : Number(rawFloor);
   const floor = Number.isFinite(parsedFloor) && parsedFloor >= 0 && parsedFloor <= 1
-    ? parsedFloor : DEFAULT_SIM_FLOOR;
+    ? parsedFloor : measuredFloor;
   const above = similar.filter((s) => s.score == null || s.score >= floor);
   const below = similar.filter((s) => s.score != null && s.score < floor);
 
@@ -288,7 +303,8 @@ export default function SamplePage() {
         <>
           <div className="sim-divider"
                title={"The floor is the 10th percentile of nearest-neighbour similarity "
-                    + "across this corpus, computed offline from the shipped embeddings. "
+                    + "across this corpus, measured on the active retrieval index "
+                    + "(each provider's space has its own). "
                     + "Override with ?min_sim= in the URL (0 disables)."}>
             below similarity floor {Number(floor.toFixed(3))} — shown for context
           </div>
