@@ -119,6 +119,8 @@ def render() -> str:
                     "selection can leave as a gallery filter or an export.",
         "/eval": "The tool measuring its own retrieval accuracy — R@1/5/10 for all "
                  "three search modes.",
+        "/compare": "Two images under one synchronized zoom; deterministic "
+                    "shared/different panel; draw a region to search or save it.",
         "/chat": "Multi-agent assistant. Answers render as interactive charts, "
                  "tables and reports, not prose about data.",
     }

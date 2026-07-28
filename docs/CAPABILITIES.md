@@ -9,7 +9,7 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 35 HTTP endpoints · 4 agent specialists · 18 agent tools · 15 tested workflows
+- 49 HTTP endpoints · 4 agent specialists · 18 agent tools · 16 tested workflows
 
 ## Views
 
@@ -22,6 +22,7 @@ capability the code does not have.
 | Audit | `/quality` | Caption quality | Caption agreement distribution with a review threshold; the selection can leave as a gallery filter or an export. |
 | Trust | `/eval` | Retrieval benchmark | The tool measuring its own retrieval accuracy — R@1/5/10 for all three search modes. |
 | Ask | `/chat` | Assistant | Multi-agent assistant. Answers render as interactive charts, tables and reports, not prose about data. |
+| — | `/compare` | Compare | Two images under one synchronized zoom; deterministic shared/different panel; draw a region to search or save it. |
 
 Navigation is grouped by job in a persistent left rail; the current selection has a permanent home in a right rail that appears whenever something is selected. Plus **⌘K** anywhere: a command palette over routes, samples, tags, attribute slices, saved views and search.
 
@@ -36,6 +37,8 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `GET /api/export` | Export Subset |
 | `GET /api/samples` | List Samples |
 | `GET /api/samples/{sample_id}` | Get Sample |
+| `GET /api/samples/{sample_id}/annotations` | List Annotations |
+| `POST /api/samples/{sample_id}/annotations` | Add Annotation |
 | `GET /api/samples/{sample_id}/similar` | Similar Samples |
 | `POST /api/samples/{sample_id}/tags` | Add Tag |
 | `DELETE /api/samples/{sample_id}/tags/{name}` | Remove Tag |
@@ -46,6 +49,9 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | --- | --- |
 | `GET /api/search` | Search |
 | `POST /api/search` | Search Post |
+| `POST /api/search/by-image` | Search By Image |
+| `POST /api/search/composed` | Search Composed |
+| `POST /api/search/scenarios` | Search Scenarios |
 
 ### Statistics and map
 
@@ -115,6 +121,21 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 
 | Endpoint | |
 | --- | --- |
+| `DELETE /api/activity` | |
+| `GET /api/activity` | |
+| `POST /api/activity` | |
+| `DELETE /api/activity/{event_id}` | |
+| `GET /api/albums` | |
+| `POST /api/albums` | |
+| `POST /api/albums/from-tag` | |
+| `PUT /api/albums/order` | |
+| `DELETE /api/albums/{album_id}` | |
+| `GET /api/albums/{album_id}` | |
+| `PATCH /api/albums/{album_id}` | |
+| `POST /api/albums/{album_id}/items` | |
+| `PUT /api/albums/{album_id}/items/order` | |
+| `DELETE /api/albums/{album_id}/items/{sample_id}` | |
+| `DELETE /api/annotations/{annotation_id}` | |
 | `GET /api/describe` | |
 
 ## Assistant
@@ -187,6 +208,7 @@ and by the assistant on request — one registry, three consumers.
 | Graceful degradation | 90s | A failing data source must announce itself, and a missing one must not. |
 | Command palette | 60s | ⌘K reaches anything without navigating first, and gets out of the way. |
 | Assistant canvas | 300s | A charting request comes back as a live component that drills into the data. |
+| Compare | 60s | Two samples under one loupe: the transform is genuinely shared, the |
 
 ## Optional layers and how they degrade
 
@@ -209,4 +231,4 @@ and by the assistant on request — one registry, three consumers.
 - `docs/DEMO.md` — an eight-minute walkthrough
 - `docs/screenshots/` — one image per view
 
-<!-- generated 2026-07-27 -->
+<!-- generated 2026-07-28 -->
