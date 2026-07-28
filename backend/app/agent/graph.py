@@ -15,15 +15,14 @@ the fan-out edges, and what the synthesizer is told. See `registry` for why.
 Three properties this graph has to hold, and where each is enforced:
 
 * **Parallel, not merely concurrent-looking.** When the orchestrator selects two
-  cheap lanes, LangGraph runs both nodes in one superstep on separate threads and
-  merges their message updates through the `add_messages` reducer. Latency is the
-  slower lane, not the sum.
-* **A failed lane must not fail the turn.** Every lane is wrapped: an exception
-  or a timeout becomes a recorded failure and the synthesizer is told which lanes
-  died, so a partial answer says so instead of quietly omitting half the work.
-* **Bounded.** Per-lane wall clock, a model-level request timeout, one retry, and
-  a recursion cap. A local model that starts looping should cost a bounded amount
-  of time, not the whole request.
+  cheap lanes, LangGraph runs both async nodes in one superstep and merges their
+  message updates through the `add_messages` reducer. Latency is the slower lane,
+  not the sum.
+* **A failed lane must not fail the turn.** Each lane is an isolated LangGraph
+  subgraph whose documented node error handler turns an exception or native node
+  timeout into state. The synthesizer can therefore name partial failure.
+* **Bounded.** LangGraph supplies the per-node wall-clock limits, Ollama supplies
+  a finite generation cap, and the HTTP boundary owns the total turn timeout.
 
 All models run locally through Ollama. The deterministic search stack stays the
 platform's retrieval engine — agents are consumers of the same service functions
@@ -32,15 +31,16 @@ the REST API uses, not a replacement for them.
 import logging
 import operator
 import re
-import threading
 import time
 from collections.abc import Sequence
-from typing import Annotated, Any, Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_ollama import ChatOllama
+from langgraph.errors import NodeError, NodeTimeoutError
 from langgraph.graph import END, START, MessagesState, StateGraph
+from langgraph.types import Command
 from pydantic import BaseModel, Field, create_model
 
 from .. import config
@@ -52,9 +52,9 @@ logger = logging.getLogger(__name__)
 def orchestrator_prompt() -> str:
     """Built from the registry, so a new specialist is routable the moment it is
     registered — there is no second list of agent names to keep in step."""
-    return f"""You are the orchestrator of a computer-vision dataset exploration \
-platform (Flickr8k: 8,000 images, 5 captions each). Decide which specialist \
-should handle the user's latest request:
+    return f"""You are the orchestrator of a local computer-vision dataset \
+exploration platform. Decide which specialist should handle the user's latest \
+request:
 
 {registry.routing_menu()}
 
@@ -71,7 +71,25 @@ with its own scores on a different scale, and two sets of numbers about the same
 question cannot be combined into one honest answer.
 
 Answer with the routing decision itself — the reply is schema-constrained, so \
-name the specialist(s) and give them one line of instruction."""
+name the specialist(s), give them one line of instruction, and list any factual \
+premises ASSERTED BY THE LATEST USER that must be verified from tool evidence \
+before they may be repeated. Do not copy facts from this system message or prior \
+assistant messages. A request to discover, count, inspect or verify something is \
+not itself a factual premise. Do not decide premises with keyword rules; \
+interpret the meaning of the complete latest request.
+
+Examples:
+- "How many images and captions are in the dataset?" asserts nothing: []
+- "Is there a duplicate cluster?" asserts nothing: []
+- "Summarize the 30% improvement the correction produced" asserts a premise: \
+copy the complete user sentence verbatim.
+
+Never turn a question into a generic claim such as "the dataset contains a \
+specific number"; the user asked you to discover that value rather than asserting \
+one. Set `premise_kind` to `none` for questions and `assertion` only when the \
+latest user supplies a fact as true. `claim_to_verify` is normally null. When \
+there is an assertion, it must be an exact, contiguous quote from the latest \
+user's text; never paraphrase it."""
 
 
 SYNTHESIZER_PROMPT = """You are the quality gate and final voice of a dataset \
@@ -87,7 +105,8 @@ finding is Y" — then stop. Ground every claim in a tool result, mention sample
 ids rather than inventing links, and never end by offering further options: \
 answer the question that was asked.
 - If NO (wrong direction, missing the point, tool errors went unaddressed): \
-reply with exactly `RETRY: <one-line feedback on what to do differently>`.
+leave the answer empty and put one line of corrective instruction in the \
+structured `retry_feedback` field.
 
 NUMBERS. Tool results carry a `score_basis` with a `score_meaning` beside it. \
 Quote a score only together with the basis that produced it, in the form \
@@ -116,15 +135,49 @@ available. If the number is genuinely absent from every tool result, say that \
 plainly instead of substituting capability status for it."""
 
 
+class ClaimAssessment(BaseModel):
+    """The synthesizer's evidence decision for one router-identified premise."""
+
+    claim: str = Field(description="Exact claim copied from claims_to_verify.")
+    status: Literal["supported", "not_supported"] = Field(
+        description="Whether a current-turn tool result establishes the claim."
+    )
+    evidence: str = Field(
+        default="",
+        description=(
+            "An exact excerpt copied from a current-turn tool result when "
+            "supported; empty when not_supported."
+        ),
+    )
+
+
+class SynthesisDecision(BaseModel):
+    """Schema-constrained quality-gate output."""
+
+    answer: str = Field(
+        default="",
+        description="Final user-facing answer; empty when requesting a retry.",
+    )
+    retry_feedback: str = Field(
+        default="",
+        description="One-line correction for the specialists, or empty to finish.",
+    )
+    claim_assessments: list[ClaimAssessment] = Field(
+        default_factory=list,
+        description=(
+            "One assessment for every claim in claims_to_verify. Never mark a "
+            "claim supported without an exact tool-result excerpt."
+        ),
+    )
+
+
 class AgentState(MessagesState):
     # Lists, because the orchestrator may select more than one lane.
     routes: list[str]
     retries: int
-    # `time.monotonic()` at which this turn must be over. Set once, by the
-    # orchestrator, and read by every step after it — the bound belongs to the
-    # turn, not to each step, or the per-step bounds add up to the wall clock a
-    # person actually waits.
-    deadline: float
+    # Semantic output of the structured router. Specialists must establish
+    # these from tools before the synthesizer may repeat them as facts.
+    claims_to_verify: list[str]
     # Written concurrently by parallel lanes, so both need an additive reducer;
     # without one LangGraph rejects the second writer in the same superstep.
     lanes_ok: Annotated[list[str], operator.add]
@@ -181,146 +234,61 @@ def _split_retry(content: str) -> tuple[str, str]:
     return (hits[0].strip() or "revise the answer"), answer
 
 
-ic = r"\d[\d,]*(?:\.\d+)?"          # 30, 1,000, 0.31 — separators included
-_FIGURE = re.compile(rf"{ic}\s?%|\b{ic}\b")
-del ic
+def _unverified_claims(
+    claims: Sequence[str],
+    assessments: Sequence[ClaimAssessment],
+    messages,
+) -> list[str]:
+    """Claims lacking a supported verdict tied to actual tool output.
 
-
-def _ungrounded_figures(messages) -> list[str]:
-    """Figures the USER asserted that appear in no tool result.
-
-    A leading premise is the assistant's worst failure mode: asked to
-    "summarize the 30% accuracy improvement the hubness correction produced",
-    an 8B model explained a number that exists nowhere, and once built a tag
-    proposal on invented ids to illustrate it. A general instruction not to
-    trust premises did not hold — three runs of three still asserted the
-    figure.
-
-    So the check is arithmetic rather than advice: take the numbers out of the
-    latest question, look for each in everything the tools returned this turn,
-    and hand the synthesizer the ones that are missing BY NAME. A specific
-    "30% appears in no tool result" is a far harder instruction to talk past
-    than "be careful about premises".
+    This check is structural, not a vocabulary heuristic: the router supplies
+    complete semantic claims, the synthesizer supplies verdicts, and a supported
+    verdict is accepted only when its cited excerpt is present in a ToolMessage
+    from this turn.
     """
-    last_user = ""
-    evidence: list[str] = []
-    for m in messages:
-        role = getattr(m, "type", "") or getattr(m, "role", "")
-        text = m.content if isinstance(getattr(m, "content", None), str) else ""
-        if role in ("human", "user"):
-            last_user = text
-            continue
-        # The orchestrator's own warning QUOTES the ungrounded figure ("NOTE: 30%
-        # appear in no tool result"). Counting it as evidence made the check
-        # conclude, on the second pass, that 30% was grounded — the warning
-        # silencing the warning. A note is not a measurement, and no tool wrote
-        # it, so it is not evidence.
-        if getattr(m, "name", "") == "orchestrator":
-            continue
-        evidence.append(text)
-    if not last_user:
-        return []
-    # Separators are formatting, not value: the tools write 1000 where a person
-    # writes 1,000, and the two must compare equal.
-    hay = " ".join(evidence).replace(",", "")
-    out: list[str] = []
-    for raw in _FIGURE.findall(last_user):
-        token = raw.strip()
-        bare = token.rstrip("%").strip().replace(",", "")
-        # A percentage is always a claim; a bare one- or two-digit number is
-        # usually a quantity being asked FOR ("show me 5") rather than asserted,
-        # and flagging those would hedge ordinary questions.
-        if "%" not in token and len(bare.replace(".", "")) < 3:
-            continue
-        # As a NUMBER, not a substring. Matching "30" anywhere in the evidence
-        # is satisfied by sample id 4301 or a score of 0.308, so every figure
-        # looked grounded and the check never fired — measured: the note was
-        # absent on the very question it exists for.
-        if not bare or token in out:
-            continue
-        if not re.search(rf"(?<![\d.]){re.escape(bare)}(?![\d.])", hay):
-            out.append(token)
-    return out
+    evidence = "\n".join(
+        message.content
+        for message in messages
+        if isinstance(message, ToolMessage) and isinstance(message.content, str)
+    ).casefold()
+    by_claim = {item.claim.strip().casefold(): item for item in assessments}
+    unverified: list[str] = []
+    for claim in claims:
+        item = by_claim.get(claim.strip().casefold())
+        excerpt = item.evidence.strip() if item else ""
+        if (
+            item is None
+            or item.status != "supported"
+            or not excerpt
+            or excerpt.casefold() not in evidence
+        ):
+            unverified.append(claim)
+    return unverified
 
 
-def _remaining(state: AgentState) -> float:
-    """Seconds left in this turn's budget.
-
-    A turn with no deadline recorded — a graph invoked directly by a test, or
-    state carried over from an older run — gets the full budget rather than a
-    negative one, so the bound can only ever help.
-    """
-    deadline = state.get("deadline")
-    if not deadline:
-        return config.AGENT_TURN_BUDGET
-    return deadline - time.monotonic()
-
-
-def lane_budget(remaining: float) -> float:
-    """How long a lane may run, given what is left of the turn.
-
-    The reserve is what keeps the synthesizer inside the budget instead of
-    starting a fresh full-length model call after the lanes have already spent
-    the wall clock — the 240 + 120 = 360s turn this function exists to prevent.
-    The floor is because a lane cut to two seconds is a lane guaranteed to
-    produce nothing, and an honest short answer beats a pointlessly started one.
-    """
-    # The ceiling is applied LAST, so the floor can never raise a lane above the
-    # per-lane limit that was set deliberately: with the clamps the other way
-    # round, configuring a 0.3s lane produced a 20s one.
-    return min(config.AGENT_LANE_TIMEOUT,
-               max(config.AGENT_LANE_MIN, remaining - config.AGENT_SYNTH_RESERVE))
-
-
-# "the duplicate cluster you removed last week", "the bias you measured".
-_PAST_CLAIM = re.compile(
-    r"\byou(?:'ve|\s+have)?\s+(?:already\s+|previously\s+|earlier\s+)?"
-    r"(removed|deleted|cleaned|fixed|found|discovered|detected|identified|"
-    r"flagged|measured|computed|calculated|ran|built|made|created|chose|"
-    r"selected|noticed|observed|reported|concluded|verified|confirmed)\b",
-    re.IGNORECASE)
-
-
-def _unsupported_premises(messages) -> list[str]:
-    """Claims about things the assistant supposedly DID, which it cannot check.
-
-    The figure check is arithmetic over digits, so a fabricated *event* with no
-    number in it walked straight past it: "Recap the duplicate cluster you
-    removed last week and confirm the corpus is clean now" was adopted in 3 of
-    4 runs, two of which invented "8,500 → 8,000" and declared the corpus clean.
-
-    A premise of this shape can never be grounded, and that is a fact about the
-    architecture rather than a guess: each turn starts from the conversation
-    plus this turn's tool results, and no tool reports what was done to the
-    corpus in the past. So an attribution of a past action to the assistant is
-    always something to refuse, whatever it claims.
-    """
-    for m in reversed(messages):
-        role = getattr(m, "type", "") or getattr(m, "role", "")
-        if role not in ("human", "user"):
-            continue
-        text = m.content if isinstance(getattr(m, "content", None), str) else ""
-        return sorted({f"you {v.lower()}" for v in _PAST_CLAIM.findall(text)})
-    return []
+def _claim_refusal(claims: Sequence[str]) -> str:
+    listed = "\n".join(f"- {claim}" for claim in claims)
+    return (
+        "I could not verify the following premise"
+        f"{'s' if len(claims) != 1 else ''} from this turn's tool results:\n"
+        f"{listed}\n\nI have not used "
+        f"{'those premises' if len(claims) != 1 else 'that premise'} as fact."
+    )
 
 
 def _model() -> ChatOllama:
-    # The request timeout is the outer bound on a single model call. Without it a
-    # stalled Ollama pins the lane until the lane timeout fires, which is a much
-    # blunter instrument.
+    # The request timeout bounds one model call; LangGraph separately bounds the
+    # async node containing it, and FastAPI bounds the complete turn.
     # num_ctx is pinned rather than left to each model's default. Ollama sizes
     # the KV cache from the context length, so an unpinned model can reserve a
     # multiple of its own weights: qwen3:30b-a3b defaulted to a 262,144-token
     # window and 44 GB resident, against 40,960 and 11 GB for qwen3:8b. That is
     # not a comparison, and on a laptop it is not a safe default either.
-    # num_predict is the cap on GENERATION, and it is the only bound here that
-    # stops the model rather than stopping our wait for it. The request timeout
-    # and the lane timeout both abandon a thread; Ollama carries on decoding the
-    # request nobody is reading any more, and with one slot on a laptop that
-    # runaway blocks every later turn until it finishes. See config for the
-    # measurement that made this non-optional.
+    # num_predict is the server-side cap on GENERATION. Async cancellation ends
+    # our request; this cap guarantees Ollama itself cannot decode indefinitely.
     return ChatOllama(model=config.CHAT_MODEL, base_url=config.OLLAMA_URL,
-                      temperature=0.1, num_ctx=config.OLLAMA_NUM_CTX,
+                      temperature=0.1, reasoning=False,
+                      num_ctx=config.OLLAMA_NUM_CTX,
                       num_predict=config.OLLAMA_NUM_PREDICT,
                       client_kwargs={"timeout": config.OLLAMA_TIMEOUT})
 
@@ -358,6 +326,31 @@ def route_schema() -> type[BaseModel]:
                                 "same question cannot be combined.")),
         brief=(str, Field(default="", description="One line telling the "
                                                   "specialist what to do.")),
+        premise_kind=(
+            Literal["none", "assertion"],
+            Field(
+                description=(
+                    "none when the latest user asks to discover, count, inspect "
+                    "or verify; assertion only when the user supplies a factual "
+                    "premise as true."
+                )
+            ),
+        ),
+        claim_to_verify=(
+            Optional[str],                                  # noqa: UP045
+            Field(
+                default=None,
+                description=(
+                    "A factual premise asserted by the latest user that requires "
+                    "tool evidence before the answer may repeat it as fact. Copy "
+                    "the complete user sentence verbatim; it must be an exact "
+                    "contiguous quote. A question "
+                    "asking to discover, count, inspect or verify a value is not "
+                    "a claim and must yield null. Never paraphrase a question as "
+                    "a generic existential claim. Null is the normal value."
+                ),
+            ),
+        ),
     )
 
 
@@ -412,45 +405,53 @@ def build_graph(model=None, specialists=None):
     }
 
     router = model.with_structured_output(route_schema())
+    synthesizer = model.with_structured_output(SynthesisDecision)
 
-    def orchestrate(state: AgentState):
+    async def orchestrate(state: AgentState):
         try:
             # Schema-constrained decoding, not prose parsed for a name: the model
             # can only answer with lanes that exist, and validation — not a
             # substring search — is what decides the reply was usable.
-            decision = router.invoke(
+            decision = await router.ainvoke(
                 [SystemMessage(orchestrator_prompt())] + state["messages"])
             picked = [decision.route] + ([decision.also] if decision.also else [])
             routes, brief = normalise_routes(picked, decision.brief)
+            latest_user = next(
+                (
+                    message.content
+                    for message in reversed(state["messages"])
+                    if (
+                        getattr(message, "type", "") in ("human", "user")
+                        and isinstance(message.content, str)
+                    )
+                ),
+                "",
+            )
+            latest_folded = latest_user.casefold()
+            candidate = (decision.claim_to_verify or "").strip()
+            claims = (
+                [candidate]
+                if (
+                    decision.premise_kind == "assertion"
+                    and candidate
+                    and candidate.casefold() in latest_folded
+                )
+                else []
+            )
         except Exception as exc:
             # Structured output can still fail — a model that ignores the schema,
             # a validation error, an Ollama hiccup. None of those may end the
             # turn: retrieval is read-only and answers most requests acceptably.
             logger.warning("Routing failed (%s); defaulting to retrieval.", exc)
-            routes, brief = ["retrieval"], ""
+            routes, brief, claims = ["retrieval"], "", []
 
-        # The warning belongs where the fabrication STARTS. Told only to the
-        # synthesizer, it asked one model to contradict the lane whose text it
-        # was summarising, and lost: the insights lane wrote "the notable
-        # finding is a 30% accuracy improvement" and the summary repeated it.
-        # Carried in the brief, every lane sees it before it writes anything.
-        loose = _ungrounded_figures(state["messages"])
-        if loose:
-            brief = (f"{brief} — NOTE: {', '.join(loose)} appear in the question "
-                     f"and in no tool result. Do not treat "
-                     f"{'it' if len(loose) == 1 else 'them'} as measured, do not "
-                     f"explain or infer "
-                     f"{'it' if len(loose) == 1 else 'them'} from other data, and "
-                     f"say plainly that this dataset does not record "
-                     f"{'it' if len(loose) == 1 else 'them'}.").strip(" —")
-        claims = _unsupported_premises(state["messages"])
         if claims:
-            brief = (f"{brief} — NOTE: the question refers to something this "
-                     f"assistant supposedly did ({', '.join(claims)}). It keeps "
-                     f"no record of past actions and no tool reports them, so "
-                     f"that cannot be confirmed. Say so plainly, do not recap or "
-                     f"invent what happened, and answer only from what the tools "
-                     f"return now.").strip(" —")
+            checklist = "; ".join(claims)
+            brief = (
+                f"{brief} — Claims requiring tool evidence before they may be "
+                f"stated as facts: {checklist}. Verify them with your tools; if "
+                f"the available evidence does not establish one, say so plainly."
+            ).strip(" —")
 
         msgs = []
         if routes != ["direct"]:
@@ -458,11 +459,22 @@ def build_graph(model=None, specialists=None):
             msgs.append(AIMessage(
                 content=f"[orchestrator → {lanes}] {brief}".rstrip(),
                 name="orchestrator"))
-        # Stamped once per turn, by the first node that runs. Every step after
-        # this reads it rather than starting its own clock.
-        return {"routes": routes, "messages": msgs,
-                "deadline": state.get("deadline")
-                            or time.monotonic() + config.AGENT_TURN_BUDGET}
+        return {"routes": routes, "claims_to_verify": claims, "messages": msgs}
+
+    def route_failure(state: AgentState, error: NodeError):
+        logger.warning("Routing node failed: %s", error.error)
+        return Command(
+            update={
+                "routes": ["retrieval"],
+                "claims_to_verify": [],
+                "messages": [AIMessage(
+                    content="[orchestrator → retrieval] The routing model was "
+                            "unavailable; use the read-only retrieval lane.",
+                    name="orchestrator",
+                )],
+            },
+            goto="retrieval",
+        )
 
     def fan_out(state: AgentState) -> list[str]:
         """Returning a list makes LangGraph run those nodes in one parallel
@@ -475,72 +487,62 @@ def build_graph(model=None, specialists=None):
     def make_lane(spec: registry.Specialist):
         agent = agents[spec.name]
 
-        def run(state: AgentState):
+        async def run(state: AgentState):
             started = time.monotonic()
             base = len(state["messages"])
-            box: dict[str, Any] = {}
-
-            def work():
-                try:
-                    box["result"] = agent.invoke(
-                        {"messages": state["messages"]},
-                        {"recursion_limit": config.AGENT_RECURSION_LIMIT})
-                except BaseException as exc:                  # noqa: BLE001
-                    box["error"] = exc
-
-            # LangGraph's own per-node bound, add_node(timeout=...), is the
-            # first choice and is not available here: it is async-only, and
-            # setting it on a sync node fails at compile time because sync
-            # Python cannot be cancelled in-process. These lanes are sync
-            # because everything under them is — SQLite, NumPy and the SigLIP
-            # forward pass — and so are both chat endpoints, which drive the
-            # graph through invoke() and stream().
-            #
-            # So the bound is a daemon thread joined with a timeout,
-            # deliberately not a ThreadPoolExecutor: the executor's context
-            # manager calls shutdown(wait=True) on exit, which blocks on
-            # precisely the hung lane the timeout exists to escape. That version
-            # was written first and measured — a 0.3s lane timeout still took
-            # 30s to return, so the timeout was decorative. A daemon thread is
-            # also abandoned cleanly: it cannot delay interpreter shutdown if it
-            # never finishes.
-            #
-            # What this bound cannot do is stop the work: an abandoned thread
-            # never reaches Ollama, which keeps generating on a request nobody
-            # is waiting for. OLLAMA_NUM_PREDICT is what ends that generation
-            # itself; see the note on it in config.py.
-            budget = lane_budget(_remaining(state))
-            thread = threading.Thread(target=work, name=f"lane-{spec.name}",
-                                      daemon=True)
-            thread.start()
-            thread.join(timeout=budget)
-
-            if thread.is_alive():
-                logger.warning("lane %s timed out after %.0fs", spec.name, budget)
-                return {
-                    "lanes_failed": [spec.name],
-                    "messages": [AIMessage(
-                        content=f"[{spec.name} ran out of time after "
-                                f"{budget:.0f}s and its work was not included]",
-                        name=spec.name)]}
-            if "error" in box:
-                exc = box["error"]
-                logger.warning("lane %s failed: %s: %s", spec.name,
-                               type(exc).__name__, exc)
-                return {
-                    "lanes_failed": [spec.name],
-                    "messages": [AIMessage(
-                        content=f"[{spec.name} failed: {type(exc).__name__}: {exc}]",
-                        name=spec.name)]}
-
-            new = box["result"]["messages"][base:]
+            result = await agent.ainvoke(
+                {"messages": state["messages"]},
+                {"recursion_limit": config.AGENT_RECURSION_LIMIT},
+            )
+            new = result["messages"][base:]
             logger.info("lane %s finished in %.1fs (%d messages)",
                         spec.name, time.monotonic() - started, len(new))
             return {"messages": new, "lanes_ok": [spec.name]}
 
-        return run
+        def lane_failure(state: AgentState, error: NodeError):
+            exc = error.error
+            if isinstance(exc, NodeTimeoutError):
+                detail = f"timed out after {exc.timeout:.0f}s"
+            else:
+                detail = f"failed: {type(exc).__name__}: {exc}"
+            logger.warning("lane %s %s", spec.name, detail)
+            return {
+                "lanes_failed": [spec.name],
+                "messages": [AIMessage(
+                    content=f"[{spec.name} {detail}; its work was not included]",
+                    name=spec.name,
+                )],
+            }
 
-    def synthesize(state: AgentState):
+        # A lane is the independently recoverable unit, so its timeout and
+        # NodeError handler belong to a subgraph boundary. The parent fan-out
+        # receives only the branch delta and can merge sibling results normally.
+        lane_graph = StateGraph(AgentState)
+        lane_graph.add_node(
+            "work",
+            run,
+            timeout=config.AGENT_LANE_TIMEOUT,
+            error_handler=lane_failure,
+        )
+        lane_graph.add_edge(START, "work")
+        lane_graph.add_edge("work", END)
+        isolated = lane_graph.compile()
+
+        async def outer_lane(state: AgentState):
+            """Expose only this lane's delta to the parallel parent superstep."""
+            message_base = len(state["messages"])
+            ok_base = len(state.get("lanes_ok") or [])
+            failed_base = len(state.get("lanes_failed") or [])
+            result = await isolated.ainvoke(state)
+            return {
+                "messages": result["messages"][message_base:],
+                "lanes_ok": (result.get("lanes_ok") or [])[ok_base:],
+                "lanes_failed": (result.get("lanes_failed") or [])[failed_base:],
+            }
+
+        return outer_lane
+
+    async def synthesize(state: AgentState):
         prompt = SYNTHESIZER_PROMPT
         failed = state.get("lanes_failed") or []
         if failed:
@@ -550,54 +552,77 @@ def build_graph(model=None, specialists=None):
                        f"nothing usable: {', '.join(failed)}. Answer with what the "
                        f"others produced and state plainly, in one short sentence, "
                        f"what could not be checked.")
-        loose = _ungrounded_figures(state["messages"])
-        if loose:
+        claims = state.get("claims_to_verify") or []
+        if claims:
             prompt += (
-                f"\n\nUNGROUNDED FIGURES — checked, not guessed: "
-                f"{', '.join(loose)} appear in the user's question and in NO tool "
-                f"result this turn. Open your answer by saying that this dataset "
-                f"does not record "
-                f"{'that figure' if len(loose) == 1 else 'those figures'}, then "
-                f"answer with what IS measured. Do not repeat "
-                f"{', '.join(loose)} as fact, do not explain or justify "
-                f"{'it' if len(loose) == 1 else 'them'}, and propose no tag, album "
-                f"or other action built on "
-                f"{'it' if len(loose) == 1 else 'them'}.")
-        # Starting a model call the budget cannot cover is how a turn that had
-        # already failed slowly went on to fail slowly a second time. With too
-        # little left, the lanes' own work is handed over immediately — it is
-        # real output, and shipping it late is strictly worse than shipping it.
-        left = _remaining(state)
-        if left < config.AGENT_SYNTH_MIN:
-            logger.warning("skipping synthesis: %.0fs left of the turn budget", left)
-            return {"messages": [AIMessage(
-                content=_fallback_answer(state, TimeoutError(
-                    f"only {left:.0f}s of the {config.AGENT_TURN_BUDGET:.0f}s turn "
-                    f"budget remained")), name="final")]}
+                "\n\nCLAIMS REQUIRING VERIFICATION. The structured router "
+                "identified these user-supplied premises:\n- "
+                + "\n- ".join(claims)
+                + "\nRepeat a claim as fact only when a tool result from this "
+                  "turn establishes it. Otherwise state that it could not be "
+                  "verified, then answer only from the evidence returned."
+            )
         try:
-            reply = model.invoke([SystemMessage(prompt)] + state["messages"])
-            content = strip_reasoning(reply.content or "")
+            decision = await synthesizer.ainvoke(
+                [SystemMessage(prompt)] + state["messages"]
+            )
         except Exception as exc:
             logger.warning("Synthesizer failed (%s); returning the lanes' own output.", exc)
+            if claims:
+                return {"messages": [AIMessage(
+                    content=_claim_refusal(claims), name="final"
+                )]}
             return {"messages": [AIMessage(
                 content=_fallback_answer(state, exc), name="final")]}
 
-        asked_retry, content = _split_retry(content)
+        unverified = _unverified_claims(
+            claims, decision.claim_assessments, state["messages"]
+        )
+        if unverified:
+            return {"messages": [AIMessage(
+                content=_claim_refusal(unverified), name="final"
+            )]}
+
+        legacy_feedback, content = _split_retry(
+            strip_reasoning(decision.answer or "")
+        )
+        asked_retry = (decision.retry_feedback or legacy_feedback).strip()
         if asked_retry and state.get("retries", 0) < 1:
             return {"retries": state.get("retries", 0) + 1,
                     "messages": [AIMessage(content=f"[quality gate] {asked_retry}",
                                            name="synthesizer")]}
         return {"messages": [AIMessage(content=content, name="final")]}
 
+    def synth_failure(state: AgentState, error: NodeError):
+        logger.warning("Synthesizer node failed: %s", error.error)
+        claims = state.get("claims_to_verify") or []
+        if claims:
+            content = _claim_refusal(claims)
+        else:
+            content = _fallback_answer(state, error.error)
+        return {"messages": [AIMessage(
+            content=content, name="final"
+        )]}
+
     def route_after_synthesize(state: AgentState):
         last = state["messages"][-1]
         return "orchestrate" if getattr(last, "name", "") == "synthesizer" else END
 
     graph = StateGraph(AgentState)
-    graph.add_node("orchestrate", orchestrate)
+    graph.add_node(
+        "orchestrate",
+        orchestrate,
+        timeout=config.OLLAMA_TIMEOUT,
+        error_handler=route_failure,
+    )
     for spec in specialists:
         graph.add_node(spec.name, make_lane(spec))
-    graph.add_node("synthesize", synthesize)
+    graph.add_node(
+        "synthesize",
+        synthesize,
+        timeout=config.OLLAMA_TIMEOUT,
+        error_handler=synth_failure,
+    )
 
     graph.add_edge(START, "orchestrate")
     graph.add_conditional_edges(

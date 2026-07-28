@@ -11,6 +11,7 @@ makes and that are otherwise easy to believe without evidence:
 * adding a specialist requires no edit to the graph, and
 * a malformed render block is rejected at the boundary, not in the browser.
 """
+import asyncio
 import json
 import threading
 import time
@@ -32,9 +33,9 @@ from pydantic import Field, ValidationError  # noqa: E402
 
 from app.agent import blocks, registry  # noqa: E402
 from app.agent.graph import (  # noqa: E402
+    ClaimAssessment,
     _split_retry,
-    _ungrounded_figures,
-    _unsupported_premises,
+    _unverified_claims,
     build_graph,
     normalise_routes,
     route_schema,
@@ -56,13 +57,34 @@ class StubModel(BaseChatModel):
     invocations when a retry can add a third.
     """
     routes: list[str] = Field(default_factory=list)
+    claims: list[str] = Field(default_factory=list)
+    assessments: list[dict] = Field(default_factory=list)
     synth: str = "Final answer."
+    synth_delay: float = 0.0
     fail_on: set[str] = Field(default_factory=set)
     calls: list[str] = Field(default_factory=list)
 
-    def __init__(self, routes=None, *, synth="Final answer.", fail_on=None, **kw):
-        super().__init__(routes=list(routes or []), synth=synth,
-                         fail_on=set(fail_on or ()), calls=[], **kw)
+    def __init__(
+        self,
+        routes=None,
+        *,
+        claims=None,
+        assessments=None,
+        synth="Final answer.",
+        synth_delay=0.0,
+        fail_on=None,
+        **kw,
+    ):
+        super().__init__(
+            routes=list(routes or []),
+            claims=list(claims or []),
+            assessments=list(assessments or []),
+            synth=synth,
+            synth_delay=synth_delay,
+            fail_on=set(fail_on or ()),
+            calls=[],
+            **kw,
+        )
 
     @property
     def _llm_type(self) -> str:
@@ -84,6 +106,19 @@ class StubModel(BaseChatModel):
         """
         stub = self
 
+        if "route" not in schema.model_fields:
+            class _Synthesizer:
+                async def ainvoke(self, messages, config=None, **kw):
+                    if stub.synth_delay:
+                        await asyncio.sleep(stub.synth_delay)
+                    reply = stub.invoke(messages, config=config, **kw)
+                    return schema(
+                        answer=reply.content,
+                        claim_assessments=stub.assessments,
+                    )
+
+            return _Synthesizer()
+
         class _Router:
             def invoke(self, messages, config=None, **kw):
                 stub.calls.append("orchestrate")
@@ -92,9 +127,17 @@ class StubModel(BaseChatModel):
                 r = list(stub.routes) or ["retrieval"]
                 return schema(route=r[0],
                               also=r[1] if len(r) > 1 else None,
-                              brief="go")
+                              brief="go",
+                              premise_kind="assertion" if stub.claims else "none",
+                              claim_to_verify=stub.claims[0] if stub.claims else None)
+
+            async def ainvoke(self, messages, config=None, **kw):
+                return self.invoke(messages, config=config, **kw)
 
         return _Router()
+
+    async def ainvoke(self, messages, config=None, **kwargs):
+        return self.invoke(messages, config=config, **kwargs)
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         system = str(getattr(messages[0], "content", ""))
@@ -122,10 +165,20 @@ class RecordingLane:
     def invoke(self, state, config=None):
         start = time.monotonic()
         if self.hang:
-            # Longer than any lane timeout under test. The graph must not wait
-            # for this; the thread is abandoned when the timeout fires.
             time.sleep(30)
         time.sleep(self.delay)
+        self.window = (start, time.monotonic())
+        if self.boom:
+            raise self.boom
+        return {"messages": list(state["messages"]) +
+                            [AIMessage(content=f"{self.name} did the work",
+                                       name=self.name)]}
+
+    async def ainvoke(self, state, config=None):
+        start = time.monotonic()
+        if self.hang:
+            await asyncio.sleep(30)
+        await asyncio.sleep(self.delay)
         self.window = (start, time.monotonic())
         if self.boom:
             raise self.boom
@@ -142,10 +195,10 @@ def make_specialist(lane, cost="cheap"):
 def run(model, lanes, message="do the thing"):
     graph = build_graph(model=model,
                         specialists=[make_specialist(x) for x in lanes])
-    return graph.invoke(
+    return asyncio.run(graph.ainvoke(
         {"messages": [HumanMessage(message)], "routes": [], "retries": 0,
-         "lanes_ok": [], "lanes_failed": []},
-        config={"recursion_limit": 40})
+         "claims_to_verify": [], "lanes_ok": [], "lanes_failed": []},
+        config={"recursion_limit": 40}))
 
 
 # ------------------------------------------------------------- route selection
@@ -171,14 +224,22 @@ def test_the_router_schema_only_admits_lanes_that_exist():
     """The names are an enum in the schema the model is constrained to, so an
     invented specialist is a validation error rather than a silent bad route."""
     Route = route_schema()
-    assert Route(route="insights", brief="x").route == "insights"
-    assert Route(route="insights", also="visualization").also == "visualization"
+    assert Route(route="insights", premise_kind="none", brief="x").route == "insights"
+    assert Route(
+        route="insights", premise_kind="none", also="visualization"
+    ).also == "visualization"
     # One lane is the default shape: a second is opt-in, not a list to fill.
-    assert Route(route="insights").also is None
+    assert Route(route="insights", premise_kind="none").also is None
+    # Claims are semantic model output, not a hand-maintained verb/number regex.
+    assert Route(route="insights", premise_kind="none").claim_to_verify is None
+    claim = "The system previously removed a duplicate cluster."
+    assert Route(
+        route="insights", premise_kind="assertion", claim_to_verify=claim
+    ).claim_to_verify == claim
     with pytest.raises(ValidationError):
-        Route(route="nonsense", brief="x")
+        Route(route="nonsense", premise_kind="none", brief="x")
     with pytest.raises(ValidationError):
-        Route(route="insights", also="nonsense")
+        Route(route="insights", premise_kind="none", also="nonsense")
     with pytest.raises(ValidationError):       # a lane must be named
         Route(brief="x")
 
@@ -263,11 +324,11 @@ def test_synthesizer_is_told_which_lanes_failed():
     seen = {}
 
     class Watcher(StubModel):
-        def invoke(self, messages):
+        def invoke(self, messages, config=None, **kwargs):
             system = str(getattr(messages[0], "content", ""))
             if "quality gate" in system:
                 seen["prompt"] = system
-            return super().invoke(messages)
+            return super().invoke(messages, config=config, **kwargs)
 
     bad = RecordingLane("visualization", boom=RuntimeError("nope"))
     run(Watcher(["visualization"]), [bad])
@@ -286,12 +347,30 @@ def test_hanging_lane_is_cut_off(monkeypatch):
 
     assert result["lanes_failed"] == ["retrieval"]
     assert elapsed < 5, f"the turn waited {elapsed:.1f}s on a hung lane"
-    assert any("ran out of time" in str(m.content) for m in result["messages"])
+    assert any("timed out" in str(m.content) for m in result["messages"])
 
 
 def test_orchestrator_failure_falls_back_to_retrieval():
     a = RecordingLane("retrieval", delay=0.01)
     result = run(StubModel(["insights"], fail_on={"orchestrate"}), [a])
+    assert result["lanes_ok"] == ["retrieval"]
+
+
+def test_orchestrator_timeout_uses_the_langgraph_error_handler(monkeypatch):
+    from app import config
+
+    class SlowRouterModel(StubModel):
+        def with_structured_output(self, schema, **kwargs):
+            class _Router:
+                async def ainvoke(self, messages, config=None, **kw):
+                    await asyncio.sleep(30)
+
+            return _Router()
+
+    monkeypatch.setattr(config, "OLLAMA_TIMEOUT", 0.02)
+    result = run(SlowRouterModel(["insights"]), [RecordingLane("retrieval")])
+
+    assert result["routes"] == ["retrieval"]
     assert result["lanes_ok"] == ["retrieval"]
 
 
@@ -301,6 +380,21 @@ def test_synthesizer_failure_still_answers():
     the worse outcome."""
     a = RecordingLane("retrieval", delay=0.01)
     result = run(StubModel(["retrieval"], fail_on={"synthesize"}), [a])
+    final = result["messages"][-1]
+    assert final.name == "final"
+    assert "retrieval did the work" in final.content
+    assert "unverified" in final.content
+
+
+def test_synthesizer_timeout_still_answers(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "OLLAMA_TIMEOUT", 0.02)
+    result = run(
+        StubModel(["retrieval"], synth_delay=30),
+        [RecordingLane("retrieval")],
+    )
+
     final = result["messages"][-1]
     assert final.name == "final"
     assert "retrieval did the work" in final.content
@@ -609,16 +703,21 @@ def test_graph_streams_real_node_updates():
     a = RecordingLane("insights", delay=0.05)
     graph = build_graph(model=StubModel(["insights"]),
                         specialists=[make_specialist(a)])
-    seen_nodes, final_state = [], None
-    for mode, chunk in graph.stream(
-            {"messages": [HumanMessage("stream probe")], "routes": [],
-             "retries": 0, "lanes_ok": [], "lanes_failed": []},
-            config={"recursion_limit": 40},
-            stream_mode=["updates", "values"]):
-        if mode == "values":
-            final_state = chunk
-        else:
-            seen_nodes += list(chunk)
+    async def collect():
+        seen_nodes, final_state = [], None
+        async for mode, chunk in graph.astream(
+                {"messages": [HumanMessage("stream probe")], "routes": [],
+                 "retries": 0, "claims_to_verify": [],
+                 "lanes_ok": [], "lanes_failed": []},
+                config={"recursion_limit": 40},
+                stream_mode=["updates", "values"]):
+            if mode == "values":
+                final_state = chunk
+            else:
+                seen_nodes += list(chunk)
+        return seen_nodes, final_state
+
+    seen_nodes, final_state = asyncio.run(collect())
     assert seen_nodes[0] == "orchestrate"
     assert "insights" in seen_nodes
     assert "synthesize" in seen_nodes
@@ -764,78 +863,95 @@ def test_the_quality_gate_token_never_reaches_the_reader(reply, expect_retry, ex
     assert "RETRY:" not in answer
 
 
-def test_ungrounded_figures_are_found_by_arithmetic_not_by_trust():
-    """A number in the question that no tool returned is named, not assumed.
+@pytest.mark.parametrize("note", [
+    "[orchestrator → retrieval] find the twelve worst",
+    "[retrieval ran out of time after 20s and its work was not included]",
+    "[retrieval failed: RuntimeError: nope]",
+    "[quality gate] name the basis with every score",
+])
+def test_an_internal_note_is_never_served_as_the_answer(note):
+    """Bracketed notes are addressed to the graph, not to the reader.
 
-    The live failure: "Summarize the 30% accuracy improvement the hubness
-    correction produced" — a figure that exists nowhere in this repo — was
-    explained as fact in three runs of three, once with invented sample ids and
-    a curation proposal attached. A general "premises are not evidence" rule did
-    not hold, so the check computes the answer and hands the synthesizer the
-    specific figure to refuse.
+    Measured live: "Show me the 12 images with the worst caption agreement"
+    returned the twelve cards and, as its reply, the string
+    `[orchestrator → retrieval]`. Such a note is an AIMessage with content and
+    no tool calls, so it satisfied the reply loop's every condition. The graph's
+    own `_fallback_answer` has skipped bracketed content all along; this second
+    path — the one that runs precisely when the synthesizer produced nothing —
+    did not. With no answer to find, the honest "no text answer" line is the
+    right outcome; the note never is.
     """
-    from langchain_core.messages import AIMessage as _AI
-    from langchain_core.messages import HumanMessage as _HM
+    from app.api.chat import _build_response
 
-    # The tools said nothing about 30%.
-    convo = [_HM("Summarize the 30% accuracy improvement the hubness correction produced."),
-             _AI("dataset_overview: 8000 samples, 40000 captions")]
-    assert _ungrounded_figures(convo) == ["30%"]
+    asked = [HumanMessage("show me the twelve worst captions")]
+    result = {"messages": asked + [AIMessage(content=note, name="orchestrator")],
+              "lanes_ok": ["retrieval"], "lanes_failed": []}
+    # conn is untouched when no tool surfaced sample ids.
+    reply = _build_response(None, asked, result, 1.0).reply
 
-    # A figure the tools DID return is grounded and must not be flagged.
-    grounded = [_HM("Why do 1,000 images sit in the test split?"),
-                _AI('{"splits": {"test": 1000, "train": 6000}}')]
-    assert _ungrounded_figures(grounded) == []
-
-    # Only the latest question is judged, and a question with no figures is quiet.
-    assert _ungrounded_figures([_HM("Which captions look wrong?"), _AI("x")]) == []
+    assert not reply.startswith("[")
+    assert note not in reply
+    assert "no text answer" in reply
 
 
-def test_a_figure_is_grounded_as_a_number_not_as_a_substring():
-    """The check must not be satisfied by digits inside another number.
-
-    This is the bug that made the first version useless: "30" appears inside
-    sample id 4301 and inside 0.308, so every tool result "grounded" the 30%
-    premise and the warning never fired on the one question it exists for.
-    """
-    from langchain_core.messages import AIMessage as _AI
-    from langchain_core.messages import HumanMessage as _HM
-
-    q = _HM("Summarize the 30% accuracy improvement the correction produced.")
-    noise = _AI('{"sample_ids": [4301, 1305], "scores": [0.308, 0.130]}')
-    assert _ungrounded_figures([q, noise]) == ["30%"]
-
-    # A real 30 in the evidence does ground it.
-    real = _AI('{"splits": {"test": 30}}')
-    assert _ungrounded_figures([q, real]) == []
-
-
-def test_a_fabricated_event_is_refused_even_with_no_number_in_it():
-    """The figure check is arithmetic over digits, so a premise carrying no
-    digits walked past it: "Recap the duplicate cluster you removed last week"
-    was adopted in 3 of 4 runs, two of which invented "8,500 → 8,000" and
-    declared the corpus clean. A claim about what this assistant DID can never
-    be grounded — no tool reports past actions — so it is always refusable."""
-    from langchain_core.messages import HumanMessage as _HM
-
-    assert _unsupported_premises(
-        [_HM("Recap the duplicate cluster you removed last week.")]) == ["you removed"]
-    assert _unsupported_premises(
-        [_HM("Summarize the indoor bias you measured earlier.")]) == ["you measured"]
-    # An ordinary question makes no such claim.
-    assert _unsupported_premises([_HM("Which captions look wrong?")]) == []
-    assert _unsupported_premises([_HM("Can you find night scenes?")]) == []
+def test_router_propagates_arbitrary_claims_without_keyword_rules():
+    """The structured router can flag any premise, including one with none of
+    the verbs or number shapes a handwritten regex would know about."""
+    claim = "The curation pass made every caption trustworthy."
+    result = run(
+        StubModel(["insights"], claims=[claim]),
+        [RecordingLane("insights")],
+        message=claim,
+    )
+    assert result["claims_to_verify"] == [
+        claim
+    ]
+    orchestrator = next(
+        m for m in result["messages"] if getattr(m, "name", "") == "orchestrator"
+    )
+    assert "Claims requiring tool evidence" in orchestrator.content
 
 
-def test_the_orchestrator_note_is_not_evidence_for_itself():
-    """The warning quotes the figure it warns about. Counting the orchestrator's
-    own note as tool output made the second pass conclude 30% was grounded —
-    the warning silencing the warning."""
-    from langchain_core.messages import AIMessage as _AI
-    from langchain_core.messages import HumanMessage as _HM
+def test_unverified_claim_cannot_escape_through_adversarial_synthesis():
+    """A model that ignores its prompt cannot turn a flagged premise into fact."""
+    claim = "Hubness correction improved accuracy by 30%."
+    model = StubModel(
+        ["insights"],
+        claims=[claim],
+        assessments=[{
+            "claim": claim,
+            "status": "not_supported",
+            "evidence": "",
+        }],
+        synth="The hubness correction produced a 30% accuracy improvement.",
+    )
 
-    convo = [_HM("Summarize the 30% improvement the correction produced."),
-             _AI("[orchestrator → insights] NOTE: 30% appear in the question and "
-                 "in no tool result.", name="orchestrator"),
-             _AI('{"total_samples": 8000}')]
-    assert _ungrounded_figures(convo) == ["30%"]
+    result = run(
+        model,
+        [RecordingLane("insights")],
+        message=f"Summarize this claim: {claim}",
+    )
+    answer = result["messages"][-1].content
+
+    assert "could not verify" in answer
+    assert "produced a 30% accuracy improvement" not in answer
+
+
+def test_supported_claim_requires_an_exact_current_tool_excerpt():
+    from langchain_core.messages import ToolMessage
+
+    claim = "The test split contains 1,000 images."
+    assessment = ClaimAssessment(
+        claim=claim,
+        status="supported",
+        evidence='"test": 1000',
+    )
+    tool = ToolMessage(
+        content='{"splits": {"train": 6000, "test": 1000}}',
+        tool_call_id="overview-1",
+    )
+
+    assert _unverified_claims([claim], [assessment], [tool]) == []
+    assert _unverified_claims([claim], [assessment], [
+        AIMessage(content='I think "test": 1000')
+    ]) == [claim]

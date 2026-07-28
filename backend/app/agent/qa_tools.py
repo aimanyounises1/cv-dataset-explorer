@@ -5,16 +5,13 @@ everything else in this platform: the answer is not in the dataset, it is in
 whether the software still works. So it is a specialist with its own tools, and
 those tools drive a real browser rather than consulting anything.
 
-The awkward part is time. A sweep takes minutes; a chat turn cannot. Rather than
-blocking a lane until it is killed by the lane timeout, `run_app_qa` waits up to a
-budget that is deliberately shorter than that timeout and then returns the run
-*in progress* — a real answer with a run id the user can ask about again. A tool
-that returns nothing after four minutes and a tool that returns a partial report
-after three look identical to the model; only one of them is useful.
+A sweep takes minutes while a chat turn should not. `run_app_qa` therefore starts
+the existing background runner and immediately returns its run id; progress is
+read with `app_qa_status`. The tool does not implement a second polling timeout
+on top of LangGraph's node timeout.
 """
 import json
 import logging
-import time
 
 from langchain_core.tools import tool
 
@@ -23,19 +20,9 @@ from . import blocks
 
 logger = logging.getLogger(__name__)
 
-# Stop waiting well before the lane is killed, so the lane returns a report
-# rather than being cut off with nothing to show.
-WAIT_MARGIN_S = 45.0
-POLL_S = 2.0
-
 SETUP = ("The QA sweep needs Playwright and the system Chrome: "
          "`pip install -r requirements-qa.txt` (or "
          "`uv run --with playwright --with python-pptx ...`), then retry.")
-
-
-def _wait_budget() -> float:
-    return max(30.0, config.AGENT_LANE_TIMEOUT - WAIT_MARGIN_S)
-
 
 def _as_block(report: dict, title: str) -> blocks.QABlock:
     from ..qa import runner
@@ -89,11 +76,6 @@ def run_app_qa(only: str = "") -> str:
     state, started = runner.MANAGER.start(flows)
     run_id = state["run_id"]
     logger.info("QA sweep %s (%s)", run_id, "started" if started else "already running")
-
-    deadline = time.monotonic() + _wait_budget()
-    while state.get("status") == "running" and time.monotonic() < deadline:
-        time.sleep(POLL_S)
-        state = runner.MANAGER.latest() or state
 
     title = ("Application status" if state.get("status") == "done"
              else "Application status (in progress)")
