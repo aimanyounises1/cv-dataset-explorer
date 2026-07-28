@@ -361,6 +361,7 @@ export default function ChatPage() {
         <ul className="chat-session-list">
           {sorted.map((m) => {
             const isActive = m.id === active;
+            const when = whenLabel(m.updatedAt);
             return (
               <li key={m.id} className={`chat-session${isActive ? " active" : ""}`}>
                 {renaming === m.id ? (
@@ -378,15 +379,22 @@ export default function ChatPage() {
                   />
                 ) : (
                   <>
+                    {/* A title is the question that was asked, and questions are
+                        long; the visible text is clamped to two lines. The whole
+                        question stays reachable both ways — hover reads the
+                        `title`, a screen reader reads the label — because a
+                        register of past work you cannot identify is not a
+                        register. */}
                     <button
                       className="chat-session-open"
                       onClick={() => openSession(m.id)}
                       disabled={busy}
                       title={m.title}
+                      aria-label={when ? `Open "${m.title}" — ${when}` : `Open "${m.title}"`}
                       aria-current={isActive ? "true" : undefined}
                     >
                       <span className="chat-session-title">{m.title}</span>
-                      <span className="chat-session-when">{whenLabel(m.updatedAt)}</span>
+                      <span className="chat-session-when">{when}</span>
                     </button>
                     <span className="chat-session-acts">
                       <button
@@ -433,13 +441,25 @@ export default function ChatPage() {
                 Your conversations are kept on this machine. Open one, or start
                 typing below to begin a new one.
               </p>
+              {/* Same contract as the register: the clamped line is what you
+                  see, the full question is what you get on hover and what
+                  assistive tech announces. */}
               <div className="chat-resume-list">
-                {sorted.map((m) => (
-                  <button key={m.id} className="chat-resume" onClick={() => openSession(m.id)}>
-                    <span className="chat-resume-title">{m.title}</span>
-                    <span className="chat-resume-when">{whenLabel(m.updatedAt)}</span>
-                  </button>
-                ))}
+                {sorted.map((m) => {
+                  const when = whenLabel(m.updatedAt);
+                  return (
+                    <button
+                      key={m.id}
+                      className="chat-resume"
+                      onClick={() => openSession(m.id)}
+                      title={m.title}
+                      aria-label={when ? `Open "${m.title}" — ${when}` : `Open "${m.title}"`}
+                    >
+                      <span className="chat-resume-title">{m.title}</span>
+                      <span className="chat-resume-when">{when}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

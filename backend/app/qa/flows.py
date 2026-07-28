@@ -251,15 +251,28 @@ def similarity_map(pg, ok):
 
 @flow("Statistics")
 def statistics(pg, ok):
-    """Charts render, and the provenance panel states where the numbers came from."""
+    """Charts render across the profile's views, and the provenance panel states
+    where the numbers came from.
+
+    The profile is five URL-addressable views now, so the charts live in the view
+    that owns them rather than all on one page — which is the point of the split,
+    and why this walks the views instead of counting everything at once."""
     pg.goto(url("/stats"), wait_until="domcontentloaded")
     pg.wait_for_selector(".stat-cards")
     pg.wait_for_timeout(1200)
     surfaces = len(pg.query_selector_all(".recharts-surface"))
-    ok("charts rendered", surfaces >= 4, f"{surfaces} chart surfaces")
-    # The panel is a collapsed <details>, so its text is absent from inner_text
-    # until expanded — the earlier assertion was testing the wrong thing.
-    pg.click(".caveat summary")
+    ok("overview charts rendered", surfaces >= 2, f"{surfaces} chart surfaces")
+
+    pg.goto(url("/stats?view=coverage"), wait_until="domcontentloaded")
+    pg.wait_for_selector(".recharts-surface")
+    pg.wait_for_timeout(1200)
+    cov = len(pg.query_selector_all(".recharts-surface"))
+    ok("coverage charts rendered", cov >= 4, f"{cov} chart surfaces")
+
+    # Provenance renders its <details> open, so the text is already in the DOM;
+    # clicking the summary would COLLAPSE it and hide what is being asserted.
+    pg.goto(url("/stats?view=provenance"), wait_until="domcontentloaded")
+    pg.wait_for_selector(".caveat")
     pg.wait_for_timeout(400)
     ok("provenance panel present", "8,091" in pg.inner_text("body"))
 
@@ -480,7 +493,8 @@ def leakage(pg, ok):
     check it: the whole threshold ladder, the split of each side, and the pairs
     at a size where you can judge whether two images really are the same.
     """
-    pg.goto(url("/stats"), wait_until="domcontentloaded")
+    # Leakage lives in the profile's "Split integrity" view, which is a URL.
+    pg.goto(url("/stats?view=integrity"), wait_until="domcontentloaded")
     try:
         pg.wait_for_selector(".leakage", timeout=45000)
     except Exception as exc:

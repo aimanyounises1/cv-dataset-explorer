@@ -164,10 +164,12 @@ export default function SamplePage() {
       </div>
       <div className="detail" style={{ marginTop: 12 }}>
         <div>
-          <img className="detail-image" src={detail.image_url} alt={detail.captions[0]?.text ?? detail.filename} />
-          {/* Region evidence: mark or accept a suggested box on THIS image and
-              search toward or away from it. Lives under the image it marks. */}
-          <RegionSearch sampleId={detail.id} imageUrl={detail.image_url} />
+          {/* One photograph, one stage. The marking surface IS the page's
+              primary image (it carries .detail-image and the caption as alt
+              text) — rendering a second, unmarkable copy above it only asked
+              the reader which of the two identical pictures was the real one. */}
+          <RegionSearch sampleId={detail.id} imageUrl={detail.image_url}
+                        alt={detail.captions[0]?.text ?? detail.filename} />
         </div>
         <div>
           <div className="panel">

@@ -5,9 +5,21 @@
 .rs-steer { flex: 0 1 220px; padding: 7px 10px; border: 1px solid var(--border);
   border-radius: 999px; background: var(--bg-inset); color: var(--text);
   font: inherit; font-size: 13px; }
-.rs-stage { position: relative; display: inline-block; max-width: 100%;
-  border-radius: var(--radius-sm); overflow: hidden; }
-.rs-stage img { display: block; max-width: 100%; }
+/* The stage is the sample page's ONE photograph, so it wears the frame the
+   standalone .detail-image used to wear and fills the column instead of
+   sitting at its intrinsic size. The frame lives on the stage rather than on
+   the <img>: the marking rectangle and the detector boxes are positioned in
+   percentages of the stage, and a border between the two would offset every
+   box by its own width. */
+.rs-stage { position: relative; display: block; width: 100%; max-width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-inset); overflow: hidden; }
+.rs-stage img { display: block; width: 100%; height: auto; }
+/* .detail-image is sticky (top: 16px) from when it stood alone above this
+   stage. Inside it, it must not be: a picture that slid within the stage would
+   leave the overlay that marks it behind, and the buttons that act on the mark
+   sit above the stage — marking correctness outranks the ride-along. */
+.rs-stage .detail-image { position: static; border: 0; border-radius: 0; }
 .rs-stage.marking { cursor: crosshair; }
 .rs-rect { position: absolute; border: 2px solid var(--accent);
   background: rgba(33, 109, 80, 0.12); pointer-events: none;
