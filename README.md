@@ -253,7 +253,7 @@ scripts/        benchmarks, screenshots, capabilities/link checks
 ## Test evidence
 
 ```bash
-cd backend && pytest                  # 369 passed (2026-07-28)
+cd backend && pytest                  # 383 passed (2026-07-29)
 cd frontend && npx tsc --noEmit && npm run build
 cd backend && python ../scripts/ui_smoke.py   # real-Chrome sweep, 17 workflows
 ```

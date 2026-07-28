@@ -220,7 +220,7 @@ were untouched:
 **The test suite is not green inside this image**, and the reason is worth
 stating rather than hiding: `docker compose exec backend python -m pytest -q`
 gave **290 passed, 8 failed, 2 skipped** when this was measured — a 300-test
-collection, against 369 on the host today, so re-run the command rather than
+collection, against 383 on the host today, so re-run the command rather than
 quote the tally. All 8 failures were in `tests/test_providers.py`, and all 8
 passed on the host.
 
