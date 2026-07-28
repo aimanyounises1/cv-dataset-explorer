@@ -125,9 +125,20 @@ Adoption is justified by that benchmark, never by this extrapolation and never
 by the word "vector" -- an approximate index trades recall for speed, and the
 trade has to be shown to be worth it on the data it will serve.
 
-The substitution is local either way: `EmbeddingIndex.search` already takes an
-`allowed_ids` candidate mask, so an ANN index drops in behind the same signature
-without the API changing.
+The substitution is local for TEXT SEARCH: `EmbeddingIndex.search` already takes
+an `allowed_ids` candidate mask, so an ANN index drops in behind the same
+signature without the API changing.
+
+It is not yet the single seam for everything, and that is worth stating plainly
+because it is the first thing an ANN swap would trip over. Composed search,
+region search and the retrieval benchmark rank by reaching into
+`index.embeddings` directly (`api/search.py` in `_composed_ranking` and the
+by-region path, `api/eval.py` in its scoring loop) — `_composed_ranking` even
+hand-copies the candidate mask that `ml/index.py` documents as the seam.
+Swapping in an approximate index today would leave two retrieval paths in the
+product, with the benchmark measuring the one you no longer ship. Routing those
+three through `EmbeddingIndex.search` is the prerequisite for the scale path
+above, not a tidy-up after it.
 
 Two things this repo deliberately does NOT do, so the reasoning is on the record
 rather than rediscovered:

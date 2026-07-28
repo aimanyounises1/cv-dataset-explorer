@@ -133,11 +133,23 @@ def _ask_assistant(page: Page) -> None:
     box.type("Show me the 12 images with the worst caption agreement.", delay=12)
     page.keyboard.press("Enter")
     try:
-        # The turn is done when the typing indicator goes away. A local 8B model
-        # with tool calls takes 10-60s, well past any default timeout.
-        page.wait_for_selector(".loading-dots", state="detached", timeout=120_000)
+        # Wait for the ANSWER, not for a spinner to leave. `.loading-dots` is
+        # only the pre-first-step placeholder now — the live trace replaces it
+        # the moment the graph reports `orchestrate`, so detaching it fired the
+        # capture 5 s into a running turn and produced a figure of an empty
+        # pane under a caption promising an answer and rendered blocks.
+        page.wait_for_function(
+            """() => {
+                if (document.querySelector('.live-trace')) return false;
+                const t = [...document.querySelectorAll('.chat-turn.assistant .chat-text')];
+                const last = t[t.length - 1];
+                return !!last && last.innerText.trim().length > 60;
+            }""",
+            timeout=180_000)
     except PWTimeout:
-        print("    (assistant still thinking — capturing as-is)")
+        raise SystemExit(
+            "    assistant produced no completed answer in 180s — refusing to "
+            "capture a figure of an empty chat. Warm the model and re-run.")
     page.wait_for_timeout(1200)
     # The pane auto-scrolls to the newest content, which puts the question
     # off-screen and leaves a figure of an answer to nothing. Pull the user turn

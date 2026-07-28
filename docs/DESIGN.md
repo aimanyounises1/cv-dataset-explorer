@@ -66,8 +66,10 @@ Flickr8k's captions are retrieval ground truth: querying with a caption should
 return its own image (the standard published protocol for this dataset). The
 Benchmark tab computes recall@1/5/10 for semantic, keyword, and hybrid modes —
 so the choice of hybrid-by-default is *measured*, not asserted. The honest
-caveat is stated in the UI: keyword recall is flattered because query captions
-are literally indexed; semantic recall is the generalization signal.
+caveat is stated in the UI, and it runs the other way: the query caption's own
+row is excluded from the lexical scan, so keyword recall is *depressed* by a
+strict conjunction that returns an empty candidate list for most queries, not
+flattered by self-retrieval. Semantic recall is the generalization signal.
 
 ### The assistant: Fugu-style orchestration as a *layer*, not the engine
 The optional Assistant runs a LangGraph multi-agent graph inspired by Sakana's
