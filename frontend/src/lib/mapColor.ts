@@ -14,9 +14,24 @@ export type ColorMode =
   | "cluster" | "split" | "agreement"
   | "legibility" | "rarity" | "difficulty" | "clutter";
 
-export const COLOR_MODES: { value: ColorMode; label: string; kind: "nominal" | "quantity" }[] = [
-  { value: "cluster", label: "Cluster (k-means)", kind: "nominal" },
-  { value: "split", label: "Split", kind: "nominal" },
+/** A colour mode, and — when its groups are also a filter the URL understands —
+ * the selection parameter one of its legend swatches sets.
+ *
+ * `facet` lives here rather than in the page that draws the legend, so adding a
+ * nominal mode that happens to be URL-selectable is one entry in this list and
+ * nothing else. The alternative was a `mode === "cluster" ? ... : "split"`
+ * ladder beside the legend, which is the same shape as the hand-copied key list
+ * `useSelection` warns about: it drifts silently the first time a mode is added
+ * and nobody remembers the second place. A mode with no `facet` still colours;
+ * it simply has nothing to select on, which is true of every quantity. */
+export const COLOR_MODES: {
+  value: ColorMode;
+  label: string;
+  kind: "nominal" | "quantity";
+  facet?: "cluster" | "split";
+}[] = [
+  { value: "cluster", label: "Cluster (k-means)", kind: "nominal", facet: "cluster" },
+  { value: "split", label: "Split", kind: "nominal", facet: "split" },
   { value: "agreement", label: "Caption agreement", kind: "quantity" },
   { value: "difficulty", label: "Difficulty", kind: "quantity" },
   { value: "legibility", label: "Legibility", kind: "quantity" },
