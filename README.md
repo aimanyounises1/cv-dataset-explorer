@@ -121,7 +121,7 @@ consistency flags images whose five captions disagree with each other.
 
 ### Trust, measured
 
-![Dataset profile with provenance caveats and split statistics](docs/screenshots/7-stats.png)
+![Dataset profile, split-integrity view: train/test leakage as a threshold ladder with judgeable cross-split pairs](docs/screenshots/7-stats.png)
 ![The self-benchmark table: recall@k for all three modes](docs/screenshots/8-eval.png)
 
 The stats page states the dataset's provenance and known defects. The

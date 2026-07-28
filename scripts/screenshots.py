@@ -168,7 +168,9 @@ SHOTS = [
     ("4-axes.png", "/?difficulty_min=8&legibility_min=8", 2600, None),
     ("5-map.png", "/map", 6000, None),
     ("6-quality.png", "/quality", 4000, None),
-    ("7-stats.png", "/stats", 4000, None),
+    # The profile is five addressable views now; this figure shows the one that
+    # carries the finding a reviewer should see, not the landing view.
+    ("7-stats.png", "/stats?view=integrity", 4500, None),
     ("8-eval.png", "/eval", 1500, _run_benchmark),
     ("9-sample.png", "/samples/1865", 3500, None),
     ("10-palette.png", "/", 1800, _open_palette),
@@ -217,7 +219,7 @@ def _album_figure(page: Page) -> None:
     aid = _album_id(page)
     page.goto(f"{BASE}/?album={aid}", wait_until="domcontentloaded")
     page.wait_for_selector(".album-header .ah-name")
-    page.click("button:has-text('Details & analysis')")
+    page.click("button:has-text('Members & analysis')")
     page.click("button:has-text('Analyze')")
     page.wait_for_selector(".ah-measured")
     page.wait_for_timeout(1500)
