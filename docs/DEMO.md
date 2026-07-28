@@ -110,21 +110,22 @@ The `qa` specialist runs alone (it is marked expensive, so it is never chosen
 speculatively alongside another lane). It drives real Chrome over every registered
 workflow and returns a status block inline:
 
-- a `DONE` badge and the pass count — **63/63 checks · 11/11 workflows** on the run
-  this walkthrough was written against, before three further workflows were
-  registered, so expect a different denominator;
+- a `DONE` badge and the pass count — **104/104 checks · 17/17 workflows** on run
+  `20260728-155424-154f`, the last full sweep recorded in `backend/data/qa/`;
+  the registry grows, so expect a different denominator;
 - one row per workflow — Routes, Gallery, Similarity map, Statistics, Quality,
-  Benchmark, Sample detail, Assistant, Graceful degradation, Command palette,
-  Assistant canvas — with its check tally and duration;
+  Benchmark, Sample detail, Assistant, Axis legend, Set description, Train/test
+  leakage, Data integrity, Graceful degradation, Command palette, Assistant
+  canvas, Compare, Hero journey — with its check tally and duration;
 - a **screenshot of each workflow**, click to enlarge;
 - an expandable list of every individual check;
 - **`markdown` and `deck` download buttons.** The deck is a real `.pptx`
-  (12 slides, ~7 MB): a title slide with the tally, then one slide per workflow
-  with its status, screenshot and checks.
+  (18 slides, ~12 MB on that run): a title slide with the tally, then one slide
+  per workflow with its status, screenshot and checks.
 
-Observed: 47 s wall clock, 63/63 checks, 11/11 flows, no console errors. A good
-chunk of that is the *Assistant canvas* flow, which waits on the local model to
-route a request and produce a chart.
+Observed on that run: 79 s wall clock, 104/104 checks, 17/17 flows, no console
+errors. A good chunk of that is the *Assistant canvas* flow, which waits on the
+local model to route a request and produce a chart.
 
 One of those workflows is *Graceful degradation*: it intercepts `/api/views` and
 `/api/tags`, returns 500s, and asserts the UI says so — while a 404 (an optional
@@ -178,8 +179,11 @@ for the embedding stack, the VLM, Playwright and `python-pptx`.
 
 ## Things that will look imperfect, and why
 
-- **No streaming.** A 50-second report shows a spinner for 50 seconds. Streaming
-  blocks as lanes finish is the version worth building and is not built.
+- **The steps stream, the prose does not.** While a turn runs, the bubble lists
+  the graph's real node transitions as they happen — *orchestrate*, then each
+  lane, with elapsed seconds — so a 50-second report says where it is. The
+  answer text still appears whole at the end; streaming tokens, and streaming
+  blocks as lanes finish, are not built.
 - **Prose quality varies.** Routing, tool choice and wording are as good as a
   local 8B model, which is usually right and occasionally not. The defences are
   structural: tools supply the numbers, the routing menu states exclusions, and

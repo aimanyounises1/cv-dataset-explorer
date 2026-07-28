@@ -41,6 +41,7 @@ Optional layers, each honest about its absence:
 | VLM tag enrichment | `ollama pull qwen2.5vl:7b`, then `python -m app.enrich` |
 | Self-QA browser sweep | `pip install -r requirements-qa.txt` (Playwright + real Chrome) |
 | Qwen3-VL retrieval provider | `pip install -r requirements-qwen.txt`, then `python -m app.ingest --provider qwen3_vl` |
+| Region suggestions (zero-shot detector) | `python -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny')"` |
 | Container path | `docker compose up --build` — see [docs/DEPLOY.md](docs/DEPLOY.md) |
 
 ## The model decision, measured
@@ -81,6 +82,12 @@ compared. Search by image (drop, paste or pick a file), or steer with
 reference chips: *More like this* / *Exclude* build a composed query in the
 URL (`?like=76&unlike=13` plus text), so a colleague can open the same
 steered search from a pasted link — and the Back button walks the trail.
+Exclusion alone is a real direction: a negative-only query ranks the corpus
+by distance from the excluded examples and says so. Recent queries drop down
+inside the search field, mode, ordering and thumbnail size share one *Search
+settings* popover beside it, and every committed search joins the workspace
+trail the History drawer shows — each row travelling back to the exact view it
+recorded.
 
 ![Zero-shot facet filters with a set description panel open](docs/screenshots/2-describe.png)
 
@@ -135,6 +142,12 @@ similarity floor (the measured 10th percentile of nearest-neighbour cosine in
 the active index; `?min_sim=` overrides) grey out rather than posing as a
 class — and when nothing clears it, the page says "possible coverage gap"
 instead of padding. A sample reached from a search says *why* it surfaced.
+Mark a rectangle on the image itself — or accept a zero-shot box proposal
+(Grounding DINO tiny, measured before it was allowed in: ~330 ms/image warm
+on the reference machine, `scripts/bench_detector.py` re-measures it) — and
+search **toward or away from that region**:
+the server crops the original from the request's normalized geometry, so the
+evidence reproduces from the URL-free request alone.
 
 ### Compare two frames
 
@@ -151,7 +164,10 @@ image search. Source images are never modified.
 ![The Share menu: copy link, email, Teams compose, downloads — everything local](docs/screenshots/16-share.png)
 
 Albums are first-class ordered collections (provenance `manual` | `tag` —
-converting a tag is explicit and keeps the tag). Drag cards onto the shelf —
+converting a tag is explicit and keeps the tag). Pick images with the ✓ each
+card carries — there is no mode to enter, so a click still opens the image —
+or keep a whole ranking as an album straight from the result bar. Drag cards
+onto the shelf —
 every drop offers an Undo that removes exactly what the drop added — reorder
 by drag or arrow keys, set a cover, edit the summary where you read it. The
 Analyze panel counts what members share and where they split, and computes
@@ -168,10 +184,13 @@ produced it.
 
 An optional LangGraph orchestration over local Ollama: an orchestrator routes
 to retrieval/insights specialists, a synthesizer quality-gates the answer, and
-the per-answer agent/tool trace is shown. Agents call the same service
-functions as the REST API — retrieval stays deterministic. The assistant's one
-mutation is a **proposal**: tagging waits for your click, and conversations
-persist locally with rename/reopen/delete.
+**the graph's own node transitions stream into the UI as they happen** — the
+progress you watch is the run, not an animation. Agents call the same service
+functions as the REST API — retrieval stays deterministic — and can inspect
+albums: ask about a rare-scenario album and the answer cites its measured
+signals and outliers. The assistant's one mutation is a **proposal**: tagging
+waits for your click, and conversations persist locally with
+rename/reopen/delete.
 
 ![Command palette over every route and action](docs/screenshots/10-palette.png)
 ![The front door, with the rail's local-models card](docs/screenshots/17-models.png)
@@ -211,8 +230,8 @@ frontend/src/
   components/     rail, cards, album shelf/header, share menu, render blocks
   api/            typed client — the only fetch layer
 backend/app/
-  api/            17 routers over one service layer (run_search is the one ranking impl)
-  ml/             providers (SigLIP 2 / Qwen3-VL) · exact index · hubness correction
+  api/            18 routers over one service layer (run_search is the one ranking impl)
+  ml/             providers (SigLIP 2 / Qwen3-VL) · exact index · hubness correction · detector
   agent/          LangGraph graph, tools, render-block contract
   qa/             flow registry + real-Chrome runner (one definition, three consumers)
   ingest/analyze/enrich    idempotent batch CLIs
@@ -223,7 +242,7 @@ scripts/        benchmarks, screenshots, capabilities/link checks
 ## Test evidence
 
 ```bash
-cd backend && pytest                  # 340 passed (2026-07-28)
+cd backend && pytest                  # 352 passed (2026-07-28)
 cd frontend && npx tsc --noEmit && npm run build
 cd backend && python ../scripts/ui_smoke.py   # real-Chrome sweep, 17 workflows
 ```
@@ -244,8 +263,11 @@ the link check and the capabilities contract.
   code says so.
 - The keyword benchmark row is flattered by construction (query captions are
   indexed); the benchmark page states this where the number appears.
-- The assistant needs Ollama and a ~5 GB model; agent answers arrive after the
-  full orchestration round rather than streaming.
+- The assistant needs Ollama and a ~5 GB model; step transitions stream live,
+  but the reply text itself arrives whole at the end of the run.
+- Detection is boxes only: SAM 2.1 tiny measured viable here (70 ms/mask) and
+  is documented future work — retrieval consumes rectangular crops, so masks
+  would add cost without changing what search can use.
 - MCP is stateless JSON (no SSE streaming, no sessions); it binds to the same
   local server and adds no authentication — a local, single-user tool by the
   assignment's constraint.
