@@ -47,6 +47,11 @@ export default function SamplePage() {
   const [similar, setSimilar] = useState<SampleCard[]>([]);
   const [similarError, setSimilarError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The active index's own measured floor, fetched once; the SigLIP constant
+  // covers the legacy layout and the fetch-failed path. Declared with the
+  // other hooks — above every early return — because hook order is identity.
+  const [measuredFloor, setMeasuredFloor] = useState(DEFAULT_SIM_FLOOR);
+  useEffect(() => { activeSimFloor().then(setMeasuredFloor); }, []);
   const [gapBusy, setGapBusy] = useState(false);
   const [gapError, setGapError] = useState<string | null>(null);
 
@@ -112,11 +117,6 @@ export default function SamplePage() {
 
   const back = () =>
     window.history.length > 1 ? navigate(-1) : navigate("/");
-
-  // The active index's own measured floor, fetched once; the SigLIP constant
-  // covers the legacy layout and the fetch-failed path.
-  const [measuredFloor, setMeasuredFloor] = useState(DEFAULT_SIM_FLOOR);
-  useEffect(() => { activeSimFloor().then(setMeasuredFloor); }, []);
 
   // The floor arrives from the URL so a pasted link carries the same cutoff its
   // author saw; anything unparseable falls back to the measured default rather
