@@ -136,14 +136,21 @@ forward pass per semantic query, keeping the UI responsive.
 
 ## What I would build next
 
-1. **Composed image retrieval**: query = image embedding + text delta ("this
-   image but at night") with a weight slider — training-free with the cached
-   embeddings; an active research area (ZS-CIR) that maps to scenario variation.
+Two earlier entries on this list shipped since it was written: composed image
+retrieval (reference chips + steering text + negative examples, basis
+`composed`) and saved views. What remains, in order:
+
+1. **Tuned composition weights**: the composed query's negative-example weight
+   is a chosen constant (0.5), stated as untuned in the code; a weight slider
+   plus a small ZS-CIR-style evaluation would turn a choice into a measurement.
 2. **Few-shot concept classifiers**: tag N positives → logistic regression on
    embeddings ranks the rest → iterate. The canonical mining-at-scale loop.
-3. **Saved views / query history** so curation sessions are resumable.
+3. **A history view over the activity log** — searches and curation actions are
+   already recorded (`/api/activity`); the missing piece is the UI that reopens
+   an old investigation from one click.
 4. **Streaming assistant responses** (LangGraph streams; the UI currently waits
-   for the full orchestration round).
+   for the full orchestration round, so per-agent tool progress is shown after
+   the fact rather than live).
 5. **Scale path**: swap the exact index for FAISS/sqlite-vec behind
    `EmbeddingIndex`, move ingestion/analysis to a job queue, virtualized grid
    rendering, multi-worker index sharing.
