@@ -3,7 +3,8 @@
 # langchain 1.x for `langchain.agents.create_agent`: the older
 # `langgraph.prebuilt.create_react_agent` is deprecated and goes away in
 # LangGraph 2.0.
-langchain>=1.0
-langchain-core>=1.0
-langchain-ollama>=0.3
-langgraph>=1.0
+langchain>=1.0,<2.0
+langchain-core>=1.0,<2.0
+langchain-ollama>=1.0,<2.0
+# 1.2 is the tested baseline for the async node timeout/error-handler contract.
+langgraph>=1.2,<2.0

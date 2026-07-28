@@ -150,7 +150,8 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 
 Model `qwen3:8b` via local Ollama. The orchestrator selects up to
 2 specialists per request and runs them in
-parallel; each lane is bounded at 240s.
+parallel; LangGraph bounds each lane at 90s and the API bounds the complete
+turn at 150s.
 
 ### `retrieval`
 

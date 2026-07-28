@@ -187,8 +187,10 @@ Each of those has a specific answer, and each answer has a test.
 | A lane hangs | Cut off at `AGENT_LANE_TIMEOUT`; reported as a timeout | `test_hanging_lane_is_cut_off` |
 | Tool loop runs away | `AGENT_RECURSION_LIMIT` inside each lane | — |
 | One model call stalls | `OLLAMA_TIMEOUT` on the HTTP client | — |
+| A complete turn stalls | One absolute `AGENT_TURN_BUDGET` deadline covers preflight, graph, stream and response assembly | `test_blocking_response_budget_includes_ollama_preflight`, `test_streaming_response_uses_the_same_absolute_deadline` |
 | The orchestrator fails | Falls back to `retrieval` (read-only, cheap) | `test_orchestrator_failure_falls_back_to_retrieval` |
-| The synthesizer fails | Hands over the specialist's own answer, marked unverified | `test_synthesizer_failure_still_answers` |
+| The synthesizer fails | Refuses router-identified premises; otherwise hands over the specialist answer marked unverified | `test_synthesizer_failure_still_answers`, `test_synthesizer_timeout_still_answers` |
+| User supplies an unsupported premise | Structured verdict must cite an exact current-turn tool excerpt; otherwise the final answer is a refusal | `test_unverified_claim_cannot_escape_through_adversarial_synthesis`, `test_supported_claim_requires_an_exact_current_tool_excerpt` |
 | Orchestrator emits junk | Prose-wrapped JSON, `route` for `routes`, unknown names, and over-long lane lists all handled | `test_parse_routes` (9 cases) |
 | A lane died | Named in the synthesizer's prompt *and* in the UI above the answer | `test_synthesizer_is_told_which_lanes_failed` |
 
@@ -208,10 +210,11 @@ now serialized on a per-instance lock, held per batch so a long image run does n
 block a single query. `backend/tests/test_embedder_concurrency.py` asserts no two
 forward passes overlap.
 
-**A `ThreadPoolExecutor` context manager cannot implement a timeout.** Its
-`__exit__` calls `shutdown(wait=True)`, which blocks on exactly the hung task the
-timeout exists to escape — a 0.3 s lane timeout still took 30 s to return. Lanes
-use a daemon thread joined with a timeout instead, which can be abandoned.
+**Timeouts are LangGraph nodes, not thread wrappers.** Every lane is async and
+uses `StateGraph.add_node(timeout=..., error_handler=...)`. Each lane is an
+isolated subgraph so one branch can record its `NodeTimeoutError` without
+failing sibling branches. The API wraps the whole `ainvoke`/`astream` call in
+one turn timeout, while Ollama's `num_predict` caps server-side generation.
 
 ### Large results and duplicates
 
@@ -240,9 +243,9 @@ in-app QA suite would have drifted from the developer one within a week.
   request attaches to the in-flight run. A run whose heartbeat goes stale is
   abandoned, because a browser can hang in a way no internal timeout can see.
 - `GET /api/qa/run/{id}` polls; `GET /api/qa/run` returns the latest.
-- A sweep takes minutes, which a chat turn cannot. `run_app_qa` waits up to a
-  budget deliberately shorter than the lane timeout and then returns the run
-  *in progress*, with its id. A partial report beats being killed with nothing.
+- A sweep takes minutes, which a chat turn cannot. `run_app_qa` starts the
+  background runner and immediately returns the run id; `app_qa_status` reads
+  progress without keeping an agent lane occupied.
 - Playwright and `python-pptx` are optional (`backend/requirements-qa.txt`). No
   Playwright gives a 503 with setup instructions; no `python-pptx` still produces
   the Markdown report and says the deck was skipped and how to enable it.
@@ -259,7 +262,8 @@ Artifacts land under `backend/data/qa/<run_id>/` (gitignored), served read-only 
 | `CVDE_CHAT_MODEL` | `qwen3:8b` | Ollama model. Must support tool calling. |
 | `CVDE_OLLAMA_URL` | `http://localhost:11434` | Ollama endpoint. |
 | `CVDE_OLLAMA_TIMEOUT` | `120` | One model call, seconds. |
-| `CVDE_AGENT_LANE_TIMEOUT` | `240` | One specialist lane, seconds. |
+| `CVDE_AGENT_LANE_TIMEOUT` | `90` | One async LangGraph specialist node, seconds. |
+| `CVDE_AGENT_TURN_BUDGET` | `150` | Complete assistant turn, seconds. |
 | `CVDE_AGENT_RECURSION_LIMIT` | `25` | Tool-call steps inside a lane. |
 | `CVDE_QA_BASE_URL` | `http://localhost:5173` | What the QA browser drives. |
 

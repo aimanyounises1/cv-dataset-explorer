@@ -17,6 +17,7 @@ know about:
 Optional stack (LangChain/LangGraph + a local Ollama chat model): missing pieces
 produce a 503 with exact setup instructions, never a crash.
 """
+import asyncio
 import json
 import logging
 import sqlite3
@@ -62,12 +63,17 @@ def _get_graph():
     return _graph
 
 
-def _check_ollama() -> None:
+async def _check_ollama() -> None:
     try:
-        resp = httpx.get(f"{config.OLLAMA_URL}/api/tags", timeout=3)
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(f"{config.OLLAMA_URL}/api/tags")
         resp.raise_for_status()
-        models = [m.get("name", "") for m in resp.json().get("models", [])]
-        if not any(m.startswith(config.CHAT_MODEL.split(":")[0]) for m in models):
+        models = {m.get("name", "") for m in resp.json().get("models", [])}
+        wanted = config.CHAT_MODEL
+        aliases = {wanted}
+        if ":" not in wanted:
+            aliases.add(f"{wanted}:latest")
+        if models.isdisjoint(aliases):
             raise HTTPException(
                 503, f"Ollama is running but model '{config.CHAT_MODEL}' is not "
                      f"pulled. Run: ollama pull {config.CHAT_MODEL}")
@@ -172,32 +178,44 @@ def agent_topology():
 
 
 @router.post("/chat", response_model=ChatResponse)
-def chat(
+async def chat(
     messages: list[ChatMessage] = Body(..., embed=True),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     if not messages or messages[-1].role != "user":
         raise HTTPException(400, "Last message must be from the user.")
-    _check_ollama()
-    graph = _get_graph()
-
-    from langchain_core.messages import AIMessage, HumanMessage
-
-    lc_messages = [
-        HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
-        for m in messages[-10:]  # bound context
-    ]
     started = time.monotonic()
+    deadline = asyncio.get_running_loop().time() + config.AGENT_TURN_BUDGET
     try:
-        result = graph.invoke(
-            {"messages": lc_messages, "routes": [], "retries": 0,
-             "lanes_ok": [], "lanes_failed": []},
-            config={"recursion_limit": 40})
+        async with asyncio.timeout_at(deadline):
+            await _check_ollama()
+            graph = _get_graph()
+
+            from langchain_core.messages import AIMessage, HumanMessage
+
+            lc_messages = [
+                HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
+                for m in messages[-10:]  # bound context
+            ]
+            result = await graph.ainvoke(
+                {"messages": lc_messages, "routes": [], "retries": 0,
+                 "claims_to_verify": [], "lanes_ok": [], "lanes_failed": []},
+                config={"recursion_limit": 40},
+            )
+            elapsed = time.monotonic() - started
+            return _build_response(conn, lc_messages, result, elapsed)
+    except HTTPException:
+        raise
+    except TimeoutError as exc:
+        logger.warning("Assistant exceeded the %.0fs turn timeout",
+                       config.AGENT_TURN_BUDGET)
+        raise HTTPException(
+            504,
+            f"Assistant exceeded the {config.AGENT_TURN_BUDGET:.0f}s turn timeout.",
+        ) from exc
     except Exception as exc:
         logger.exception("Agent run failed")
         raise HTTPException(500, f"Assistant run failed: {exc}") from exc
-    elapsed = time.monotonic() - started
-    return _build_response(conn, lc_messages, result, elapsed)
 
 
 # Human phrasing per graph node for the live trace. A node missing here still
@@ -213,7 +231,7 @@ _STEP_LABELS = {
 
 
 @router.post("/chat/stream")
-def chat_stream(
+async def chat_stream(
     messages: list[ChatMessage] = Body(..., embed=True),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
@@ -224,45 +242,72 @@ def chat_stream(
     """
     if not messages or messages[-1].role != "user":
         raise HTTPException(400, "Last message must be from the user.")
-    _check_ollama()
-    graph = _get_graph()
+    started = time.monotonic()
+    deadline = asyncio.get_running_loop().time() + config.AGENT_TURN_BUDGET
+    try:
+        async with asyncio.timeout_at(deadline):
+            await _check_ollama()
+            graph = _get_graph()
 
-    from langchain_core.messages import AIMessage, HumanMessage
+            from langchain_core.messages import AIMessage, HumanMessage
 
-    lc_messages = [
-        HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
-        for m in messages[-10:]
-    ]
-    state = {"messages": lc_messages, "routes": [], "retries": 0,
-             "lanes_ok": [], "lanes_failed": []}
+            lc_messages = [
+                HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
+                for m in messages[-10:]
+            ]
+            state = {"messages": lc_messages, "routes": [], "retries": 0,
+                     "claims_to_verify": [], "lanes_ok": [], "lanes_failed": []}
+    except HTTPException:
+        raise
+    except TimeoutError as exc:
+        raise HTTPException(
+            504,
+            f"Assistant exceeded the {config.AGENT_TURN_BUDGET:.0f}s turn timeout.",
+        ) from exc
 
-    def gen():
+    async def gen():
         emit = lambda d: json.dumps(d, separators=(",", ":")) + "\n"  # noqa: E731
-        started = time.monotonic()
         final_state = None
         try:
-            for mode, chunk in graph.stream(
-                    state, config={"recursion_limit": 40},
-                    stream_mode=["updates", "values"]):
-                if mode == "values":
-                    final_state = chunk
-                    continue
-                for node in chunk:
-                    yield emit({"type": "step", "node": node,
-                                "label": _STEP_LABELS.get(node, node),
-                                "t": round(time.monotonic() - started, 2)})
+            async with asyncio.timeout_at(deadline):
+                async for mode, chunk in graph.astream(
+                        state,
+                        config={"recursion_limit": 40},
+                        stream_mode=["updates", "values"]):
+                    if mode == "values":
+                        final_state = chunk
+                        continue
+                    for node in chunk:
+                        yield emit({"type": "step", "node": node,
+                                    "label": _STEP_LABELS.get(node, node),
+                                    "t": round(time.monotonic() - started, 2)})
+                if final_state is None:
+                    yield emit({"type": "error",
+                                "detail": "The graph produced no final state."})
+                    return
+                resp = _build_response(
+                    conn, lc_messages, final_state, time.monotonic() - started
+                )
+                yield emit({
+                    "type": "final",
+                    "response": resp.model_dump(mode="json"),
+                })
+        except TimeoutError:
+            logger.warning("Streaming assistant exceeded the %.0fs turn timeout",
+                           config.AGENT_TURN_BUDGET)
+            yield emit({
+                "type": "error",
+                "detail": (
+                    f"Assistant exceeded the "
+                    f"{config.AGENT_TURN_BUDGET:.0f}s turn timeout."
+                ),
+            })
+            return
         except Exception as exc:                          # noqa: BLE001
             logger.exception("Streaming agent run failed")
             yield emit({"type": "error",
                         "detail": f"Assistant run failed: {exc}"})
             return
-        if final_state is None:
-            yield emit({"type": "error",
-                        "detail": "The graph produced no final state."})
-            return
-        resp = _build_response(conn, lc_messages, final_state,
-                               time.monotonic() - started)
-        yield emit({"type": "final", "response": resp.model_dump(mode="json")})
 
     from fastapi.responses import StreamingResponse
 
@@ -328,6 +373,16 @@ def _build_response(conn, lc_messages, result, elapsed) -> ChatResponse:
             # has no answer in it, so the specialist's own last word is a better
             # reply than the agent's note to itself.
             _, cleaned = _split_retry(strip_reasoning(raw))
+            # Internal notes are addressed to the graph, not to the reader:
+            # `[orchestrator → retrieval] …`, `[retrieval ran out of time …]`,
+            # `[quality gate] …`. They are AIMessages with content and no tool
+            # calls, so without this they satisfy the loop and become the answer
+            # — measured: "Show me the 12 images with the worst caption
+            # agreement" returned the twelve cards and the reply
+            # "[orchestrator → retrieval]". `_fallback_answer` in the graph has
+            # skipped bracketed content all along; this path never did.
+            if cleaned.startswith("["):
+                continue
             reply = cleaned
             if reply:
                 break
@@ -382,10 +437,10 @@ def _tool_payload(msg: Any) -> dict | None:
 
 
 @router.get("/chat/status")
-def chat_status():
+async def chat_status():
     """Availability probe so the UI can show setup instructions proactively."""
     try:
-        _check_ollama()
+        await _check_ollama()
         from ..agent import registry
         return {"available": True, "model": config.CHAT_MODEL,
                 "specialists": [s.name for s in registry.SPECIALISTS]}

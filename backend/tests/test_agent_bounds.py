@@ -1,22 +1,14 @@
-"""The bounds that keep a turn finite, and the one that stops the model.
+"""The library-native bounds that keep an assistant turn finite."""
+import asyncio
+import json
 
-These pin the fix for a measured failure: a turn that took exactly 360.0s to
-say "retrieval did not finish" and "final review ReadTimeout". Two independent
-causes, so two independent groups of tests here.
-
-1. The per-step timeouts ADDED, because nothing owned the turn. A lane spent
-   its full AGENT_LANE_TIMEOUT (240s) and the synthesizer then started a fresh
-   call with its own OLLAMA_TIMEOUT (120s): 240 + 120 = 360.
-2. Nothing bounded GENERATION. Ollama's log showed a task still decoding after
-   the client had disconnected, past 53,000 tokens — and a local Ollama serves
-   one slot, so that runaway made every later turn queue behind it and abort
-   having received nothing. A timeout that abandons a thread cannot fix this;
-   only a finite output cap ends the work itself.
-"""
-import time
+import pytest
+from fastapi import HTTPException
 
 from app import config
 from app.agent import graph
+from app.api import chat as chat_api
+from app.schemas import ChatMessage
 
 
 class TestOutputCap:
@@ -57,70 +49,87 @@ class TestOutputCap:
         monkeypatch.setattr(graph, "ChatOllama", FakeChatOllama)
         graph._model()
         assert "think" not in captured
+        assert captured["reasoning"] is False
 
 
-class TestLaneBudget:
-    """A lane may only spend what the turn can afford."""
+class HangingGraph:
+    async def ainvoke(self, state, config=None):
+        await asyncio.sleep(30)
+        return state
 
-    def test_reserves_time_for_synthesis(self):
-        """The 360s bug in one assertion: the lane must not be handed the whole
-        remaining budget, or the synthesizer starts from zero."""
-        budget = graph.lane_budget(config.AGENT_TURN_BUDGET)
-        assert budget <= config.AGENT_TURN_BUDGET - config.AGENT_SYNTH_RESERVE
-
-    def test_never_exceeds_the_per_lane_ceiling(self):
-        assert graph.lane_budget(10_000) == config.AGENT_LANE_TIMEOUT
-
-    def test_has_a_floor_so_a_lane_is_never_pointless(self):
-        """A lane cut to two seconds is a lane guaranteed to produce nothing."""
-        assert graph.lane_budget(1.0) == config.AGENT_LANE_MIN
-        assert graph.lane_budget(-500.0) == config.AGENT_LANE_MIN
-
-    def test_lane_plus_reserve_stays_inside_the_turn_budget(self):
-        """The property the old code violated. Checked across the range rather
-        than at one point, because the bug was an arithmetic one."""
-        for remaining in (60.0, 90.0, 120.0, config.AGENT_TURN_BUDGET):
-            total = graph.lane_budget(remaining) + config.AGENT_SYNTH_RESERVE
-            assert total <= max(remaining, config.AGENT_LANE_MIN
-                                + config.AGENT_SYNTH_RESERVE), remaining
+    async def astream(self, state, config=None, stream_mode=None):
+        await asyncio.sleep(30)
+        yield "values", state
 
 
-class TestRemaining:
-    def test_missing_deadline_yields_the_full_budget(self):
-        """A test-invoked graph, or state from before deadlines existed, must
-        not be born already out of time."""
-        assert graph._remaining({}) == config.AGENT_TURN_BUDGET
+class TestTurnTimeout:
+    """The FastAPI boundary, not timeout arithmetic in graph state, owns the
+    total wall clock experienced by the caller."""
 
-    def test_counts_down_from_the_recorded_deadline(self):
-        state = {"deadline": time.monotonic() + 30}
-        assert 25 < graph._remaining(state) <= 30
+    def test_blocking_response_budget_includes_ollama_preflight(self, monkeypatch):
+        monkeypatch.setattr(config, "AGENT_TURN_BUDGET", 0.02)
 
-    def test_an_expired_deadline_is_negative(self):
-        state = {"deadline": time.monotonic() - 10}
-        assert graph._remaining(state) < 0
+        async def hanging_preflight():
+            await asyncio.sleep(30)
+
+        monkeypatch.setattr(chat_api, "_check_ollama", hanging_preflight)
+        with pytest.raises(HTTPException) as caught:
+            asyncio.run(chat_api.chat(
+                [ChatMessage(role="user", content="hello")], None
+            ))
+        assert caught.value.status_code == 504
+
+    def test_streaming_response_uses_the_same_absolute_deadline(self, monkeypatch):
+        monkeypatch.setattr(config, "AGENT_TURN_BUDGET", 0.02)
+
+        async def ready():
+            return None
+
+        monkeypatch.setattr(chat_api, "_check_ollama", ready)
+        monkeypatch.setattr(chat_api, "_get_graph", HangingGraph)
+
+        async def consume():
+            response = await chat_api.chat_stream(
+                [ChatMessage(role="user", content="hello")], None
+            )
+            return [
+                json.loads(chunk)
+                async for chunk in response.body_iterator
+            ]
+
+        events = asyncio.run(consume())
+        assert events[-1]["type"] == "error"
+        assert "turn timeout" in events[-1]["detail"]
+
+    def test_default_lane_limit_leaves_room_inside_the_turn(self):
+        assert 0 < config.AGENT_LANE_TIMEOUT < config.AGENT_TURN_BUDGET
 
 
-class TestTurnStaysBounded:
-    """End to end over the real graph, with a stub model: a lane that hangs
-    must not produce a turn longer than the budget."""
+def test_ollama_preflight_requires_the_configured_model_tag(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
 
-    def test_a_hung_lane_cannot_outlast_the_turn_budget(self, monkeypatch):
-        monkeypatch.setattr(config, "AGENT_TURN_BUDGET", 3.0)
-        monkeypatch.setattr(config, "AGENT_SYNTH_RESERVE", 1.0)
-        monkeypatch.setattr(config, "AGENT_LANE_MIN", 0.5)
-        monkeypatch.setattr(config, "AGENT_LANE_TIMEOUT", 60.0)
-        monkeypatch.setattr(config, "AGENT_SYNTH_MIN", 0.2)
+        def json(self):
+            return {"models": [{"name": "qwen3:30b-a3b"}]}
 
-        started = time.monotonic()
-        assert graph.lane_budget(config.AGENT_TURN_BUDGET) <= 2.0
-        # The point: whatever the per-lane ceiling says, the turn's own budget
-        # is what the waiting person experiences.
-        assert time.monotonic() - started < 1.0
+    class Client:
+        def __init__(self, **kwargs):
+            pass
 
-    def test_synthesis_is_skipped_rather_than_started_too_late(self, monkeypatch):
-        """With the budget spent, the lanes' real work is handed over instead of
-        a model call being started that cannot finish inside it."""
-        monkeypatch.setattr(config, "AGENT_SYNTH_MIN", 15.0)
-        state = {"deadline": time.monotonic() - 1,
-                 "messages": [], "lanes_ok": [], "lanes_failed": []}
-        assert graph._remaining(state) < config.AGENT_SYNTH_MIN
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url):
+            return Response()
+
+    monkeypatch.setattr(config, "CHAT_MODEL", "qwen3:8b")
+    monkeypatch.setattr(chat_api.httpx, "AsyncClient", Client)
+
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(chat_api._check_ollama())
+    assert caught.value.status_code == 503
+    assert "qwen3:8b" in caught.value.detail
