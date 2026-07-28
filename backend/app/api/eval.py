@@ -69,11 +69,21 @@ def _cache_path(sample_size: int):
     PROTOCOL_VERSION by hand is not invalidation; it only covers changes a
     human remembered.)
     """
+    from ..ml import providers
+
+    # Provider-scoped: two providers over the same corpus are two different
+    # retrieval environments, so the active provider's artifacts drive the
+    # stamp and its name joins the key below. (PRISM artifacts live in the
+    # legacy dir regardless — their presence flag keeps its own key slot.)
+    emb_dir = providers.active_emb_dir()
     stamp = 0.0
-    for embs in ("image_embeddings.npy", "caption_embeddings.npy", MU_FILE):
-        p = config.EMB_DIR / embs
+    for embs in ("image_embeddings.npy", "caption_embeddings.npy"):
+        p = emb_dir / embs
         if p.exists():
             stamp = max(stamp, p.stat().st_mtime)
+    mu = config.EMB_DIR / MU_FILE
+    if mu.exists():
+        stamp = max(stamp, mu.stat().st_mtime)
     if config.DB_PATH.exists():
         stamp = max(stamp, config.DB_PATH.stat().st_mtime)
     # Presence is keyed explicitly, not only through the mtime: an artifact
@@ -82,7 +92,8 @@ def _cache_path(sample_size: int):
     # as if the trained model did not exist.
     prism = int((config.EMB_DIR / MU_FILE).exists())
     return (config.CACHE_DIR /
-            f"eval_v{PROTOCOL_VERSION}_{sample_size}_k{config.RRF_K}"
+            f"eval_v{PROTOCOL_VERSION}_{providers.active_provider()}"
+            f"_{sample_size}_k{config.RRF_K}"
             f"_d{config.SEARCH_DEPTH}"
             # The hubness constants re-rank the semantic path, so they belong in
             # the key for exactly the reason RRF_K does.

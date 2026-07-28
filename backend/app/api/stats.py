@@ -48,12 +48,25 @@ def overview(conn: sqlite3.Connection = Depends(get_conn)):
         else:
             buckets["500px+"] += 1
     enriched = conn.execute("SELECT COUNT(DISTINCT sample_id) FROM vlm_tags").fetchone()[0]
+    from .. import config
+    from ..ml import providers
+
+    pstate = providers.resolve()
     return StatsOverview(
         total_samples=total, total_captions=total_caps, splits=splits,
         avg_caption_length_words=round(float(avg_len), 2),
         image_size_buckets=dict(buckets),
         embeddings_available=get_index() is not None,
         vlm_enriched=enriched,
+        embed_preferred=pstate.preferred,
+        embed_provider=pstate.active,
+        embed_model=pstate.model_id,
+        embed_dim=pstate.dim,
+        embed_index_ready=pstate.index_ready,
+        embed_fallback_reason=pstate.fallback_reason,
+        sim_floor=pstate.sim_floor,
+        vlm_model=config.VLM_MODEL,
+        chat_model=config.CHAT_MODEL,
     )
 
 

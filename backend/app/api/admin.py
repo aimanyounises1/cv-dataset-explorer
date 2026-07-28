@@ -70,7 +70,12 @@ def integrity(conn: sqlite3.Connection = Depends(get_conn)):
 @router.post("/admin/reload")
 def reload_indexes(conn: sqlite3.Connection = Depends(get_conn)):
     from . import leakage, stats
+    from ..ml import providers
 
+    # Providers first: index loading below resolves through the active
+    # provider, so a freshly built Qwen index (or a repaired SigLIP one) must
+    # be re-probed before the caches refill.
+    providers.invalidate_providers()
     invalidate_index()
     invalidate_prism()
     stats.clear_caches()

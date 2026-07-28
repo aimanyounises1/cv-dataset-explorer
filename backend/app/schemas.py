@@ -136,6 +136,21 @@ class StatsOverview(BaseModel):
     image_size_buckets: dict[str, int]
     embeddings_available: bool
     vlm_enriched: int
+    # Retrieval provider truth (additive): which provider is configured as
+    # preferred, which one is actually serving, with what model/dimension, and
+    # — when they differ — the named reason. The UI must never have to guess.
+    embed_preferred: Optional[str] = None
+    embed_provider: Optional[str] = None
+    embed_model: Optional[str] = None
+    embed_dim: Optional[int] = None
+    embed_index_ready: bool = False
+    embed_fallback_reason: Optional[str] = None
+    # Measured 10th-percentile nearest-neighbour cosine of the ACTIVE index
+    # (from its manifest); None for the legacy flat layout, where the UI keeps
+    # its documented SigLIP-derived default.
+    sim_floor: Optional[float] = None
+    vlm_model: Optional[str] = None
+    chat_model: Optional[str] = None
 
 
 class CaptionStats(BaseModel):
