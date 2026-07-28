@@ -181,9 +181,42 @@ body {
 .rail-l.collapsed .rail-filters,
 .rail-l.collapsed .rail-foot { display: none; }
 .rail-l.collapsed .rail-link-label { display: none; }
-.rail-l.collapsed .rail-link-min { display: block; text-align: center; }
+/* Keycaps wear the kbd chrome so they read as pressable keys — bare faint
+   letters were half mystery meat, and they collided with the axis legend's
+   always-unboxed letter vocabulary on the same screen. */
+.rail-l.collapsed .rail-link-min {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; margin: 0 auto;
+  font-family: var(--font-mono); font-size: 11px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-inset); color: var(--text-dim);
+  transition: color var(--t-quick), border-color var(--t-quick);
+}
 .rail-l.collapsed .rail-groups { padding: 0 8px; }
-.rail-l.collapsed .rail-link { padding: 7px 0; }
+.rail-l.collapsed .rail-link { padding: 3px 0; }
+.rail-l.collapsed .rail-link:hover { background: none; }
+.rail-l.collapsed .rail-link:hover .rail-link-min { color: var(--text); border-color: var(--border-strong); }
+.rail-l.collapsed .rail-link.active { background: none; box-shadow: none; }
+.rail-l.collapsed .rail-link.active .rail-link-min {
+  background: var(--accent-deep); border-color: var(--accent); color: #ffffff;
+}
+/* The strip keeps one entry point back into filters and the library — with a
+   live count, so collapsing never silently disowns an active filter set. */
+.rail-filter-key {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; margin: 6px auto 0;
+  font-size: 12px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-inset); color: var(--text-dim);
+  transition: color var(--t-quick), border-color var(--t-quick);
+}
+.rail-filter-key:hover { color: var(--text); border-color: var(--border-strong); }
+.rail-filter-count {
+  position: absolute; top: -6px; right: -7px;
+  font-family: var(--font-mono); font-size: 9px; line-height: 1.4;
+  padding: 0 4px; border-radius: 999px;
+  background: var(--amber); color: #201500;
+}
 
 /* ---- Album shelf -------------------------------------------------------
    Ordered collections as destinations, living with navigation. Rows are drop
@@ -246,6 +279,11 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* Inside the library group the boxes go: the LIBRARY eyebrow already scopes
+   this territory, and a bordered panel whose entire content was a second
+   title read as an empty crashed box. */
+.rail-library .saved-views { background: none; border: none; padding: 0 6px; margin-bottom: 4px; }
+
 .rail-foot {
   padding: 12px 16px 0; margin-top: 10px;
   border-top: 1px solid var(--border);
@@ -286,6 +324,18 @@ body {
 .rail-filters { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
 .rail-filters select { width: 100%; }
 .rail-filters .axis-panel,
+/* The one disclosure that stays a disclosure (an id list is occasional
+   ingress, not the headline feature) gets a marker the flex summary was
+   silently suppressing — same chevron the axis folds already use. */
+.idlist-panel > summary { display: flex; align-items: center; gap: 6px; list-style: none; }
+.idlist-panel > summary::-webkit-details-marker { display: none; }
+.idlist-panel > summary::before {
+  content: "\203a"; display: inline-block; flex-shrink: 0;
+  color: var(--text-faint); font-size: 13.5px; line-height: 1;
+  transition: transform var(--t-quick);
+}
+.idlist-panel[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
+
 .rail-filters .idlist-panel {
   background: transparent; border: none; padding: 0; margin: 14px 0 0;
 }
@@ -320,7 +370,9 @@ body {
      <details> flex item stretches the strip exactly the way filters did,
      and collapsing a horizontal strip means hiding the nav, so a desktop
      "collapsed" preference must not follow the user onto a phone. */
-  .rail-l .rail-filters, .rail-l .rail-library, .rail-toggle { display: none; }
+  .rail-l .rail-filters, .rail-l .rail-library, .rail-toggle,
+  .rail-filter-key { display: none; }
+  .selection-tray { left: 50%; }   /* no rail column to offset against */
   .rail-l.collapsed .rail-brand-name { display: inline; }
   .rail-l.collapsed .rail-link-label { display: inline; }
   .rail-l.collapsed .rail-link-min { display: none; }
@@ -412,12 +464,11 @@ select:hover { border-color: var(--border-strong); }
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 9px 14px; margin-bottom: 14px;
 }
-.axis-panel > summary {
-  cursor: pointer; font-size: 10.5px; text-transform: uppercase;
+.axis-panel-title {
+  font-size: 10.5px; text-transform: uppercase;
   letter-spacing: 0.09em; font-weight: 600; color: var(--text-faint);
-  display: flex; align-items: center; gap: 8px; list-style: revert;
+  display: flex; align-items: center; gap: 8px;
 }
-.axis-panel > summary:hover { color: var(--text-dim); }
 .axis-count {
   font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0;
   background: var(--accent-soft); color: var(--accent);
@@ -746,7 +797,11 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
    floats over the viewport bottom and exists only while something is picked;
    it enters by transform+opacity so the reduced-motion contract flattens it. */
 .selection-tray {
-  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  /* Centred on the content pane, not the viewport: 50% alone included the
+     rail and sat the tray ~120px left of the grid it acts on. The var tracks
+     the rail's collapsed width for free. */
+  position: fixed; bottom: 18px; left: calc(50% + var(--rail-l) / 2);
+  transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   max-width: calc(100vw - 24px); z-index: 40;
   padding: 10px 14px;

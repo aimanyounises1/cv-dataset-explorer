@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import FilterPanel from "./FilterPanel";
+import { useSelection } from "../../hooks/useSelection";
 import AlbumShelf from "../AlbumShelf";
 import SavedViews from "../SavedViews";
 
@@ -73,6 +74,9 @@ export default function LeftRail() {
   const [total, setTotal] = useState<number | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
+  // Read-only: the chip count on the collapsed strip's filter key, so
+  // collapsing the rail never silently disowns an active filter set.
+  const sel = useSelection();
   /* Collapsed is workspace geometry, not shareable state — localStorage like
    * the gallery density, never the URL. The state is mirrored onto the root
    * element so the app grid's column width follows without prop-drilling
@@ -140,6 +144,21 @@ export default function LeftRail() {
         </div>
 
         <FilterPanel />
+
+        {/* The collapsed strip keeps one way back into filters and the
+            library. The count is the active-chip count — an amber badge says
+            "this strip is hiding live constraints", which is exactly the state
+            that must never be silent. */}
+        {collapsed && location.pathname === "/" && (
+          <button className="rail-filter-key" onClick={() => setCollapsed(false)}
+                  title={"Filters and library — expand the rail"
+                         + (sel.chips.length ? ` (${sel.chips.length} active)` : "")}>
+            ≡
+            {sel.chips.length > 0 && (
+              <span className="rail-filter-count">{sel.chips.length}</span>
+            )}
+          </button>
+        )}
       </div>
 
       <div className="rail-foot">

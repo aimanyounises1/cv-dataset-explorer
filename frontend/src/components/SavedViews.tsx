@@ -123,24 +123,49 @@ export default function SavedViews({ current, onRestore }: Props) {
 
   if (!available) return null;
 
+  const form = (
+    <form className="saved-views-form" onSubmit={(e) => void save(e)}>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Name this view…"
+        aria-label="Name for the current view"
+        disabled={busy}
+      />
+      <button className="ghost" type="submit" disabled={busy || !name.trim()}>
+        Save
+      </button>
+    </form>
+  );
+
+  /* Empty is not a disclosure: the copy that explains what a saved view IS
+   * was hidden behind a closed, marker-less summary — an apparently empty box
+   * by this app's own empty-state standard. With nothing to collapse, render
+   * the explanation and the form directly. */
+  if (views.length === 0) {
+    return (
+      <div className="saved-views">
+        {error && <div className="error saved-views-error">{error}</div>}
+        <p className="saved-views-empty">
+          No saved views yet — name the current filter set to keep it.
+        </p>
+        {form}
+      </div>
+    );
+  }
+
   return (
-    // Collapsed until it holds something: the filter column already stacks
-    // chips, the id list and four axis sliders above the results, and an
-    // expanded empty state costs ~110px of vertical space for no information.
-    <details className="saved-views" open={views.length > 0}>
+    // Open by default but still collapsible — with a visible chevron, because
+    // a flex summary silently suppresses the native disclosure marker.
+    <details className="saved-views" open>
       <summary className="saved-views-title">
         Saved views
-        {views.length > 0 && <span className="saved-views-count">{views.length}</span>}
+        <span className="saved-views-count">{views.length}</span>
       </summary>
 
       {error && <div className="error saved-views-error">{error}</div>}
 
-      {views.length === 0 ? (
-        <p className="saved-views-empty">
-          No saved views yet — name the current filter set to keep it.
-        </p>
-      ) : (
-        <ul className="saved-views-list">
+      <ul className="saved-views-list">
           {views.map((v) => (
             <li className="saved-view" key={v.name}>
               <button
@@ -169,21 +194,9 @@ export default function SavedViews({ current, onRestore }: Props) {
               </button>
             </li>
           ))}
-        </ul>
-      )}
+      </ul>
 
-      <form className="saved-views-form" onSubmit={(e) => void save(e)}>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Name this view…"
-          aria-label="Name for the current view"
-          disabled={busy}
-        />
-        <button className="ghost" type="submit" disabled={busy || !name.trim()}>
-          Save
-        </button>
-      </form>
+      {form}
     </details>
   );
 }
