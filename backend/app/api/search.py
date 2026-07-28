@@ -705,15 +705,19 @@ def search_composed(body: ComposedSearchRequest,
 
 SCENARIO_DEPTH = 200
 SCENARIO_MIN_RESULTS = 8
-# A label part must describe at least this share of its group, so a title still
-# describes the group rather than a corner of it: a trait carried by 3 of 60
-# members (5%) can never head a group. Chosen, not tuned.
-SCENARIO_MIN_SHARE = 0.35
-# ...and it must be at least this much more common here than across the whole
-# ranked pool. Being *any* more common (lift > 1) is the honest minimum, but a
-# part claiming "49% here vs 48% across the results" names nothing a reader can
-# use, so a naming margin is required. Chosen, not tuned.
-SCENARIO_MIN_LIFT = 1.1
+# A label part must describe a MAJORITY of its group. A title is read as a claim
+# about the images under it — "water · black" says these are the black ones — so
+# a part that holds for a large minority mislabels the rest. At 0.35 a group of
+# 80 titled "water · black" carried 45 black ones and 35 that were not, which is
+# what a reader sees as a misclassification rather than a summary.
+SCENARIO_MIN_SHARE = 0.5
+# ...and it must be this much more common here than across the whole ranked pool.
+# The same group's "black" ran 56% here against 51% across the results — a lift
+# of 1.10, which distinguishes nothing while sounding like a category.
+# Swept against five real queries: 1.25 drops the overclaiming parts and leaves
+# the distinguishing ones (biker/dirt, trick, indoor, night); 1.5 starts
+# dissolving good labels into "mixed". Chosen against that sweep, not tuned.
+SCENARIO_MIN_LIFT = 1.25
 SCENARIO_MAX_PARTS = 3
 SCENARIO_BASIS = ("k-means over the top-200 composed ranking; each label names the traits most "
                   "over-represented in its group versus the whole result set — counted, "

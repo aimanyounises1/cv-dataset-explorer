@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import type { ActivityEvent, ChatStatus, StatsOverview } from "../../api/types";
 import FilterPanel from "./FilterPanel";
@@ -21,7 +21,10 @@ import SavedViews from "../SavedViews";
  * clicking a frame, not a destination you navigate to cold.
  */
 
-interface Item { to: string; label: string; end?: boolean; hint: string }
+/** A view of a destination: same page, different addressable slice. */
+interface View { to: string; label: string; end?: boolean }
+interface Item { to: string; label: string; end?: boolean; hint: string;
+                 views?: View[] }
 interface Group { title: string; items: Item[] }
 
 const GROUPS: Group[] = [
@@ -45,7 +48,19 @@ const GROUPS: Group[] = [
     title: "Trust",
     items: [
       { to: "/stats", label: "Dataset profile",
-        hint: "Composition, coverage, duplicates and leakage" },
+        hint: "Composition, coverage, duplicates and leakage",
+        /* The profile's five views belong to the rail, not to a second left
+           column beside it: two stacked navigations on one edge read as one
+           broken navigation. They appear indented under the profile while it
+           is the open section, so the rail shows where you are without
+           carrying five more rows everywhere else. */
+        views: [
+          { to: "/stats", label: "Overview", end: true },
+          { to: "/stats?view=integrity", label: "Split integrity" },
+          { to: "/stats?view=coverage", label: "Coverage" },
+          { to: "/stats?view=captions", label: "Caption health" },
+          { to: "/stats?view=provenance", label: "Provenance" },
+        ] },
       { to: "/eval", label: "Retrieval benchmark",
         hint: "The tool measuring its own search accuracy" },
     ],
@@ -147,15 +162,35 @@ export default function LeftRail() {
           <div className="rail-group" key={g.title}>
             <div className="eyebrow rail-group-title">{g.title}</div>
             {g.items.map((it) => (
-              <NavLink key={it.to} to={it.to} end={it.end}
-                       title={collapsed ? `${it.label} — ${it.hint}` : it.hint}
-                       className={({ isActive }) =>
-                         `rail-link${isActive ? " active" : ""}`}>
-                {/* Both spans always render; CSS swaps them, so collapsing
-                    never remounts the nav or loses keyboard focus. */}
-                <span className="rail-link-label">{it.label}</span>
-                <span className="rail-link-min" aria-hidden="true">{it.label[0]}</span>
-              </NavLink>
+              <Fragment key={it.to}>
+                <NavLink to={it.to} end={it.end}
+                         title={collapsed ? `${it.label} — ${it.hint}` : it.hint}
+                         className={({ isActive }) =>
+                           `rail-link${isActive ? " active" : ""}`}>
+                  {/* Both spans always render; CSS swaps them, so collapsing
+                      never remounts the nav or loses keyboard focus. */}
+                  <span className="rail-link-label">{it.label}</span>
+                  <span className="rail-link-min" aria-hidden="true">{it.label[0]}</span>
+                </NavLink>
+                {/* A destination's own views, shown only while you are there —
+                    and never in the collapsed strip, which has room for one
+                    letter per row. */}
+                {it.views && !collapsed && location.pathname === it.to && (
+                  <div className="rail-views">
+                    {it.views.map((v) => {
+                      const active = location.pathname + location.search === v.to
+                        || (v.end && location.pathname === it.to && !location.search);
+                      return (
+                        <Link key={v.to} to={v.to}
+                              aria-current={active ? "page" : undefined}
+                              className={`rail-view${active ? " active" : ""}`}>
+                          {v.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
+              </Fragment>
             ))}
           </div>
         ))}

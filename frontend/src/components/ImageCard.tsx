@@ -15,10 +15,11 @@ const AXIS_ABBR: Record<string, string> = {
  * other, so the value always carries its basis. */
 const SCORE_LABEL: Record<string, string> = {
   cosine: "cos", rrf: "rrf",
-  // Starred rather than renamed: the number really is a plain cosine — the
-  // hubness correction subtracts its penalty before ranking and the raw
-  // similarity is what comes back — so it stays comparable with every other
-  // `cos` in the app. Only the ordering differs, and the star is what says so.
+  // Starred because it is NOT a plain cosine. `EmbeddingIndex.search` returns
+  // the value that did the ranking, penalty included — it used to return the
+  // raw cosine and the list read as broken, 106 of 228 adjacent pairs showing a
+  // score going up. So cos* is the cosine minus a query-bank penalty: same
+  // units, different quantity, and not comparable with a plain `cos`.
   cosine_adj: "cos*",
   // Spelled out, not abbreviated: a blended-query score has no everyday name,
   // and "cmp"-style shorthand would only pretend it has one.
@@ -27,9 +28,9 @@ const SCORE_LABEL: Record<string, string> = {
 
 const SCORE_HELP: Record<string, string> = {
   cosine: "Cosine similarity in the embedding space — comparable with other cosines, and not a probability.",
-  cosine_adj: "Cosine similarity, ranked with the hubness correction. The number is the "
-            + "raw cosine and is comparable with any other; the ordering is not, because "
-            + "each image was scored against how close it sits to queries in general.",
+  cosine_adj: "Hubness-adjusted semantic score: the cosine minus a penalty for how close "
+            + "this image sits to queries in general. It is the number that did the "
+            + "ranking, so it is NOT a raw cosine and should not be compared with one.",
   rrf: "Reciprocal-rank fusion weight — derived from ranks, not a similarity.",
   composed: "Cosine to the blended query (steering text averaged with the positive "
           + "reference images), minus half the strongest negative-example cosine. "

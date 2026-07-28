@@ -10,15 +10,18 @@ import type { SearchMode } from "../api/types";
  * does not determine basis: `semantic` comes back as `cosine` or `cosine_adj`
  * depending on whether the hubness penalty loaded for that request, which is
  * runtime state. Deriving the label from `semantic` alone relabelled a
- * hubness-ranked score as a plain cosine — measured, the card read `cos* 0.091`
- * while this line read `cosine 0.091` for the same number.
+ * hubness-adjusted score as a raw cosine — measured, the card read `cos* 0.091`
+ * while this line read `cosine 0.091` for the same number, which are two
+ * different quantities however alike they look.
  *
  * A Map for the same reason SOURCE below is one: the key arrives from a URL. */
 const BASIS = new Map<string, string>([
   ["cosine", "cosine"],
-  // Starred on the card for the same reason it is qualified here: the number is
-  // the raw cosine, but the ordering is not comparable with a plain one.
-  ["cosine_adj", "cosine*, hubness-ranked"],
+  // Not a cosine. The index returns the value that ranked the result, penalty
+  // included, so cos* is the cosine minus a query-bank penalty — the same
+  // units measuring a different quantity, and not comparable with a plain
+  // cosine in either value or ordering.
+  ["cosine_adj", "cos*, hubness-adjusted (not a raw cosine)"],
   ["rrf", "RRF"],
   // The blended-query score. Missing from this map once, which silently
   // voided the WHOLE banner for composed click-throughs — an unknown basis

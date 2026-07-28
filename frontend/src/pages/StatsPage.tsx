@@ -30,9 +30,9 @@ type ViewId = (typeof VIEWS)[number]["id"];
 const isViewId = (v: string | null): v is ViewId =>
   v !== null && VIEWS.some((x) => x.id === v);
 
-/** Overview is addressed by the bare path, so the page's canonical URL stays
- * the one already in the rail, the command palette and the README. */
-const viewHref = (id: ViewId) => (id === "overview" ? "/stats" : `/stats?view=${id}`);
+// Overview is addressed by the bare path, so the page's canonical URL stays the
+// one already in the rail, the command palette and the README. The hrefs
+// themselves are written in LeftRail, which is where these views are listed.
 
 export default function StatsPage() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);
@@ -72,30 +72,12 @@ export default function StatsPage() {
     <div>
       <h1 className="section-title" style={{ marginTop: 0 }}>Dataset profile</h1>
 
+      {/* The views are navigation, and navigation lives in the rail — a second
+          column of links on the same left edge read as one broken navigation.
+          They are listed under "Dataset profile" in components/shell/LeftRail,
+          which is also the only place that knows the benchmark is elsewhere.
+          Every view is still its own URL, so Back and a pasted link work. */}
       <div className="profile-page">
-        {/* Page-local navigation: these are sections of one artifact, so they
-            stay inside it. Real links, so Back works between views and any of
-            them can be opened in a new tab or pasted into a review. */}
-        <nav className="profile-nav" aria-label="Dataset profile views">
-          <ul className="profile-nav-list">
-            {VIEWS.map((v) => (
-              <li key={v.id}>
-                <Link
-                  className={`profile-nav-link${v.id === view ? " active" : ""}`}
-                  to={viewHref(v.id)}
-                  aria-current={v.id === view ? "page" : undefined}
-                >
-                  {v.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-          <div className="profile-nav-away">
-            <span className="profile-nav-eyebrow">Measured elsewhere</span>
-            <Link className="profile-nav-out" to="/eval">Retrieval benchmark →</Link>
-          </div>
-        </nav>
-
         <div className="profile-body">
           {/* A failed section is announced wherever the reader is standing: an
               error discovered by switching views is an error that reads as an

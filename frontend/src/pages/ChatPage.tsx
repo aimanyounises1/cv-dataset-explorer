@@ -157,9 +157,21 @@ function loadSessionTurns(id: string): Turn[] {
   }
 }
 
-/** ≤60 chars from the first user turn. Renaming overwrites it for good. */
-const autoTitle = (text: string): string =>
-  text.length <= 60 ? text : `${text.slice(0, 59).trimEnd()}…`;
+/** The first user turn, kept nearly whole. Renaming overwrites it for good.
+ *
+ * Stored at up to 200 characters rather than 60, because this string is the
+ * only record of what the conversation was about and truncating at STORE time
+ * destroys it: "Which captions in the test split disagree with…" and "Which
+ * captions in the test split disagree with each other by more than 0.2?" are
+ * the same 60 characters and different questions. Clamping is the LIST's job —
+ * two lines of CSS, with the full text on the element's title and accessible
+ * name — so what is shown can shrink without what is kept shrinking too. 200
+ * bounds a pathological paste without touching a real question. */
+const TITLE_MAX = 200;
+const autoTitle = (text: string): string => {
+  const t = text.trim().replace(/\s+/g, " ");
+  return t.length <= TITLE_MAX ? t : `${t.slice(0, TITLE_MAX - 1).trimEnd()}…`;
+};
 
 function whenLabel(iso: string): string {
   const d = new Date(iso);

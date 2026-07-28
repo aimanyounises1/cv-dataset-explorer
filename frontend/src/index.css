@@ -142,6 +142,24 @@ body {
   transition: color var(--t-quick), background var(--t-quick);
 }
 .rail-link:hover { color: var(--text); background: var(--bg-hover); }
+
+/* A destination's own views, one level in. Indented under their parent with a
+   hairline running down the group, so they read as parts of the page above them
+   rather than as five more destinations. Only rendered while that page is open,
+   so the rail never carries them anywhere else. */
+.rail-views {
+  margin: 1px 0 4px 10px; padding-left: 10px;
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.rail-view {
+  padding: 5px 8px; border-radius: var(--radius-sm);
+  color: var(--text-faint); text-decoration: none;
+  font-size: 12.5px; line-height: 1.25;
+  transition: color var(--t-quick), background var(--t-quick);
+}
+.rail-view:hover { color: var(--text); background: var(--bg-hover); }
+.rail-view.active { color: var(--accent-deep); font-weight: 600; }
 /* The active marker is a left edge, not an underline: in a vertical list the
    edge reads as "you are here on this branch" rather than as a divider. */
 .rail-link.active {
