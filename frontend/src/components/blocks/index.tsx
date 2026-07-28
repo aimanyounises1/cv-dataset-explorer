@@ -26,6 +26,7 @@ import QABlockView from "./QABlockView";
 import ReportBlockView from "./ReportBlockView";
 import StatBlockView from "./StatBlockView";
 import TableBlockView from "./TableBlockView";
+import TagProposalBlockView from "./TagProposalBlockView";
 import "../../styles/blocks.css";
 
 /** A renderer for kind K accepts exactly the block for kind K. */
@@ -44,6 +45,7 @@ export const BLOCK_RENDERERS: { [K in BlockKind]: Renderer<K> } = {
   images: ImagesBlockView,
   report: ReportBlockView,
   qa: QABlockView,
+  tag_proposal: TagProposalBlockView,
 };
 
 /** Dispatch is a lookup rather than a ten-arm switch, so the registry above is

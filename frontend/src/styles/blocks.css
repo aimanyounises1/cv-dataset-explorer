@@ -528,3 +528,17 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg-inset);
 }
+
+/* Tag proposal — the approval boundary. The block frame carries the agent
+   voice; the Approve button is the HUMAN's action and wears product sage. */
+.tag-proposal .tp-reason { margin: 0 0 10px; color: var(--text-dim); font-size: 13px; }
+.tag-proposal .tp-thumbs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tag-proposal .tp-thumbs img {
+  width: 64px; height: 64px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border);
+}
+.tag-proposal .tp-more { color: var(--text-faint); font-size: 12px; }
+.tag-proposal .tp-missing { margin: 8px 0 0; color: var(--amber); font-size: 12px; }
+.tag-proposal .tp-actions { display: flex; gap: 8px; margin-top: 12px; }
+.tag-proposal .tp-done { margin: 12px 0 0; color: var(--accent-deep); font-size: 13px; }
+.tag-proposal .tp-failed { margin: 12px 0 0; color: var(--red); font-size: 13px; }

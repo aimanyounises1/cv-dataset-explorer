@@ -29,7 +29,7 @@
  * registry is keyed by this, so the two sets cannot drift. */
 export const BLOCK_KINDS = [
   "bar", "line", "pie", "histogram", "table", "stat", "flow", "images",
-  "report", "qa",
+  "report", "qa", "tag_proposal",
 ] as const;
 
 export type BlockKind = (typeof BLOCK_KINDS)[number];
@@ -219,6 +219,17 @@ export interface QABlock extends BlockBase {
   finished_at?: string | null;
 }
 
+/** A mutation the assistant WANTS but cannot perform. The browser writes the
+ * tag only when the user clicks approve; Reject writes nothing anywhere. */
+export interface TagProposalBlock extends BlockBase {
+  kind: "tag_proposal";
+  tag: string;
+  sample_ids: number[];
+  reason?: string | null;
+  /** Requested ids that do not exist — reported, never silently dropped. */
+  missing?: number[];
+}
+
 export type Block =
   | BarBlock
   | LineBlock
@@ -229,7 +240,8 @@ export type Block =
   | FlowBlock
   | ImagesBlock
   | ReportBlock
-  | QABlock;
+  | QABlock
+  | TagProposalBlock;
 
 /** The block type for one kind, e.g. `BlockOfKind<"bar">` is `BarBlock`. Lets
  * the registry state "the renderer for K takes the block for K" without naming
