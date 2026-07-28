@@ -226,3 +226,46 @@ def tag_samples(sample_ids: list[int], tag: str, reason: str = "") -> str:
         conn.close()
 
 
+
+
+@tool
+def inspect_album(album: str) -> str:
+    """Inspect a saved album by name or id: metadata, measured analysis
+    (common signals, splits, coherence, centroid outliers) and its members.
+    Use when the user asks about an album — what it contains, which members
+    are rare or out of place, whether it is coherent — especially for
+    rare-scenario and coverage-gap albums."""
+    conn = db.connect()
+    try:
+        ref = album.strip()
+        row = (conn.execute("SELECT * FROM albums WHERE id = ?",
+                            (int(ref),)).fetchone()
+               if ref.isdigit() else
+               conn.execute("SELECT * FROM albums WHERE name = ? COLLATE NOCASE",
+                            (ref,)).fetchone())
+        if row is None:
+            names = [r["name"] for r in conn.execute(
+                "SELECT name FROM albums ORDER BY position, id LIMIT 20")]
+            return json.dumps({
+                "error": f"no album named or numbered {ref!r}",
+                "existing_albums": names,
+                "hint": "Use one of the existing album names exactly."})
+        from ..api.albums import album_analysis
+
+        analysis = album_analysis(album_id=row["id"], conn=conn)
+        member_ids = [r["sample_id"] for r in conn.execute(
+            "SELECT sample_id FROM album_items WHERE album_id = ? "
+            "ORDER BY position, sample_id LIMIT 24", (row["id"],))]
+        return json.dumps({
+            "album_id": row["id"], "name": row["name"], "origin": row["origin"],
+            "summary": row["summary"], "category": row["category"],
+            "count": analysis["count"],
+            "measured": analysis["measured"],
+            "sample_ids": member_ids,
+            "note": "'measured' is counted/computed from stored data — cite it "
+                    "as measurement. Outliers are the members farthest from "
+                    "the album centroid: the first places to look for rare "
+                    "scenarios inside the album.",
+        })
+    finally:
+        conn.close()
