@@ -23,6 +23,9 @@ const SCORE_LABEL: Record<string, string> = {
   // Not a cosine at all — a log-likelihood under the image's trained speaker
   // model — so it gets its own label rather than borrowing one it would lie in.
   prism_ll: "fit",
+  // Spelled out, not abbreviated: a blended-query score has no everyday name,
+  // and "cmp"-style shorthand would only pretend it has one.
+  composed: "composed",
 };
 
 const SCORE_HELP: Record<string, string> = {
@@ -35,6 +38,9 @@ const SCORE_HELP: Record<string, string> = {
           + "(PRISM, boosted mode). Higher is better and the ordering is what was "
           + "measured; the value is only comparable within this result list — it is "
           + "not a cosine and not a probability.",
+  composed: "Cosine to the blended query (steering text averaged with the positive "
+          + "reference images), minus half the strongest negative-example cosine. "
+          + "Only comparable within this result list.",
 };
 
 const PATH_LABEL: Record<string, string> = { keyword: "kw", semantic: "sem", boosted: "boost" };

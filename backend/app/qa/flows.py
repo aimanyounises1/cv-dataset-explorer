@@ -716,16 +716,11 @@ def compare(pg, ok):
     so preventDefault would be ignored) — Playwright's mouse.wheel would work
     too, but the dispatch pins the coordinates to pane A's centre exactly.
 
-    The annotations endpoint is optional (same contract as saved views in the
-    palette: 404 means "not mounted", and the page must stay quiet). But the
-    probe's 404 still hits the browser console, and the sweep's health verdict
-    is zero console errors — so the endpoint is stubbed empty here. This flow
-    tests the compare canvas, not the annotations router; whether that router
-    is mounted must not decide whether the whole application is healthy.
+    The annotations endpoint was stubbed here while it was being built in a
+    parallel lane (its 404 probe would have failed the sweep's zero-console-
+    errors verdict). The router shipped; the flow now exercises the real
+    thing, so an annotations regression on this page is the sweep's to catch.
     """
-    pg.route("**/api/samples/*/annotations",
-             lambda r: r.fulfill(status=200, content_type="application/json",
-                                 body="[]"))
     pg.goto(url("/compare?a=76&b=2259"), wait_until="domcontentloaded")
     pg.wait_for_selector(".compare-pane img", timeout=25000)
     pg.wait_for_timeout(800)
