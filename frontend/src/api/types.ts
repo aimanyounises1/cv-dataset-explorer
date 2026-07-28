@@ -129,6 +129,37 @@ export interface ActivityEvent {
   created_at: string;
 }
 
+/** GET /api/albums/{id}/analysis. Split by epistemic status on purpose:
+ * `measured` is counted/computed from stored data and works with no model
+ * running; `generated` names its model and only ever reports availability
+ * here — the summary itself comes from an explicit POST. */
+export interface AnalysisSignal {
+  kind: "attribute" | "tag" | "vlm_tag";
+  grp?: string;
+  label: string;
+  share: number;
+}
+
+export interface AlbumAnalysis {
+  album_id: number;
+  count: number;
+  truncated: boolean;
+  measured: {
+    score_basis: string;
+    coherence: number | null;
+    common: AnalysisSignal[];
+    different: { grp: string; top: { label: string; share: number }[] }[];
+    outliers: { id: number; score: number }[];
+    note: string | null;
+  };
+  generated: {
+    available: boolean;
+    model: string;
+    summary: string | null;
+    message: string | null;
+  };
+}
+
 export interface CaptionStats {
   length_histogram: { bucket: string; count: number }[];
   top_words: { word: string; count: number }[];

@@ -5,6 +5,7 @@ import { AXES, AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat } f
 import { AXIS_META } from "../components/AxisFilters";
 import AxisLegend from "../components/AxisLegend";
 import { albumsChanged } from "../components/AlbumShelf";
+import AlbumHeader from "../components/AlbumHeader";
 import ImageCard from "../components/ImageCard";
 import { showToast } from "../components/Toast";
 import { useDebounce } from "../hooks/useDebounce";
@@ -72,6 +73,7 @@ export default function GalleryPage() {
    * the UI never sends that request — it shows the plain ranking with the
    * chip kept and says inline what would make the exclusion take effect. */
   const composedValid = likeIds.length > 0 || query.trim() !== "";
+  const albumId = Number(searchParams.get("album")) || null;
   const [refThumbs, setRefThumbs] = useState<Record<number, string>>({});
   /* Scenario groups are proposals, not state: at most three, on demand,
    * temporary until "Save as album" makes one durable. */
@@ -594,6 +596,12 @@ export default function GalleryPage() {
             Clear references
           </button>
         </div>
+      )}
+
+      {/* The album, editable where it is read: name, details, analysis. */}
+      {albumId != null && (
+        <AlbumHeader albumId={albumId}
+                     onGone={() => setParams({ album: "", page: "" })} />
       )}
 
       {/* The hero exists only on the bare gallery — the workspace's front
