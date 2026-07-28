@@ -55,3 +55,19 @@ def test_with_only_a_failed_run_it_is_returned_honestly(two_runs):
     rep = runner.latest_report()
     assert rep is not None and rep["run_id"] == BAD
     assert rep["status"] == "failed"  # served as what it is, never dressed up
+
+
+def test_failed_run_held_in_memory_cannot_shadow_either(two_runs, monkeypatch):
+    """The reviewer's case: the process that watched the run die still holds
+    it in MANAGER. The same validity predicate must apply there."""
+    dead = {"run_id": BAD, "status": "failed", "passed": 0, "total": 0, "flows": []}
+    monkeypatch.setattr(runner.MANAGER, "latest", lambda: dead)
+    rep = runner.latest_report()
+    assert rep["run_id"] == GOOD
+
+
+def test_genuinely_running_state_is_shown_as_current(two_runs, monkeypatch):
+    live = {"run_id": "20260728-999999-live", "status": "running",
+            "passed": 3, "total": 10, "flows": []}
+    monkeypatch.setattr(runner.MANAGER, "latest", lambda: live)
+    assert runner.latest_report()["status"] == "running"

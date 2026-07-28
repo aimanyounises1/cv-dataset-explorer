@@ -454,7 +454,13 @@ def latest_report() -> Optional[dict]:
     """
     live = MANAGER.latest()
     if live is not None:
-        return live
+        if live.get("status") == "running":
+            return live                      # genuinely in flight IS the truth
+        if live.get("status") == "done" and (live.get("total") or 0) > 0:
+            return live
+        # A finished-but-failed/empty in-process run falls through to the disk
+        # scan below — same predicate as on disk, or the bug survives in the
+        # very process that watched the run die.
     runs = sorted(p.parent.name for p in Path(config.QA_DIR).glob("*/report.json"))
     for rid in reversed(runs):
         rep = load_report(rid)
