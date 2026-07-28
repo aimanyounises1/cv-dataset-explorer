@@ -13,14 +13,17 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from pydantic import Field
 
 from ..schemas import AlbumCreate, AlbumDetail, AlbumSummary, AlbumUpdate
-from .deps import ID_PARAM_LIMIT, first_captions, get_conn, row_to_card, thumb_url
+from .deps import (
+    ID_PARAM_LIMIT,
+    MAX_SQLITE_INT,
+    first_captions,
+    get_conn,
+    row_to_card,
+    thumb_url,
+)
 
 router = APIRouter()
 
-# SQLite INTEGER is signed 64-bit; a Python int past 2^63-1 raises
-# OverflowError at bind time, which would surface as a 500. Bounding turns the
-# hostile probe into a 422.
-MAX_SQLITE_INT = 2**63 - 1
 PathId = Annotated[int, Path(ge=1, le=MAX_SQLITE_INT)]
 BoundedId = Annotated[int, Field(ge=1, le=MAX_SQLITE_INT)]
 

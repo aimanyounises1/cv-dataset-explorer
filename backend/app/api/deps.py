@@ -14,6 +14,11 @@ from ..schemas import AxisScores, SampleCard
 # parsed, because the axis name reaches SQL as an identifier.
 SORT_KEYS = tuple(f"{a}_{d}" for a in AXES for d in ("asc", "desc"))
 
+# SQLite INTEGER is signed 64-bit; a Python int past 2^63-1 raises
+# OverflowError at bind time, which would surface as a 500. Bounding turns the
+# hostile probe into a 422.
+MAX_SQLITE_INT = 2**63 - 1
+
 
 def get_conn() -> Iterator[sqlite3.Connection]:
     with db.get_db() as conn:
@@ -182,7 +187,8 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
                   axes: Optional[dict[str, tuple[Optional[int], Optional[int]]]] = None,
                   ids: Optional[list[str]] = None, ids_staged: bool = False,
                   max_agreement: Optional[float] = None,
-                  cluster: Optional[int] = None):
+                  cluster: Optional[int] = None,
+                  album: Optional[int] = None):
     """Compose WHERE clauses + params for common sample filters.
 
     `attr` is a zero-shot attribute facet encoded as "group:label"; `axes` maps
@@ -208,6 +214,11 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
         # which meant the only way to reach a cluster was to lasso it by hand.
         clauses.append("s.cluster = ?")
         params.append(cluster)
+    if album is not None:
+        # Album membership. An id that names no album matches nothing — an
+        # honest empty result, the same contract a tag that tags nothing has.
+        clauses.append("s.id IN (SELECT sample_id FROM album_items WHERE album_id = ?)")
+        params.append(album)
     # One attribute facet or several, intersected. `attr` was a bare `str`, so
     # FastAPI bound only the LAST occurrence: `?attr=time_of_day:night&
     # attr=environment:indoors` silently returned the 706 indoor images instead
@@ -252,13 +263,14 @@ def build_filters(split: Optional[str], tag: Optional[str], vlm_tag: Optional[st
 
 def filtered_id_set(conn, split, tag, vlm_tag, attr=None, axes=None,
                     ids=None, ids_staged=False, max_agreement=None,
-                    cluster=None) -> Optional[set[int]]:
+                    cluster=None, album=None) -> Optional[set[int]]:
     """Set of sample ids matching filters, or None when unfiltered."""
     if not (split or tag or vlm_tag or attr or axes or ids
-            or max_agreement is not None or cluster is not None):
+            or max_agreement is not None or cluster is not None
+            or album is not None):
         return None
     where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged,
-                                  max_agreement, cluster)
+                                  max_agreement, cluster, album)
     rows = conn.execute(f"SELECT s.id FROM samples s{where}", params)
     return {r["id"] for r in rows}
 
@@ -275,6 +287,21 @@ def order_by_axis(sort: Optional[str]) -> str:
     axis, direction = sort.rsplit("_", 1)
     return (f" ORDER BY (s.{axis} IS NULL), s.{axis} "
             f"{'ASC' if direction == 'asc' else 'DESC'}, s.id")
+
+
+def order_by_album_position(album: Optional[int]) -> tuple[str, list]:
+    """ORDER BY the album's own item order, or ("", []) when no album filter.
+
+    An album is an ordered collection — its position is user intent, so the
+    filter path presents members in that order rather than by id. Explicit sort
+    keys and query rankings still win; callers consult this only when neither
+    is in force. Correlated rather than joined so the caller's FROM clause
+    stays untouched.
+    """
+    if album is None:
+        return "", []
+    return (" ORDER BY (SELECT ai.position FROM album_items ai "
+            "WHERE ai.album_id = ? AND ai.sample_id = s.id), s.id", [album])
 
 
 def axis_scores(row: sqlite3.Row) -> Optional[AxisScores]:

@@ -12,6 +12,7 @@ from ..db import AXES
 from ..ml.index import get_index
 from ..schemas import CaptionOut, SampleCard, SampleDetail, SampleList
 from .deps import (
+    MAX_SQLITE_INT,
     axis_bounds,
     axis_scores,
     build_filters,
@@ -20,6 +21,7 @@ from .deps import (
     get_conn,
     id_list,
     image_url,
+    order_by_album_position,
     order_by_axis,
     row_to_card,
     stage_id_list,
@@ -48,19 +50,26 @@ def list_samples(
         None, ge=0.0, le=1.0, allow_inf_nan=False,
         description="Samples with any caption at or below this agreement"),
     cluster: Optional[int] = Query(None, description="k-means group id"),
+    album: Optional[int] = Query(None, ge=1, le=MAX_SQLITE_INT,
+                                 description="Restrict to members of this album"),
     axes: dict = Depends(axis_bounds),
     ids: list = Depends(id_list),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     staged = stage_id_list(conn, ids) if ids else False
     where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged,
-                                  max_agreement, cluster)
+                                  max_agreement, cluster, album)
     total = conn.execute(f"SELECT COUNT(*) FROM samples s{where}", params).fetchone()[0]
     # Sorting is over the whole filtered set, in SQL — never over the page.
-    order = order_by_axis(sort) or " ORDER BY s.id"
+    # An explicit axis sort wins; otherwise an album filter presents its
+    # members in the album's own order, because that order is user intent.
+    order, order_params = order_by_axis(sort), []
+    if not order:
+        order, order_params = order_by_album_position(album)
+    order = order or " ORDER BY s.id"
     rows = conn.execute(
         f"SELECT s.* FROM samples s{where}{order} LIMIT ? OFFSET ?",
-        params + [per_page, (page - 1) * per_page],
+        params + order_params + [per_page, (page - 1) * per_page],
     ).fetchall()
     captions = first_captions(conn, [r["id"] for r in rows])
     items = [row_to_card(r, caption=captions.get(r["id"])) for r in rows]
@@ -135,6 +144,8 @@ def export_subset(
         None, ge=0.0, le=1.0, allow_inf_nan=False,
         description="Samples with any caption at or below this agreement"),
     cluster: Optional[int] = Query(None, description="k-means group id"),
+    album: Optional[int] = Query(None, ge=1, le=MAX_SQLITE_INT,
+                                 description="Restrict to members of this album"),
     scores: bool = Query(
         True, description="Include the computed per-sample signals "
                           "(difficulty axes, cluster, caption agreement)"),
@@ -162,7 +173,7 @@ def export_subset(
 
         result = run_search(conn, q, mode=mode, top_k=top_k, split=split,
                             tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes, ids=ids,
-                            max_agreement=max_agreement)
+                            max_agreement=max_agreement, album=album)
         ranked_depth = result.depth_limit
         truncated = bool(result.depth_reached)
         ids = [it.id for it in result.items]
@@ -176,9 +187,13 @@ def export_subset(
     else:
         staged = stage_id_list(conn, ids) if ids else False
         where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, staged,
-                                      max_agreement, cluster)
+                                      max_agreement, cluster, album)
+        # A filter export of an album keeps the album's own order — the export
+        # exists to hand over the set as curated, and the order is part of that.
+        order, order_params = order_by_album_position(album)
         rows = conn.execute(
-            f"SELECT s.* FROM samples s{where} ORDER BY s.id", params).fetchall()
+            f"SELECT s.* FROM samples s{where}{order or ' ORDER BY s.id'}",
+            params + order_params).fetchall()
         ids = [r["id"] for r in rows]
     caps: dict[int, list[str]] = {}
     tag_map: dict[int, list[str]] = {}
@@ -233,7 +248,7 @@ def export_subset(
     samples = [record(r) for r in rows]
     query = {"q": q, "mode": mode if q else None, "top_k": top_k if q else None,
              "split": split, "tag": tag, "vlm_tag": vlm_tag, "attr": attr,
-             "cluster": cluster,
+             "cluster": cluster, "album": album,
              "axes": {a: list(b) for a, b in axes.items()},
              "max_agreement": max_agreement, "scores": scores,
              # Named so a consumer can tell whether two exports are comparable:

@@ -1,5 +1,5 @@
 """Albums: lifecycle, ordered membership, reorder exactness, tag conversion,
-cover fallback, and the input bounds.
+cover fallback, the album membership filter, and the input bounds.
 
 Runs on the full app (module-scoped TestClient) over a handful of seeded
 samples, all removed on teardown so module order stays irrelevant.
@@ -19,19 +19,28 @@ def ctx():
     """(client, sample_ids) — five seeded samples with one caption each."""
     conn = db.connect()
     db.init_db(conn)
-    sids = []
+    sids, fts = [], []
     for i in range(5):
         cur = conn.execute(
             "INSERT INTO samples(dataset, filename, split, width, height, filesize) "
             "VALUES ('flickr8k', ?, 'train', 300, 200, 1)", (f"alb_{i}.jpg",))
-        conn.execute("INSERT INTO captions(sample_id, idx, text) VALUES (?, 0, ?)",
-                     (cur.lastrowid, f"album seed caption {i}"))
+        text = f"album seed caption {i}"
+        ccur = conn.execute("INSERT INTO captions(sample_id, idx, text) VALUES (?, 0, ?)",
+                            (cur.lastrowid, text))
+        # Indexed for FTS so keyword search can rank these — the membership
+        # filter tests need a query that actually returns candidates.
+        conn.execute("INSERT INTO captions_fts(rowid, text) VALUES (?, ?)",
+                     (ccur.lastrowid, text))
+        fts.append((ccur.lastrowid, text))
         sids.append(cur.lastrowid)
     conn.commit()
     with TestClient(app) as c:
         yield c, sids
-    # Samples cascade captions and sample_tags; albums carry no FK, so their
-    # rows go explicitly — the same invariant the DELETE endpoint enforces.
+    # Samples cascade captions and sample_tags; the FTS index is external
+    # content, so its rows need the fts5 'delete' command; albums carry no FK,
+    # so their rows go explicitly — the invariant the DELETE endpoint enforces.
+    conn.executemany(
+        "INSERT INTO captions_fts(captions_fts, rowid, text) VALUES ('delete', ?, ?)", fts)
     conn.execute("DELETE FROM album_items")
     conn.execute("DELETE FROM albums")
     qmarks = ",".join("?" * len(sids))
@@ -218,6 +227,81 @@ def test_cover_fallback_and_explicit_cover(ctx):
     listed = [a for a in client.get("/api/albums").json() if a["id"] == aid][0]
     assert listed["cover"] == first_thumb
     assert listed["item_count"] == 1
+
+
+def test_album_filter_lists_members_in_position_order(ctx):
+    client, s = ctx
+    aid = client.post("/api/albums", json={"name": "filter-order"}).json()["id"]
+    client.post(f"/api/albums/{aid}/items", json={"sample_ids": [s[3], s[0], s[2]]})
+    r = client.get("/api/samples", params={"album": aid})
+    assert r.status_code == 200
+    assert r.json()["total"] == 3
+    assert [i["id"] for i in r.json()["items"]] == [s[3], s[0], s[2]]
+    # Reordering the album reorders the listing — the album's order is the view.
+    client.put(f"/api/albums/{aid}/items/order",
+               json={"sample_ids": [s[2], s[3], s[0]]})
+    got = [i["id"] for i in client.get("/api/samples",
+                                       params={"album": aid}).json()["items"]]
+    assert got == [s[2], s[3], s[0]]
+    # An explicit axis sort still wins over album order: unscored samples tie,
+    # so id order — not the album order the request would otherwise get.
+    got = [i["id"] for i in client.get(
+        "/api/samples", params={"album": aid, "sort": "difficulty_desc"}).json()["items"]]
+    assert got == sorted([s[0], s[2], s[3]])
+
+
+def test_album_filter_restricts_search_candidates(ctx):
+    client, s = ctx
+    aid = client.post("/api/albums", json={"name": "search-restrict"}).json()["id"]
+    client.post(f"/api/albums/{aid}/items", json={"sample_ids": [s[0], s[1]]})
+    # Unfiltered, the query reaches every seeded caption.
+    ids = [i["id"] for i in client.get(
+        "/api/search", params={"q": "album seed caption", "mode": "keyword"}).json()["items"]]
+    assert s[2] in ids
+    # With the filter, only members may rank — same for GET and the POST body.
+    r = client.get("/api/search",
+                   params={"q": "album seed caption", "mode": "keyword", "album": aid})
+    assert r.status_code == 200
+    ids = [i["id"] for i in r.json()["items"]]
+    assert set(ids) == {s[0], s[1]}
+    r = client.post("/api/search",
+                    json={"q": "album seed caption", "mode": "keyword", "album": aid})
+    assert set(i["id"] for i in r.json()["items"]) == {s[0], s[1]}
+
+
+def test_export_carries_album_and_follows_its_order(ctx):
+    client, s = ctx
+    aid = client.post("/api/albums", json={"name": "export-slice"}).json()["id"]
+    client.post(f"/api/albums/{aid}/items", json={"sample_ids": [s[2], s[0]]})
+    r = client.get("/api/export", params={"album": aid})
+    assert r.status_code == 200
+    body = r.json()
+    # The manifest names the album, so the slice is regenerable.
+    assert body["filters"]["album"] == aid
+    assert [x["id"] for x in body["samples"]] == [s[2], s[0]]   # album order, not id
+
+
+def test_album_filter_unknown_id_is_empty_not_error(ctx):
+    client, _ = ctx
+    r = client.get("/api/samples", params={"album": 999_999})
+    assert r.status_code == 200
+    assert r.json()["total"] == 0 and r.json()["items"] == []
+    r = client.get("/api/export", params={"album": 999_999})
+    assert r.status_code == 200 and r.json()["count"] == 0
+    r = client.get("/api/search",
+                   params={"q": "album seed caption", "mode": "keyword", "album": 999_999})
+    assert r.status_code == 200 and r.json()["items"] == []
+
+
+def test_album_filter_bounds(ctx):
+    client, _ = ctx
+    for bad in (0, 2**63):
+        assert client.get("/api/samples", params={"album": bad}).status_code == 422
+        assert client.get("/api/export", params={"album": bad}).status_code == 422
+        assert client.get("/api/search",
+                          params={"q": "x", "album": bad}).status_code == 422
+        assert client.post("/api/search",
+                           json={"q": "x", "album": bad}).status_code == 422
 
 
 def test_bounds(ctx):
