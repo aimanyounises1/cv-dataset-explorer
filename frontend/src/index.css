@@ -901,6 +901,12 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 .section-title {
   font-size: 15px; font-weight: 650; margin: 28px 0 12px; letter-spacing: -0.01em;
 }
+/* For headings a screen reader needs on pages whose visual hierarchy already
+   names the place another way (the assistant's full-height canvas). */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
 
 /* Stats */
 .stat-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 12px; margin-bottom: 20px; }
@@ -1022,7 +1028,9 @@ mark {
 .chip:hover { color: var(--accent); border-color: var(--accent); }
 
 /* Quality page */
-.suspect-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 11px; }
+/* min(420px, 100%): the 420px floor must collapse to the container at phone
+   widths — a track wider than the pane scrolls the whole page sideways. */
+.suspect-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 11px; }
 .suspect-row {
   display: flex; gap: 12px; background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 10px; text-decoration: none; color: inherit;
@@ -1044,6 +1052,8 @@ mark {
 .back-btn { margin-bottom: 4px; }
 
 /* Benchmark table */
+/* Wide tables scroll inside their own container; the page body never does. */
+.table-scroll { overflow-x: auto; }
 .eval-table { border-collapse: collapse; margin-top: 14px; font-size: 13.5px; }
 .eval-table th, .eval-table td {
   border: 1px solid var(--border); padding: 8px 16px; text-align: left;
@@ -1140,6 +1150,21 @@ mark {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); flex: none;
 }
 @media (max-width: 900px) { .chat-sessions { width: 168px; } }
+/* Phone width: a fixed-width register beside the transcript leaves neither
+   usable, so the register becomes a horizontal shelf above the conversation. */
+@media (max-width: 700px) {
+  .chat-page { flex-direction: column; }
+  .chat-sessions {
+    width: auto; flex-direction: row; align-items: center;
+    border-right: none; border-bottom: 1px solid var(--border);
+    padding: 0 0 10px; overflow-y: visible; overflow-x: auto;
+  }
+  .chat-sessions-new { align-self: auto; margin-bottom: 0; }
+  .chat-sessions-none { margin: 0 0 0 8px; }
+  .chat-session-list { display: flex; gap: 4px; margin-left: 8px; }
+  .chat-session { flex: none; max-width: 200px; margin-bottom: 0; }
+  .chat-main { min-height: 0; }
+}
 .chat-turn { display: flex; margin-bottom: 13px; }
 .chat-turn.user { justify-content: flex-end; }
 .chat-bubble {
@@ -1157,7 +1182,9 @@ mark {
 }
 .chat-input { display: flex; gap: 9px; padding-top: 12px; border-top: 1px solid var(--border); }
 .chat-input input {
-  flex: 1; padding: 11px 15px; border-radius: var(--radius);
+  /* min-width 0: a text input's intrinsic size (~20ch) otherwise wins over
+     flex shrinking and pushes the Send button past a phone viewport. */
+  flex: 1; min-width: 0; padding: 11px 15px; border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--bg-inset);
   color: var(--text); font-size: 13.5px; outline: none; font-family: var(--font-sans);
 }
@@ -1475,3 +1502,60 @@ a.tag:hover { filter: brightness(1.15); }
 .ai-btn { padding: 7px 12px; border-radius: var(--radius-sm); border: 0;
   background: var(--ai); color: #fff; cursor: pointer; font: inherit; }
 .ai-btn:disabled { opacity: 0.6; }
+
+/* Member strip: every member as a small thumb, removable, coverable,
+   reorderable. Capped at two thumb rows — a big album scrolls inside the
+   strip instead of pushing the details form below the fold. */
+.ah-members-wrap { display: grid; gap: 4px; }
+.ah-members-label { color: var(--text-faint); font-size: 12px; }
+.ah-members { display: flex; flex-wrap: wrap; gap: 8px;
+  max-height: 128px; overflow-y: auto; padding: 2px; }
+.ah-member { position: relative; width: 56px; height: 56px; flex-shrink: 0;
+  border-radius: var(--radius-sm); overflow: hidden; cursor: grab;
+  border: 1px solid var(--border);
+  transition: border-color var(--t-quick), box-shadow var(--t-quick); }
+.ah-member img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ah-member:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ah-member.is-cover { border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent); }
+.ah-member.drop { border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft), 0 0 0 3px var(--accent); }
+.ah-member.dragging { opacity: 0.5; }
+/* The thumb's two actions paint on hover or keyboard focus, like the card's
+   diagnostics: images lead, controls wait. The active cover star stays. */
+.ah-member-x, .ah-member-star { position: absolute; width: 18px; height: 18px;
+  padding: 0; border: 0; border-radius: 999px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.92); color: var(--accent-deep);
+  font-size: 11px; line-height: 18px; text-align: center;
+  opacity: 0; transition: opacity var(--t-quick); }
+.ah-member-x { top: 3px; right: 3px; }
+.ah-member-star { bottom: 3px; left: 3px; }
+.ah-member:hover .ah-member-x, .ah-member:hover .ah-member-star,
+.ah-member:focus-visible .ah-member-x, .ah-member:focus-visible .ah-member-star,
+.ah-member:focus-within .ah-member-x, .ah-member:focus-within .ah-member-star,
+.ah-member-star.on { opacity: 1; }
+.ah-member-x:hover { color: var(--red); }
+.ah-member-star.on { color: var(--accent); }
+
+/* Share menu: a small local-first popover — links to this machine, an email
+   or Teams compose, and the export downloads. Nothing uploads. */
+.share-menu { position: relative; }
+.share-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+  min-width: 250px; padding: 6px; display: grid;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
+.share-item { display: block; text-align: left; padding: 7px 9px;
+  border: 0; border-radius: 6px; background: none; font: inherit;
+  font-size: 13px; color: var(--text); cursor: pointer;
+  text-decoration: none; transition: background var(--t-quick); }
+.share-item:hover, .share-item:focus-visible { background: var(--bg-hover);
+  color: var(--accent-deep); }
+.share-sub { display: block; font-size: 11px; color: var(--text-faint); }
+.share-ok { margin-left: 6px; font-size: 11.5px; color: var(--green); }
+.share-downloads { display: flex; align-items: baseline; gap: 4px; cursor: default; }
+.share-downloads a { margin-left: 6px; color: var(--accent);
+  font-family: var(--font-mono); font-size: 12px; }
+.share-downloads a:hover { color: var(--accent-deep); }
+.share-foot { margin: 4px 2px 2px; padding: 6px 7px 2px;
+  border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text-faint); }

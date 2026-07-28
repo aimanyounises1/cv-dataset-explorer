@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AlbumAnalysis, AlbumDetail } from "../api/types";
 import { api } from "../api/client";
-import { ALBUMS_CHANGED, albumsChanged } from "./AlbumShelf";
+import { ALBUMS_CHANGED, albumsChanged, DRAG_IDS } from "./AlbumShelf";
+import ShareMenu from "./ShareMenu";
 
 /**
  * The album, editable where it is read. Renders above the grid whenever
@@ -28,6 +29,13 @@ export default function AlbumHeader({ albumId, onGone }:
   const [genModel, setGenModel] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  // Member-strip reorder: which thumb is being dragged, which one it hovers.
+  const [dragSid, setDragSid] = useState<number | null>(null);
+  const [overSid, setOverSid] = useState<number | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  // An arrow-key move re-renders the strip in the new order, which would drop
+  // keyboard focus on the floor; this remembers whom to give it back to.
+  const focusSid = useRef<number | null>(null);
 
   const load = useCallback(() => {
     api.albumDetail(albumId)
@@ -46,6 +54,14 @@ export default function AlbumHeader({ albumId, onGone }:
     return () => window.removeEventListener(ALBUMS_CHANGED, load);
   }, [load]);
 
+  useEffect(() => {
+    const sid = focusSid.current;
+    if (sid == null || !stripRef.current) return;
+    focusSid.current = null;
+    stripRef.current
+      .querySelector<HTMLElement>(`[data-member="${sid}"]`)?.focus();
+  }, [album]);
+
   if (missing) {
     return (
       <div className="album-header">
@@ -59,6 +75,63 @@ export default function AlbumHeader({ albumId, onGone }:
   const patch = (body: Parameters<typeof api.updateAlbum>[1], done?: string) =>
     api.updateAlbum(album.id, body)
       .then((a) => { setAlbum(a); albumsChanged(); if (done) setNote(done); })
+      .catch((e) => setNote(e instanceof Error ? e.message : String(e)));
+
+  /** The order endpoint demands exactness — the new order must be the whole
+   * current membership, nothing added, nothing missing — so every commit
+   * sends the full id list, never a delta. */
+  const commitOrder = (orderedIds: number[]) =>
+    fetch(`/api/albums/${album.id}/items/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sample_ids: orderedIds }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+        albumsChanged();
+      })
+      .catch((e) => {
+        setNote(e instanceof Error ? e.message : String(e));
+        load();                       // put the strip back to the server's order
+      });
+
+  /** Apply a new order optimistically (arrow keys and drops should feel
+   * instant), then commit; ALBUMS_CHANGED reconciles with the server. */
+  const applyOrder = (ids: number[]) => {
+    const byId = new Map(album.items.map((s) => [s.id, s]));
+    setAlbum({ ...album, items: ids.map((id) => byId.get(id)!) });
+    void commitOrder(ids);
+  };
+
+  const moveMember = (sid: number, delta: -1 | 1) => {
+    const ids = album.items.map((s) => s.id);
+    const i = ids.indexOf(sid);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    focusSid.current = sid;
+    applyOrder(ids);
+  };
+
+  const dropReorder = (fromSid: number, toSid: number) => {
+    setOverSid(null);
+    setDragSid(null);
+    if (fromSid === toSid) return;
+    const ids = album.items.map((s) => s.id);
+    const from = ids.indexOf(fromSid);
+    const to = ids.indexOf(toSid);
+    if (from < 0 || to < 0) return;
+    ids.splice(from, 1);
+    // Dragging rightward lands after the target, leftward before it — the
+    // thumb settles on the side it was pulled toward.
+    const at = ids.indexOf(toSid);
+    ids.splice(from < to ? at + 1 : at, 0, fromSid);
+    applyOrder(ids);
+  };
+
+  const removeMember = (sid: number) =>
+    api.removeFromAlbum(album.id, sid)
+      .then(() => albumsChanged())
       .catch((e) => setNote(e instanceof Error ? e.message : String(e)));
 
   const runAnalysis = () => {
@@ -105,6 +178,7 @@ export default function AlbumHeader({ albumId, onGone }:
           {" · "}created {album.created_at.slice(0, 10)}
         </span>
         <span className="ah-spacer" />
+        <ShareMenu album={album} />
         <button className="ghost" onClick={() => setOpen((o) => !o)}>
           {open ? "Close details" : "Details & analysis"}
         </button>
@@ -126,6 +200,80 @@ export default function AlbumHeader({ albumId, onGone }:
 
       {open && (
         <div className="ah-details">
+          {album.items.length > 0 && (
+            <div className="ah-members-wrap">
+              <span className="ah-members-label">
+                Members, in album order — drag or use ←/→ to reorder
+              </span>
+              <div className="ah-members" role="list" ref={stripRef}
+                   aria-label={`${album.item_count} album member${
+                     album.item_count === 1 ? "" : "s"}, reorderable`}>
+                {album.items.map((s, i) => {
+                  const isCover = album.cover_sample_id === s.id;
+                  return (
+                    <div key={s.id} role="listitem" tabIndex={0}
+                         data-member={s.id}
+                         className={`ah-member${isCover ? " is-cover" : ""}${
+                           overSid === s.id ? " drop" : ""}${
+                           dragSid === s.id ? " dragging" : ""}`}
+                         aria-label={`Image ${s.id}, position ${i + 1} of ${
+                           album.items.length}${isCover ? ", cover" : ""}.`
+                           + " Arrow keys move it."}
+                         draggable
+                         onDragStart={(e) => {
+                           setDragSid(s.id);
+                           // The payload a card would carry, so a member thumb
+                           // can also be filed onto another shelf row.
+                           e.dataTransfer.setData(DRAG_IDS, JSON.stringify([s.id]));
+                           e.dataTransfer.effectAllowed = "move";
+                         }}
+                         onDragEnd={() => { setDragSid(null); setOverSid(null); }}
+                         onDragOver={(e) => {
+                           if (dragSid != null && dragSid !== s.id) {
+                             e.preventDefault();
+                             setOverSid(s.id);
+                           }
+                         }}
+                         onDragLeave={() =>
+                           setOverSid((o) => (o === s.id ? null : o))}
+                         onDrop={(e) => {
+                           if (dragSid == null) return;
+                           e.preventDefault();
+                           e.stopPropagation();
+                           dropReorder(dragSid, s.id);
+                         }}
+                         onKeyDown={(e) => {
+                           if (e.key === "ArrowLeft") {
+                             e.preventDefault(); moveMember(s.id, -1);
+                           } else if (e.key === "ArrowRight") {
+                             e.preventDefault(); moveMember(s.id, 1);
+                           }
+                         }}>
+                      <img src={s.thumb_url} alt={`sample ${s.id}`} />
+                      <button type="button" className="ah-member-x"
+                              aria-label={`Remove image ${s.id} from this album`}
+                              onClick={() => void removeMember(s.id)}>
+                        ✕
+                      </button>
+                      <button type="button"
+                              className={`ah-member-star${isCover ? " on" : ""}`}
+                              aria-label={isCover
+                                ? `Image ${s.id} is the cover`
+                                : `Set image ${s.id} as the album cover`}
+                              aria-pressed={isCover}
+                              onClick={() => {
+                                if (!isCover) {
+                                  void patch({ cover_sample_id: s.id }, "Cover set.");
+                                }
+                              }}>
+                        {isCover ? "★" : "☆"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <label>Summary
             <textarea value={draft.summary} rows={2}
                       onChange={(e) => setDraft({ ...draft, summary: e.target.value })} />

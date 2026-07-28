@@ -22,9 +22,10 @@ export const DRAG_IDS = "application/x-cvde-ids";
  *
  * Rows are drop targets — drag a card (or a picked bundle) from the gallery
  * onto a row to file it. The keyboard path to the same mutation is select
- * mode's tray, and every drop offers Undo, but only when the add was clean:
- * undoing a partial add would evict images that were already members, which
- * is worse than no undo at all.
+ * mode's tray, and every drop that added something offers Undo. The add
+ * response only carries a count, so membership is read and diffed BEFORE the
+ * add: Undo removes exactly the ids this drop introduced, never a member
+ * that was already there.
  */
 export default function AlbumShelf() {
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
@@ -52,21 +53,43 @@ export default function AlbumShelf() {
     let ids: number[] = [];
     try { ids = JSON.parse(raw) as number[]; } catch { return; }
     if (ids.length === 0) return;
-    api.addToAlbum(album.id, ids)
-      .then((r) => {
+    // Read membership first and diff: `fresh` is the set this drop is about
+    // to introduce, and the only set Undo may remove. The dropped ids alone
+    // cannot say which were already members, and the add response is a count.
+    api.albumDetail(album.id)
+      .then((detail) => {
+        const members = new Set(detail.items.map((s) => s.id));
+        const fresh = ids.filter((id) => !members.has(id));
+        return api.addToAlbum(album.id, ids).then((r) => ({ r, fresh }));
+      })
+      .then(({ r, fresh }) => {
         albumsChanged();
-        const clean = r.added === ids.length;
+        const skipped = ids.length - r.added;
+        // A count that disagrees with the diff means another writer moved the
+        // membership between our read and our add — an Undo built on that
+        // would be guessing, so it is withheld.
+        const provable = r.added > 0 && r.added === fresh.length;
         showToast(
-          clean
+          skipped === 0
             ? `Added ${r.added} to “${album.name}”`
-            : `Added ${r.added} to “${album.name}” — ${ids.length - r.added} already there`,
-          clean && r.added > 0
+            : `Added ${r.added} to “${album.name}” — ${skipped} already there`,
+          provable
             ? {
                 label: "Undo",
                 run: () => {
                   void Promise.allSettled(
-                    ids.map((sid) => api.removeFromAlbum(album.id, sid)),
-                  ).then(albumsChanged);
+                    fresh.map((sid) => api.removeFromAlbum(album.id, sid)),
+                  ).then((results) => {
+                    albumsChanged();
+                    // A swallowed failure would leave the count quietly
+                    // wrong — the one thing an undo must never do.
+                    const failed = results.filter(
+                      (x) => x.status === "rejected").length;
+                    if (failed > 0) {
+                      showToast(`Undo removed ${fresh.length - failed} of ${
+                        fresh.length} — ${failed} could not be removed`);
+                    }
+                  });
                 },
               }
             : undefined,
