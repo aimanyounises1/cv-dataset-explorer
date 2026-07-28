@@ -331,6 +331,20 @@ export default function GalleryPage() {
                  if (f) runImageSearch(f);
                  e.target.value = "";   // the same file, picked twice, still fires
                }} />
+        {/* One command bar: the query's dials live behind a single quiet
+            button — the spec's own rule (advanced controls hidden until
+            requested). The dot marks a non-default dial, so collapsing never
+            silently hides a live choice. */}
+        <details className="search-settings">
+          <summary title="Mode, ordering and density">
+            Search settings
+            {(mode !== "hybrid" || sort !== "") && (
+              <span className="settings-dot" aria-hidden="true" />
+            )}
+          </summary>
+          <div className="search-settings-pop">
+            <div className="setting-row">
+              <span className="eyebrow">Mode</span>
         <div className="mode-toggle" role="group" aria-label="Search mode">
           {MODES.map((m) => (
             <button
@@ -350,6 +364,9 @@ export default function GalleryPage() {
             </button>
           ))}
         </div>
+            </div>
+            <div className="setting-row">
+              <span className="eyebrow">Order</span>
         <select value={sort} aria-label="Sort results"
                 onChange={(e) => setParams({ sort: e.target.value, page: "" })}>
           <option value="">Sort: relevance</option>
@@ -362,6 +379,8 @@ export default function GalleryPage() {
             </option>,
           ])}
         </select>
+            </div>
+            <div className="setting-row">
         <div className="density">
           <span className="density-label">Size</span>
           <div className="density-group" role="group" aria-label="Thumbnail size">
@@ -372,6 +391,9 @@ export default function GalleryPage() {
             ))}
           </div>
         </div>
+            </div>
+          </div>
+        </details>
         <button className={`ghost${selecting ? " select-on" : ""}`}
                 aria-pressed={selecting}
                 onClick={() => { setSelecting(!selecting); setPicked(new Set()); }}
