@@ -748,3 +748,72 @@ def compare(pg, ok):
     toggles = len(pg.query_selector_all(".compare-pane .draw-toggle"))
     ok("region drawing is reachable on both panes", toggles == 2,
        f"{toggles} Draw region toggles")
+
+
+@flow("Hero journey", budget_s=180.0)
+def hero_journey(pg, ok):
+    """The workspace's spine as one continuous story: search -> inspect
+    evidence -> pick two -> compare -> find more -> name the set -> the album
+    explains itself. The one mutation (the album) cleans up after itself.
+    The agent-proposal step is deliberately not here: flows must run without
+    Ollama; the approval gate is pinned by the agent test suite instead."""
+    pg.goto(url("/?q=a%20dog%20jumping%20into%20water"), wait_until="domcontentloaded")
+    pg.wait_for_selector(".grid .card", timeout=25000)
+    ok("search returns results", len(pg.query_selector_all(".grid .card")) > 0)
+
+    pg.hover(".grid .card")
+    pg.wait_for_timeout(300)
+    score = (pg.text_content(".grid .card .ev-score") or "").strip()
+    ok("evidence shows the score and its basis", bool(score), score[:40])
+
+    pg.click("button:has-text('Select')")
+    pg.evaluate("document.querySelectorAll('.grid .card')[0].click()")
+    pg.evaluate("document.querySelectorAll('.grid .card')[1].click()")
+    pg.wait_for_selector(".selection-tray", timeout=5000)
+    ok("tray appears with two picked",
+       "2" in (pg.text_content(".selection-tray") or ""))
+
+    compare_btn = pg.query_selector(".selection-tray button:has-text('Compare')")
+    if ok("tray offers Compare for a pair", compare_btn is not None):
+        compare_btn.click()
+        pg.wait_for_selector(".compare-pane img", timeout=15000)
+        ok("compare canvas loads both panes",
+           len(pg.query_selector_all(".compare-pane img")) >= 2)
+        pg.go_back()
+        pg.wait_for_selector(".grid .card", timeout=15000)
+
+    pg.hover(".grid .card")
+    pg.wait_for_timeout(250)
+    pg.click(".card-actions button:has-text('More like this')")
+    pg.wait_for_selector(".ref-chip.like", timeout=8000)
+    pg.wait_for_timeout(1200)
+    pg.hover(".grid .card")
+    pg.wait_for_timeout(250)
+    basis = (pg.text_content(".grid .card .ev-score") or "").strip()
+    ok("composed ranking carries its basis", basis.startswith("composed"), basis)
+
+    if not pg.query_selector(".selection-tray"):
+        pg.click("button:has-text('Select')")
+        pg.evaluate("document.querySelectorAll('.grid .card')[0].click()")
+        pg.evaluate("document.querySelectorAll('.grid .card')[1].click()")
+        pg.wait_for_selector(".selection-tray", timeout=5000)
+    pg.fill(".selection-tray input", "hero-journey-flow")
+    pg.click(".selection-tray .primary")
+    pg.wait_for_timeout(1500)
+    album_id = pg.evaluate("new URLSearchParams(location.search).get('album')")
+    ok("the set became an album and the view landed in it",
+       album_id is not None, f"album={album_id}")
+
+    if album_id:
+        try:
+            pg.wait_for_selector(".album-header", timeout=8000)
+            pg.click("button:has-text('Details & analysis')")
+            pg.click("button:has-text('Analyze')")
+            pg.wait_for_selector(".ah-measured", timeout=10000)
+            ok("analysis renders its measured half",
+               "Measured" in (pg.text_content(".ah-panel-title") or ""))
+            ok("the generated half names its model",
+               bool(pg.query_selector(".ah-panel-title.ai")))
+        finally:
+            r = pg.request.delete(f"{config.QA_API_URL}/api/albums/{album_id}")
+            ok("journey cleans up its album", r.status == 200, f"{r.status}")
