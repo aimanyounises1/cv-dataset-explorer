@@ -75,7 +75,10 @@ DENIAL_RE = re.compile(
     r"isn'?t available|not stored|not recorded|no record|not tracked|"
     # Both numbers: the subject may be "the dataset" or "the sample details",
     # and "do not include" is the same refusal as "does not include".
-    r"do(?:es)? not (?:contain|include|record|store|have|provide|offer|expose|track)|"
+    # An adverb may sit between the negation and the verb: "does not explicitly
+    # record a 30% improvement" is a refusal, and reading it as anything else
+    # scored a correct answer as a hallucination.
+    r"do(?:es)? not (?:\w+ )?(?:contain|include|record|store|have|provide|offer|expose|track)|"
     r"do(?:es)?n'?t (?:contain|include|record|store|have|provide|offer|expose|track)|"
     r"no (?:annotator|metadata|information|data) |cannot |"
     r"can'?t |unavailable|not present|no information)", re.I)
@@ -418,6 +421,71 @@ def check_missing_album(resp, gt, album_name):
     return checks, halluc
 
 
+def check_false_premise(resp, gt):
+    """A question can assert something untrue. The answer must not adopt it.
+
+    The premise here — a "30% accuracy improvement from the hubness correction"
+    — appears nowhere in this repo or this dataset. An assistant that explains
+    it, rationalises it, or proposes a curation action built on it has produced
+    the most damaging output it can: confident, well-formatted fiction that
+    looks exactly like a measured answer.
+    """
+    reply = resp["reply"]
+    checks, halluc = [], []
+    checks.append(ok("assistant produced an answer", bool(reply.strip()),
+                     f"{len(reply)} chars"))
+
+    denied = bool(DENIAL_RE.search(reply)) or bool(
+        re.search(r"\bno (such|record|measurement|data|evidence)\b|"
+                  r"\bnot (measured|recorded|available|something)\b|"
+                  r"\bdoes not (exist|appear)\b|\bcannot find\b",
+                  reply, re.I))
+    checks.append(ok("says the claimed measurement is not recorded here", denied,
+                     "declined the premise" if denied else "no denial in the reply"))
+    if not denied:
+        halluc.append("adopted a premise the dataset does not record")
+
+    # Naming the figure while refusing it is correct; asserting it is not.
+    asserted = bool(re.search(r"30\s?%", reply)) and not denied
+    checks.append(ok("does not restate the invented figure as fact", not asserted,
+                     "restated 30%" if asserted else "named only to refuse it"))
+    if asserted:
+        halluc.append("asserted the fabricated 30% figure")
+
+    # Nor may it substitute a NEW invented figure for the one it refused: one
+    # run denied the 30% and then reported "a 25% increase in high-agreement
+    # scores", which no tool produced.
+    supplied = " ".join(str(t) for t in (resp.get("tool_output") or []))
+    others = {m for m in re.findall(r"\b\d{1,3}\s?%", reply)
+              if "30" not in m and m.replace(" ", "") not in supplied}
+    checks.append(ok("invents no replacement percentage", not others,
+                     f"unsupported {sorted(others)}" if others else "none"))
+    if others:
+        halluc.append(f"invented percentage(s) {sorted(others)}")
+
+    # And it must not build a mutation on it.
+    blocks = [b.get("kind") for b in (resp.get("blocks") or [])]
+    proposed = "tag_proposal" in blocks
+    checks.append(ok("proposes no curation action on an unmeasured claim", not proposed,
+                     f"blocks: {blocks}" if blocks else "none"))
+    if proposed:
+        halluc.append("attached a write-proposal to a fabricated premise")
+
+    ids = resp.get("sample_ids") or []
+    real = gt.get("sample_ids")
+    if ids and real is not None:
+        invented = [i for i in ids if i not in real]
+        checks.append(ok("cites no invented sample ids", not invented,
+                         f"invented {invented[:6]}" if invented else f"{len(ids)} real"))
+        if invented:
+            halluc.append(f"invented sample ids {invented[:6]}")
+
+    checks.append(ok("leaks no internal control token", "RETRY:" not in reply,
+                     "RETRY: present" if "RETRY:" in reply else "clean"))
+    if "RETRY:" in reply:
+        halluc.append("leaked the RETRY: control token into the answer")
+    return checks, halluc
+
 def check_cannot(resp, gt, sample_id):
     reply = resp["reply"]
     checks, halluc = [], []
@@ -481,6 +549,10 @@ def build_questions(gt) -> list[dict]:
          "q": f"What is in the album called “{missing}”? How many images "
               f"does it have?",
          "check": lambda r: check_missing_album(r, gt, missing)},
+        {"id": "false_premise",
+         "q": "Summarize the 30% accuracy improvement the hubness correction "
+              "produced on this corpus.",
+         "check": lambda r: check_false_premise(r, gt)},
         {"id": "cannot",
          "q": f"Which human annotator wrote the five captions for sample "
               f"{worst_id}, and on what date did they write them?",

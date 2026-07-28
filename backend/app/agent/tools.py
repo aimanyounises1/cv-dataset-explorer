@@ -235,10 +235,18 @@ def tag_samples(sample_ids: list[int], tag: str, reason: str = "") -> str:
         real = {r["id"] for r in conn.execute(
             f"SELECT id FROM samples WHERE id IN ({qmarks})", wanted)}
         missing = [i for i in wanted if i not in real]
-        if not real:
+        # ANY missing id voids the whole proposal, not just its own row. A model
+        # that guessed one of them guessed the list, and dropping the misses
+        # quietly would hand the reviewer a shorter, cleaner-looking fiction —
+        # the surviving ids are real images that were never actually selected
+        # for anything. Refusing outright is the only answer that cannot be
+        # mistaken for a result.
+        if missing:
             return json.dumps({
-                "error": f"none of those {len(wanted)} sample ids exist in this "
-                         f"dataset — nothing was proposed",
+                "error": f"{len(missing)} of those {len(wanted)} sample ids do not "
+                         f"exist in this dataset, so the whole proposal was refused "
+                         f"— a list with an invented id in it was not read off a "
+                         f"tool result",
                 "missing": missing[:20],
                 "hint": "Use ids that came from a tool result in this "
                         "conversation, never ids you inferred."})

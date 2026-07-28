@@ -32,6 +32,8 @@ from pydantic import Field, ValidationError  # noqa: E402
 
 from app.agent import blocks, registry  # noqa: E402
 from app.agent.graph import (  # noqa: E402
+    _split_retry,
+    _ungrounded_figures,
     build_graph,
     normalise_routes,
     route_schema,
@@ -543,14 +545,21 @@ def test_tag_samples_proposes_and_never_writes():
     sid = cur.lastrowid
     conn.commit()
     try:
-        out = _json.loads(tag_samples.func(
+        # An id that does not exist voids the proposal rather than being
+        # quietly dropped: the remainder would be a shorter, cleaner-looking
+        # fiction built from images nobody selected.
+        refused = _json.loads(tag_samples.func(
             sample_ids=[sid, 999_999_999], tag="Edge-Case ",
             reason="probe reason"))
+        assert "blocks" not in refused
+        assert 999_999_999 in refused["missing"]
+
+        out = _json.loads(tag_samples.func(
+            sample_ids=[sid], tag="Edge-Case ", reason="probe reason"))
         assert out["proposed"] is True and out["candidates"] == 1
         block = out["blocks"][0]
         assert block["kind"] == "tag_proposal" and block["tag"] == "edge-case"
         assert block["sample_ids"] == [sid]
-        assert 999_999_999 in block["missing"]
         assert "approve" in out["next"]
         rows = conn.execute(
             "SELECT COUNT(*) FROM sample_tags WHERE sample_id = ?", (sid,)).fetchone()[0]
@@ -675,16 +684,22 @@ def test_a_proposal_lists_every_id_it_proposes_and_writes_nothing():
     conn.commit()
     ghost = 10_000_000 + made[0]
     try:
-        out = _json.loads(tag_samples.func(
+        # A list carrying one invented id is refused whole.
+        with_ghost = _json.loads(tag_samples.func(
             tag="Night-Probe", sample_ids=[*made, ghost],
-            reason="  three real frames and one that does not exist  "))
+            reason="three real frames and one that does not exist"))
+        assert "blocks" not in with_ghost
+        assert with_ghost["missing"] == [ghost]
+
+        out = _json.loads(tag_samples.func(
+            tag="Night-Probe", sample_ids=made,
+            reason="  three real frames  "))
         block = out["blocks"][0]
         assert block["kind"] == "tag_proposal"
         # Every real id survives, in order, so the grid can render each one.
         assert block["sample_ids"] == made
-        assert block["missing"] == [ghost]
         assert block["tag"] == "night-probe"          # normalized for the write
-        assert block["reason"] == "three real frames and one that does not exist"
+        assert block["reason"] == "three real frames"
 
         # The proposal is a proposal: no tag row, no membership, nothing.
         assert conn.execute(
@@ -697,13 +712,98 @@ def test_a_proposal_lists_every_id_it_proposes_and_writes_nothing():
         assert "error" in bad and "blocks" not in bad
 
         # The block is bounded, so "render every member" stays a finite promise.
-        wide = _json.loads(tag_samples.func(
-            tag="wide", sample_ids=[*made, *range(ghost, ghost + 500)],
-            reason="more ids than the cap"))
-        assert len(wide["blocks"][0]["sample_ids"]) <= 200
+        # Built from REAL rows, because an invented id now voids the proposal.
+        many = []
+        for i in range(205):
+            c = conn.execute(
+                "INSERT INTO samples(dataset, filename, split, width, height, "
+                "filesize) VALUES ('flickr8k', ?, 'train', 10, 10, 1)",
+                (f"cap_{i}.jpg",))
+            many.append(c.lastrowid)
+        conn.commit()
+        try:
+            wide = _json.loads(tag_samples.func(
+                tag="wide", sample_ids=many, reason="more ids than the cap"))
+            assert len(wide["blocks"][0]["sample_ids"]) == 200
+        finally:
+            qm = ",".join("?" * len(many))
+            conn.execute(f"DELETE FROM samples WHERE id IN ({qm})", many)
+            conn.commit()
     finally:
         for sid in made:
             conn.execute("DELETE FROM samples WHERE id = ?", (sid,))
         conn.execute("DELETE FROM tags WHERE name IN ('night-probe','wide')")
         conn.commit()
         conn.close()
+
+
+@pytest.mark.parametrize("reply,expect_retry,expect_answer", [
+    # The classic shape the handler already caught.
+    ("RETRY: ask for the split sizes instead", "ask for the split sizes instead", ""),
+    # The shape that leaked: a full answer, then the control token as its own
+    # paragraph. The user was shown the agent's instruction to itself.
+    ("The test split holds 1,000 images.\n\nRETRY: check whether agreement "
+     "metrics exist", "check whether agreement metrics exist",
+     "The test split holds 1,000 images."),
+    # Decorated by a model that likes markdown.
+    ("Answer.\n\n**RETRY:** try the other lane", "try the other lane", "Answer."),
+    # No token: the answer passes through untouched.
+    ("The corpus holds 8,000 images.", "", "The corpus holds 8,000 images."),
+])
+def test_the_quality_gate_token_never_reaches_the_reader(reply, expect_retry, expect_answer):
+    """`RETRY:` is the synthesizer's private word for "send this back".
+
+    It was recognised only at position 0, so a model that answered and *then*
+    appended the token both skipped the retry and printed its own control
+    instruction into the chat, in the same voice as the answer.
+    """
+    retry, answer = _split_retry(reply)
+    assert retry == expect_retry
+    assert answer == expect_answer
+    assert "RETRY:" not in answer
+
+
+def test_ungrounded_figures_are_found_by_arithmetic_not_by_trust():
+    """A number in the question that no tool returned is named, not assumed.
+
+    The live failure: "Summarize the 30% accuracy improvement the hubness
+    correction produced" — a figure that exists nowhere in this repo — was
+    explained as fact in three runs of three, once with invented sample ids and
+    a curation proposal attached. A general "premises are not evidence" rule did
+    not hold, so the check computes the answer and hands the synthesizer the
+    specific figure to refuse.
+    """
+    from langchain_core.messages import AIMessage as _AI
+    from langchain_core.messages import HumanMessage as _HM
+
+    # The tools said nothing about 30%.
+    convo = [_HM("Summarize the 30% accuracy improvement the hubness correction produced."),
+             _AI("dataset_overview: 8000 samples, 40000 captions")]
+    assert _ungrounded_figures(convo) == ["30%"]
+
+    # A figure the tools DID return is grounded and must not be flagged.
+    grounded = [_HM("Why do 1,000 images sit in the test split?"),
+                _AI('{"splits": {"test": 1000, "train": 6000}}')]
+    assert _ungrounded_figures(grounded) == []
+
+    # Only the latest question is judged, and a question with no figures is quiet.
+    assert _ungrounded_figures([_HM("Which captions look wrong?"), _AI("x")]) == []
+
+
+def test_a_figure_is_grounded_as_a_number_not_as_a_substring():
+    """The check must not be satisfied by digits inside another number.
+
+    This is the bug that made the first version useless: "30" appears inside
+    sample id 4301 and inside 0.308, so every tool result "grounded" the 30%
+    premise and the warning never fired on the one question it exists for.
+    """
+    from langchain_core.messages import AIMessage as _AI
+    from langchain_core.messages import HumanMessage as _HM
+
+    q = _HM("Summarize the 30% accuracy improvement the correction produced.")
+    noise = _AI('{"sample_ids": [4301, 1305], "scores": [0.308, 0.130]}')
+    assert _ungrounded_figures([q, noise]) == ["30%"]
+
+    # A real 30 in the evidence does ground it.
+    real = _AI('{"splits": {"test": 30}}')
+    assert _ungrounded_figures([q, real]) == []
