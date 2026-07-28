@@ -966,6 +966,21 @@ select:hover { border-color: var(--border-strong); }
   font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
 }
 .legend-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+/* A swatch that filters. It reads as a legend entry until the pointer arrives,
+   because the colour key is what it is first and a control second — the border
+   appears on hover rather than sitting there competing with the canvas. The
+   one in force keeps its outline at rest, since "which group am I looking at"
+   has to be answerable without hovering anything. */
+.legend-pick {
+  border: 1px solid transparent; border-radius: 999px;
+  padding: 1px 7px 1px 5px; margin: -1px 0; background: none; cursor: pointer;
+  font: inherit; color: inherit;
+  transition: border-color var(--t-quick), color var(--t-quick);
+}
+.legend-pick:hover { border-color: var(--border); color: var(--text-dim); }
+.legend-pick.on {
+  border-color: var(--accent); color: var(--accent-deep); font-weight: 600;
+}
 
 /* One line per mark, above the canvas: what a dot is, what a lasso does, what
    isolation suggests. The full honesty panel lives below the canvas — this is
