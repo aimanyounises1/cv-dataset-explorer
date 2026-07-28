@@ -124,10 +124,13 @@ export default function SearchSettings({ mode, sort, density, densities,
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        (ref.current?.querySelector("summary") as HTMLElement | null)?.focus();
-      }
+      if (e.key !== "Escape") return;
+      // An Escape aimed at something else — the search box dismissing its own
+      // recent-queries list — may still close this popover, but it must not
+      // steal the focus that Escape belonged to.
+      const inside = ref.current?.contains(document.activeElement);
+      setOpen(false);
+      if (inside) (ref.current?.querySelector("summary") as HTMLElement | null)?.focus();
     };
     document.addEventListener("pointerdown", onDown);
     document.addEventListener("keydown", onKey);
