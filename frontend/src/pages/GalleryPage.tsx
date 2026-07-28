@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { AXES, AlbumSummary, SampleCard, SearchMode, TermStat } from "../api/types";
 import { AXIS_META } from "../components/AxisFilters";
@@ -49,6 +49,7 @@ export default function GalleryPage() {
   // from the URL. The gallery keeps only what orders or renders the view.
   const selection = useSelection();
   const [input, setInput] = useState(query);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<SampleCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -314,6 +315,7 @@ export default function GalleryPage() {
       <div className="controls">
         <div className="search-box">
           <input
+            ref={searchRef}
             aria-label="Search images"
             placeholder='Search images… e.g. "dog jumping into water", "crowded market at night"'
             value={input}
@@ -437,6 +439,45 @@ export default function GalleryPage() {
 
 
 
+
+      {/* The hero exists only on the bare gallery — the workspace's front
+          door. The moment a query, filter or image lands, it yields the room
+          back to results. Its h1 is also the page's heading. */}
+      {!query && !selection.active && !imageQuery && (
+        <section className="hero">
+          <div className="hero-copy">
+            <p className="eyebrow">Local visual intelligence</p>
+            <h1>Find the moments that matter.</h1>
+            <p className="hero-sub">
+              Search, understand and curate this corpus with local models and
+              agents that show their work.
+            </p>
+          </div>
+          <div className="hero-flows">
+            <button type="button" className="flow-card" onClick={() => searchRef.current?.focus()}>
+              <span className="flow-no">01</span>
+              <span className="flow-name">Find</span>
+              <span className="flow-hint">Words, an image, or both — every score labelled.</span>
+            </button>
+            <button type="button" className="flow-card"
+                    onClick={() => { setSelecting(true); window.scrollTo({ top: 0 }); }}>
+              <span className="flow-no">02</span>
+              <span className="flow-name">Curate</span>
+              <span className="flow-hint">Pick images into albums; drag a card to file it.</span>
+            </button>
+            <Link className="flow-card" to="/quality">
+              <span className="flow-no">03</span>
+              <span className="flow-name">Audit</span>
+              <span className="flow-hint">Captions their own images don’t support.</span>
+            </Link>
+            <Link className="flow-card" to="/chat">
+              <span className="flow-no">04</span>
+              <span className="flow-name">Ask</span>
+              <span className="flow-hint">Agents that search and show their work.</span>
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* Zero-state only. With a filter applied these are noise between
           the controls and the results the filter just produced. */}
