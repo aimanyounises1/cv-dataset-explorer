@@ -155,9 +155,10 @@ from one click. What remains, in order:
    finishes is the version worth building.
 4. **A review gate over the annotations that already persist.** Annotations are
    stored today — `annotations(sample_id, kind, geometry, label, created_at)`
-   with list/create/delete at `/api/samples/{id}/annotations`, drawn and deleted
-   on the compare canvas. What is missing is everything that turns a drawing
-   into a *reviewed* record:
+   with list/create at `/api/samples/{id}/annotations`, drawn and listed on the
+   compare canvas. `DELETE /api/annotations/{id}` exists and is tested, but no
+   UI path calls it — a box can be drawn and saved, not taken back. What is
+   missing is everything that turns a drawing into a *reviewed* record:
    * **provenance** — the row cannot say whether a person drew the box, the
      detector proposed it, or an agent did; a reviewed annotation layer is worth
      little if you cannot tell who claimed what;
