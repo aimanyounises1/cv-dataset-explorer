@@ -179,6 +179,11 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
                   key={`${o.group ?? ""}:${o.value}`}
                   id={`${id}-opt-${i}`}
                   role="option"
+                  // A native <option> could be picked by value; this one is only
+                  // its label, which leaves anything driving the control (the QA
+                  // sweep, a keyboard test) matching on display text. The value
+                  // is what the option MEANS, so it rides along.
+                  data-value={o.value}
                   aria-selected={o.value === selected}
                   aria-disabled={o.disabled || undefined}
                   className={"listbox-opt"
