@@ -219,8 +219,10 @@ were untouched:
 
 **The test suite is not green inside this image**, and the reason is worth
 stating rather than hiding: `docker compose exec backend python -m pytest -q`
-gives **290 passed, 8 failed, 2 skipped**. All 8 are in `tests/test_providers.py`
-and all 8 pass on the host.
+gave **290 passed, 8 failed, 2 skipped** when this was measured — a 300-test
+collection, against 352 on the host today, so re-run the command rather than
+quote the tally. All 8 failures were in `tests/test_providers.py`, and all 8
+passed on the host.
 
 The application is correct here; the tests carry an environment assumption.
 The image deliberately omits `requirements-qwen.txt`, so `providers.resolve()`

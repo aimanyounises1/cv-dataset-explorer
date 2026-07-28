@@ -13,7 +13,7 @@ assume, and it is cheaper to say so than to be found out.
 | Agent orchestration | same | `requirements-agent.txt` | skipped |
 | Frontend types + build | `npm ci && npm run build` (`frontend/`) | Node 18+ | yes |
 | Relative Markdown links | `python scripts/check_links.py` (repo root) | stdlib | yes |
-| Capability inventory | `python scripts/capabilities.py --check` (repo root) | a running API | no |
+| Capability inventory | `python scripts/capabilities.py --check` (repo root) | a running API | yes — the backend job starts one for it |
 | UI sweep, real Chrome | `python ../scripts/ui_smoke.py` (`backend/`) | Chrome, both servers, an ingested corpus | no |
 
 The install CI uses is deliberately narrow -- `fastapi httpx pydantic numpy

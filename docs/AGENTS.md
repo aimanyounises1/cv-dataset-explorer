@@ -283,9 +283,13 @@ on IPv6 only, so the numeric form connects to nothing.
 - **Ollama serializes at the model level.** Two lanes overlap in tool work and in
   SQL, and their generation steps queue. Parallelism is real (measured: lane
   execution windows overlap) but the speedup is smaller than the lane count.
-- **No streaming.** A turn returns when it is complete, so a 50-second report
-  shows a spinner for 50 seconds. Streaming tokens is straightforward; streaming
-  *blocks* as lanes finish is the version worth building, and is not built.
+- **The steps stream; the text does not.** `POST /api/chat/stream` emits
+  LangGraph's own node transitions as NDJSON — `{"type":"step","node":…,"t":…}`
+  per real transition, never a staged animation — and the Assistant renders
+  them live, so a 50-second report names the lane it is in rather than showing
+  a bare spinner. The reply itself arrives whole, in the closing
+  `{"type":"final"}` line carrying the exact `POST /chat` payload. Streaming
+  tokens, and streaming *blocks* as lanes finish, are still not built.
 - **Reports do not survive a cleared data directory.** They are build artifacts.
 - **`qwen2.5vl:7b` is not installed here,** so VLM tag enrichment is unavailable
   and the app degrades as designed.
