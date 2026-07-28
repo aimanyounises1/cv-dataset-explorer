@@ -504,6 +504,12 @@ body {
      "collapsed" preference must not follow the user onto a phone. */
   .rail-l .rail-filters, .rail-l .rail-library, .rail-toggle,
   .rail-filter-key { display: none; }
+  /* The nav strip scrolls sideways on a phone; the fade is the indication
+     that it does — an unindicated scroll reads as a clipped dead end. */
+  .rail-l {
+    mask-image: linear-gradient(90deg, #000 88%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent);
+  }
   .selection-tray { left: 50%; }   /* no rail column to offset against */
   .rail-l.collapsed .rail-brand-name { display: inline; }
   .rail-l.collapsed .rail-link-label { display: inline; }

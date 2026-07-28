@@ -153,7 +153,7 @@ cd backend && uv run --with playwright --with python-pptx \
     --python .venv/bin/python python ../scripts/ui_smoke.py
 #   PASS  route /
 #   ...
-#   90/90 checks passed in 76s
+#   104/104 checks passed in 96s
 ```
 
 ---
