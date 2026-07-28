@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat } from "../api/types";
+import {
+  AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat,
+} from "../api/types";
 import AxisLegend from "../components/AxisLegend";
 import SearchSettings from "../components/SearchSettings";
 import { albumsChanged } from "../components/AlbumShelf";
 import AlbumHeader from "../components/AlbumHeader";
 import ImageCard from "../components/ImageCard";
+import ScoreDistribution, { COSINE_BASES } from "../components/ScoreDistribution";
+import ScenarioGroups, {
+  GROUP_MIN_RESULTS, GROUP_THUMBS, GroupsAnswer, readGroupsAnswer,
+} from "../components/ScenarioGroups";
+import SelectionTray from "../components/SelectionTray";
 import { showToast } from "../components/Toast";
 import { useActiveProviderName } from "../lib/activeProvider";
 import { useDebounce } from "../hooks/useDebounce";
@@ -101,15 +108,24 @@ export default function GalleryPage() {
   const providerName = useActiveProviderName();
   const [refThumbs, setRefThumbs] = useState<Record<number, string>>({});
   /* Scenario groups are proposals, not state: at most three, on demand,
-   * temporary until "Save as album" makes one durable. */
-  const [scenarios, setScenarios] = useState<ScenarioGroup[] | null>(null);
+   * temporary until "Save as album" makes one durable. The whole answer is
+   * kept — including the degraded flag and the server's own sentence — so a
+   * grouping that could not be made says why instead of rendering as "no
+   * groups", which is indistinguishable from "your results have no structure". */
+  const [scenarios, setScenarios] = useState<GroupsAnswer | null>(null);
   const [scenBusy, setScenBusy] = useState(false);
+  /* Ranked results and grouped exploration are two views of ONE result set,
+   * not two pages: the switch is in the result bar, the ranking is the
+   * default, and moving between them costs one click and no request. The view
+   * is deliberately not in the URL — the shareable artifact of a group is the
+   * `?ids=` slice it opens, and a proposal is not a place. */
+  const [view, setView] = useState<"ranked" | "grouped">("ranked");
+  const [groupThumbs, setGroupThumbs] = useState<Record<number, string>>({});
   // Every membership constraint — split, tag, attribute, axes, id list, the
   // quality threshold, the cluster — is now owned by the rail and read back
   // from the URL. The gallery keeps only what orders or renders the view.
   const selection = useSelection();
   const [input, setInput] = useState(query);
-  const searchRef = useRef<HTMLInputElement | null>(null);
   const [items, setItems] = useState<SampleCard[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -144,6 +160,20 @@ export default function GalleryPage() {
   const [histOpen, setHistOpen] = useState(false);
   const [histIdx, setHistIdx] = useState(-1);
   const histFetched = useRef(false);
+  /* The corpus's own similarity floor, read once per mount: `undefined` until
+   * the answer arrives, `null` when the active index publishes none. No
+   * constant stands in for it — a number nobody measured must not be drawn as
+   * if somebody had. */
+  const [simFloor, setSimFloor] = useState<number | null | undefined>(undefined);
+  useEffect(() => {
+    api.overview()
+      .then((o) => setSimFloor(typeof o.sim_floor === "number" ? o.sim_floor : null))
+      .catch(() => setSimFloor(null));
+  }, []);
+  /* Where the reader has put the dim line, or null for "wherever the floor
+   * is". Deliberately not a URL param: this is how one person is reading one
+   * result set, not a filter that changed which images are in it. */
+  const [dimBelow, setDimBelow] = useState<number | null>(null);
 
   useEffect(() => {
     const missing = [...likeIds, ...unlikeIds].filter((id) => !refThumbs[id]);
@@ -572,21 +602,68 @@ export default function GalleryPage() {
 
   // The URL remains the source of truth: touching any filter, query or page
   // dismisses the in-memory image results rather than competing with them.
-  useEffect(() => { setImageQuery(null); setScenarios(null); }, [filterKey, page]);
+  // Proposals die with the ranking they described — a group over yesterday's
+  // result set, shown beside today's, would be a lie with a thumbnail on it.
+  useEffect(() => {
+    setImageQuery(null);
+    setScenarios(null);
+    setView("ranked");
+  }, [filterKey, page]);
 
-  const suggestGroups = () => {
+  /* A new ranking is a new set of scores, so the reader's line goes back to
+   * the measured floor. "Load more" deliberately does not reset it: the same
+   * ranking, read deeper, is still the same reading. */
+  useEffect(() => { setDimBelow(null); }, [filterKey]);
+
+  /** Show the grouped view, fetching the proposal once per result set. The
+   * switch flips immediately — the view is the user's choice, not the
+   * request's — and the panel below reports whichever state the answer is in:
+   * grouping, grouped, refused with a reason, or unavailable. */
+  const showGroups = () => {
+    setView("grouped");
+    if (scenarios !== null || scenBusy) return;
     setScenBusy(true);
     api.scenarioGroups({
       text: query || undefined,
       positive_ids: likeIds, negative_ids: unlikeIds,
       ...(selection.params as object),
     })
-      .then((r) => setScenarios(r.groups))
-      .catch((e) => showToast(e instanceof Error && e.message.startsWith("404")
-        ? "Scenario groups need the updated backend — not available yet"
-        : "Could not group these results"))
+      .then((r) => setScenarios(readGroupsAnswer(r)))
+      .catch((e) => setScenarios({
+        groups: [], basis: "", degraded: true,
+        // A capability that is absent names the thing that would enable it;
+        // any other failure is reported verbatim. Neither is ever silence.
+        message: e instanceof Error && e.message.startsWith("404")
+          ? "Grouping is not available on this backend — POST /api/search/scenarios "
+            + "is not mounted. Restart the API after updating it."
+          : `Could not group these results — ${e instanceof Error ? e.message : String(e)}`,
+      }))
       .finally(() => setScenBusy(false));
   };
+
+  /* Faces for the group strips, in one request for the whole panel: a label
+   * and a count describe a group, but only the pictures show whether the
+   * grouping is any good. Ids the server already ranked, so nothing here
+   * re-ranks — this is a thumbnail lookup. */
+  useEffect(() => {
+    const groups = scenarios?.groups ?? [];
+    if (view !== "grouped" || groups.length === 0) return;
+    const want = groups.flatMap((g) => g.sample_ids.slice(0, GROUP_THUMBS));
+    const missing = [...new Set(want)].filter((id) => !(id in groupThumbs));
+    if (missing.length === 0) return;
+    const ctrl = new AbortController();
+    api.listSamples({ ids: missing.join(","), per_page: missing.length }, ctrl.signal)
+      .then((r) => setGroupThumbs((prev) => {
+        const next = { ...prev };
+        for (const s of r.items) next[s.id] = s.thumb_url;
+        return next;
+      }))
+      .catch(() => { /* the strip falls back to placeholders */ });
+    return () => ctrl.abort();
+    // groupThumbs is a cache read inside, never a trigger: depending on it
+    // would re-run this effect with every arriving thumbnail.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, scenarios]);
 
   /** The whole ranking, kept: an album named after the query, from the ids on
    * screen. Capped at 200 — an album is a curated set a person will actually
@@ -627,11 +704,18 @@ export default function GalleryPage() {
       .finally(() => setSavingAlbum(false));
   };
 
+  /* Groups go through the same collision-safe creation as a saved ranking:
+   * the same query proposes the same labels, so keeping one twice is ordinary
+   * and must not surface the unique-name 409. */
   const saveGroupAsAlbum = (gr: ScenarioGroup) => {
-    api.createAlbum(gr.label)
-      .then((a) => api.addToAlbum(a.id, gr.sample_ids).then(() => a))
-      .then((a) => { albumsChanged(); showToast(`Saved “${gr.label}” (${gr.sample_ids.length})`);
-                     setParams({ album: String(a.id), q: "", like: "", unlike: "", page: "" }); })
+    createAlbumForRanking(gr.label)
+      .then(({ album, name }) => api.addToAlbum(album.id, gr.sample_ids)
+        .then(() => ({ album, name })))
+      .then(({ album, name }) => {
+        albumsChanged();
+        showToast(`Saved “${name}” (${gr.sample_ids.length})`);
+        setParams({ album: String(album.id), q: "", like: "", unlike: "", page: "" });
+      })
       .catch((e) => showToast(e instanceof Error ? e.message : "Could not save album"));
   };
 
@@ -644,6 +728,27 @@ export default function GalleryPage() {
   const conjunctionFailed =
     items.length === 0 && meta.terms.length > 1 && missing.length === 0 && !hasFilters;
 
+  /* The distribution is offered only where the number under it is a
+   * similarity. Two identical scores are not a distribution, so a flat result
+   * set gets no panel either. */
+  const distScores = useMemo(
+    () => (meta.basis && COSINE_BASES.has(meta.basis)
+      ? items.map((s) => s.score).filter((v): v is number => typeof v === "number")
+      : []),
+    [items, meta.basis]);
+  const showDist = distScores.length > 1
+    && Math.max(...distScores) > Math.min(...distScores);
+  /* The line: wherever the reader put it, else the measured floor when it
+   * falls inside these scores, else the bottom of the range — which dims
+   * nothing, because the corpus never said where the line belongs. */
+  const dimLine = (() => {
+    if (!showDist) return 0;
+    const lo = Math.min(...distScores);
+    const hi = Math.max(...distScores);
+    const fallback = simFloor != null && simFloor > lo && simFloor < hi ? simFloor : lo;
+    return Math.min(hi, Math.max(lo, dimBelow ?? fallback));
+  })();
+
 
   return (
     <div ref={pageRef}
@@ -652,10 +757,14 @@ export default function GalleryPage() {
            const f = e.dataTransfer.files?.[0];
            if (f && f.type.startsWith("image/")) { e.preventDefault(); runImageSearch(f); }
          }}>
+      {/* The hero used to carry this page's only h1. The workspace does not
+          want a headline above its search field, but the document still needs
+          a heading — so it keeps one for screen readers, the same way the
+          sample and chat pages do. */}
+      <h1 className="sr-only">Image gallery</h1>
       <div className="controls">
         <div className="search-box">
           <input
-            ref={searchRef}
             aria-label="Search images"
             role="combobox"
             aria-expanded={histOpen && historyItems.length > 0}
@@ -721,47 +830,13 @@ export default function GalleryPage() {
         />
       </div>
 
-      {/* The tray exists only while something is picked — a tray of zero
-          would be furniture. Fixed to the viewport bottom so the running
-          count and the album action stay in reach however deep the scroll,
-          which is exactly when hand-picking happens. */}
-      {picked.size > 0 && (
-        <div className="selection-tray" role="toolbar" aria-label="Selected images">
-          <span className="select-count" aria-live="polite">
-            {picked.size} picked
-          </span>
-          <input list="album-names" value={albumName}
-                 onChange={(e) => setAlbumName(e.target.value)}
-                 placeholder="Album name…"
-                 aria-label="Album name" />
-          <datalist id="album-names">
-            {albums.map((a) => <option key={a.id} value={a.name} />)}
-          </datalist>
-          <button className="primary" disabled={!picked.size || !albumName.trim() || albumBusy}
-                  onClick={saveAlbum}>
-            {albumBusy ? "Saving…" : `Add ${picked.size || ""} to album`}
-          </button>
-          {picked.size === 2 && (
-            <button className="ghost"
-                    title="Open these two side by side with synchronized zoom"
-                    onClick={() => {
-                      const [a, b] = [...picked];
-                      navigate(`/compare?a=${a}&b=${b}`);
-                    }}>
-              Compare
-            </button>
-          )}
-          {/* Clearing the set is also how the tray leaves: with no mode to
-              exit, an emptied selection has nothing left to dismiss. */}
-          <button className="ghost" onClick={() => setPicked(new Set())}>
-            Clear
-          </button>
-        </div>
-      )}
-
-
-
-
+      {/* The picked set's own surface, which knows nothing about searching.
+          It renders itself away when nothing is picked. */}
+      <SelectionTray picked={picked} albums={albums}
+                     albumName={albumName} onAlbumName={setAlbumName}
+                     busy={albumBusy} onSave={saveAlbum}
+                     onCompare={(a, b) => navigate(`/compare?a=${a}&b=${b}`)}
+                     onClear={() => setPicked(new Set())} />
 
 
       {composed && (
@@ -795,50 +870,6 @@ export default function GalleryPage() {
       {albumId != null && (
         <AlbumHeader albumId={albumId}
                      onGone={() => setParams({ album: "", page: "" })} />
-      )}
-
-      {/* The hero exists only on the bare gallery — the workspace's front
-          door. The moment a query, filter or image lands, it yields the room
-          back to results. Its h1 is also the page's heading. */}
-      {!query && !selection.active && !imageQuery && !composed && (
-        <section className="hero">
-          <div className="hero-copy">
-            <p className="eyebrow">Local visual intelligence</p>
-            <h1>Find the moments that matter.</h1>
-            <p className="hero-sub">
-              Search, understand and curate this corpus with local models and
-              agents that show their work — built for hunting the long tail:
-              rare scenes, coverage gaps, and the captions that don&rsquo;t
-              hold up.
-            </p>
-          </div>
-          <div className="hero-flows">
-            <button type="button" className="flow-card" onClick={() => searchRef.current?.focus()}>
-              <span className="flow-no">01</span>
-              <span className="flow-name">Find</span>
-              <span className="flow-hint">Words, an image, or both — every score labelled.</span>
-            </button>
-            <button type="button" className="flow-card"
-                    onClick={() => {
-                      window.scrollTo({ top: 0 });
-                      showToast("Hover any image and click its ✓ to start picking");
-                    }}>
-              <span className="flow-no">02</span>
-              <span className="flow-name">Curate</span>
-              <span className="flow-hint">Pick images into albums; drag a card to file it.</span>
-            </button>
-            <Link className="flow-card" to="/quality">
-              <span className="flow-no">03</span>
-              <span className="flow-name">Audit</span>
-              <span className="flow-hint">Captions their own images don’t support.</span>
-            </Link>
-            <Link className="flow-card" to="/chat">
-              <span className="flow-no">04</span>
-              <span className="flow-name">Ask</span>
-              <span className="flow-hint">Agents that search and show their work.</span>
-            </Link>
-          </div>
-        </section>
       )}
 
       {/* Zero-state only. With a filter applied these are noise between
@@ -915,14 +946,6 @@ export default function GalleryPage() {
             : `${total.toLocaleString()} samples`}
           {query && meta.basis === "rrf" && meta.rrfK != null &&
             ` · fused by reciprocal rank, k=${meta.rrfK}`}
-          {(query || composed) && items.length >= 8 && (
-            <>
-              {" · "}
-              <button className="link-btn" onClick={suggestGroups} disabled={scenBusy}>
-                {scenBusy ? "grouping…" : "suggest groups"}
-              </button>
-            </>
-          )}
           {(query || composed) && items.length > 0 && (
             <>
               {" · "}
@@ -934,53 +957,84 @@ export default function GalleryPage() {
             </>
           )}
         </div>
-        {/* The key for the sparkline every card carries. Only shown when the
-            cards actually have axes — a legend for an absent encoding is
-            noise, and axes are absent until `python -m app.analyze` has run. */}
-        {items.some((s) => s.axes) && <AxisLegend />}
+        {/* Two views of one result set, and which one you are in. The ranking
+            is the default; grouping is a proposal over the same ids. */}
+        <div className="result-bar-right">
+          {(query || composed) && items.length > 0 && (
+            <div className="view-switch" role="group" aria-label="Result view">
+              <button type="button" aria-pressed={view === "ranked"}
+                      className={view === "ranked" ? "on" : ""}
+                      title="The ranking, in score order"
+                      onClick={() => setView("ranked")}>
+                Ranked
+              </button>
+              <button type="button" aria-pressed={view === "grouped"}
+                      className={view === "grouped" ? "on" : ""}
+                      disabled={items.length < GROUP_MIN_RESULTS}
+                      title={items.length < GROUP_MIN_RESULTS
+                        ? `Grouping needs at least ${GROUP_MIN_RESULTS} results — `
+                          + `${items.length} here`
+                        : "The same results, clustered into at most three "
+                          + "explainable groups"}
+                      onClick={showGroups}>
+                {scenBusy ? "Grouping…" : "Grouped"}
+              </button>
+            </div>
+          )}
+          {/* The key for the sparkline every card carries. Only shown when the
+              cards actually have axes — a legend for an absent encoding is
+              noise, and axes are absent until `python -m app.analyze` has run. */}
+          {items.some((s) => s.axes) && view === "ranked" && <AxisLegend />}
+        </div>
       </div>
 
-      {scenarios && scenarios.length > 0 && (
-        <div className="scenario-row">
-          {scenarios.map((gr) => (
-            <div className="scenario-card" key={gr.label}>
-              <div className="scenario-head">
-                <strong>{gr.label}</strong>
-                <span className="scenario-count">{gr.count}</span>
-              </div>
-              <div className="scenario-evidence">{gr.evidence}</div>
-              <div className="scenario-actions">
-                <Link className="open-all"
-                      to={`/?ids=${gr.sample_ids.join(",")}`}>
-                  Open {gr.count} →
-                </Link>
-                <button className="ghost" onClick={() => saveGroupAsAlbum(gr)}>
-                  Save as album
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+      {view === "grouped" && (
+        <ScenarioGroups resultCount={items.length} hasMore={hasMore}
+                        answer={scenarios} busy={scenBusy} thumbs={groupThumbs}
+                        onBack={() => setView("ranked")}
+                        onSaveGroup={saveGroupAsAlbum} />
       )}
 
+      {/* Only where the score is a similarity. Hybrid results are fused by
+          rank and keyword results are BM25 — a "0.42" drawn on either scale
+          would be a number pretending to mean something. */}
+      {view === "ranked" && showDist && (
+        <ScoreDistribution scores={distScores} basis={meta.basis ?? ""}
+                           floor={simFloor} threshold={dimLine}
+                           onThreshold={setDimBelow} />
+      )}
+
+      {view === "ranked" && (
       <div className="grid"
            style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
         {/* Each card links with the query, mode and score that put it here.
             `items` accumulates every page loaded so far, so the array index is
             already the rank within the whole result set: the first card on
             page 3 is rank 121, not rank 1. */}
-        {items.map((s, i) => (
-          <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
-                     query={query} mode={mode} rank={i + 1}
-                     selected={picked.has(s.id)}
-                     onToggleSelect={togglePick} getDragIds={getDragIds}
-                     onLike={(id) => editRef(id, "like", true)}
-                     onExclude={(id) => editRef(id, "unlike", true)} />
-        ))}
+        {items.map((s, i) => {
+          const card = (
+            <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
+                       query={query} mode={mode} rank={i + 1}
+                       selected={picked.has(s.id)}
+                       onToggleSelect={togglePick} getDragIds={getDragIds}
+                       onLike={(id) => editRef(id, "like", true)}
+                       onExclude={(id) => editRef(id, "unlike", true)} />
+          );
+          // Below the line: greyed in place, never moved and never removed.
+          // Rank order is the answer the ranking gave, so dimming must not
+          // rewrite it. The one-cell `grid dim` wrapper is what carries the
+          // existing similarity-floor dim rule (`.grid.dim .card`, which also
+          // restores full opacity on hover) down to a single card without
+          // touching its column: an auto-fill track is by construction under
+          // two frames wide, so the nested grid resolves to exactly one column.
+          if (!showDist || typeof s.score !== "number" || s.score >= dimLine) return card;
+          return <div className="grid dim" key={s.id}>{card}</div>;
+        })}
       </div>
+      )}
 
-      {loading && <div className="loading">Loading…</div>}
-      {!loading && items.length === 0 && (
+      {loading && view === "ranked" && <div className="loading">Loading…</div>}
+      {!loading && view === "ranked" && items.length === 0 && (
         <div className="empty">
           No samples found.
           {missing.length > 0
@@ -1000,7 +1054,7 @@ export default function GalleryPage() {
 
       {/* Paging stops where the fusion stopped ranking. Saying so beats a
           "Load more" button that silently disappears with matches left over. */}
-      {!hasMore && query && meta.depthReached && (
+      {!hasMore && query && meta.depthReached && view === "ranked" && (
         <div className="meta-line" style={{ textAlign: "center", marginTop: 18 }}>
           End of the ranked results — this query ranked its top{" "}
           {meta.depthLimit?.toLocaleString()}. More images match; narrow the query
@@ -1008,7 +1062,7 @@ export default function GalleryPage() {
         </div>
       )}
 
-      {hasMore && (
+      {hasMore && view === "ranked" && (
         <div className="load-more">
           <button className="primary" onClick={() => setParams({ page: String(page + 1) })}
                   disabled={loading}>
