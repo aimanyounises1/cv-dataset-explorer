@@ -449,7 +449,14 @@
    treatment rather than inventing a second card style. */
 /* Collapsed-when-empty: the summary must look and behave like the sibling
    panels (id list, difficulty axes), which are also <details>. */
-.saved-views > summary { cursor: pointer; list-style: revert; display: flex; align-items: center; gap: 8px; }
+.saved-views > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.saved-views > summary::-webkit-details-marker { display: none; }
+.saved-views > summary::before {
+  content: "\203a"; display: inline-block; flex-shrink: 0;
+  color: var(--text-faint); font-size: 13.5px; line-height: 1;
+  transition: transform var(--t-quick);
+}
+.saved-views[open] > summary::before { transform: rotate(90deg); color: var(--accent); }
 .saved-views > summary:hover { color: var(--text-dim); }
 .saved-views-count {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;

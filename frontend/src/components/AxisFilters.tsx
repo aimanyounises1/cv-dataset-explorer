@@ -46,11 +46,15 @@ export default function AxisFilters({ value, onChange }: Props) {
   };
 
   return (
-    <details className="axis-panel" open={active.length > 0}>
-      <summary>
+    <div className="axis-panel">
+      {/* No disclosure, deliberately: FilterPanel's header comment promises the
+          axes are "no longer behind a disclosure" — this wrapper was the last
+          place still breaking that promise, rendering the app's headline
+          feature as a dead label on every fresh load. */}
+      <div className="axis-panel-title">
         Difficulty axes
         {active.length > 0 && <span className="axis-count">{active.length}</span>}
-      </summary>
+      </div>
       <div className="axis-rows">
         {AXES.map((axis) => {
           const [lo, hi] = value[axis] ?? [null, null];
@@ -93,6 +97,6 @@ export default function AxisFilters({ value, onChange }: Props) {
         about 70% of these 8,000 images” — not an absolute measurement, and not
         comparable to another dataset.
       </p>
-    </details>
+    </div>
   );
 }
