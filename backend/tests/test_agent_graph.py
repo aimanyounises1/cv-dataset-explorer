@@ -327,7 +327,7 @@ def test_every_declared_kind_has_a_model():
         for m in (blocks.BarBlock, blocks.LineBlock, blocks.PieBlock,
                   blocks.HistogramBlock, blocks.TableBlock, blocks.StatBlock,
                   blocks.FlowBlock, blocks.ImagesBlock, blocks.ReportBlock,
-                  blocks.QABlock)}
+                  blocks.QABlock, blocks.TagProposalBlock)}
 
 
 def test_block_requires_a_source():
@@ -476,3 +476,40 @@ def test_markdown_escapes_pipes_in_captions():
                          [{"c": "a dog | a cat"}])
     md = report_to_markdown(block.model_dump(mode="json"))
     assert r"a dog \| a cat" in md
+
+
+def test_tag_samples_proposes_and_never_writes():
+    """The assistant's one mutating tool is now an approval gate: it returns a
+    tag_proposal block for existing ids and leaves sample_tags untouched."""
+    import json as _json
+
+    from app import db as _db
+    from app.agent.tools import tag_samples
+
+    conn = _db.connect()
+    _db.init_db(conn)
+    cur = conn.execute(
+        "INSERT INTO samples(dataset, filename, split, width, height, filesize) "
+        "VALUES ('flickr8k', 'proposal_probe.jpg', 'train', 10, 10, 1)")
+    sid = cur.lastrowid
+    conn.commit()
+    try:
+        out = _json.loads(tag_samples.func(
+            sample_ids=[sid, 999_999_999], tag="Edge-Case ",
+            reason="probe reason"))
+        assert out["proposed"] is True and out["candidates"] == 1
+        block = out["blocks"][0]
+        assert block["kind"] == "tag_proposal" and block["tag"] == "edge-case"
+        assert block["sample_ids"] == [sid]
+        assert 999_999_999 in block["missing"]
+        assert "approve" in out["next"]
+        rows = conn.execute(
+            "SELECT COUNT(*) FROM sample_tags WHERE sample_id = ?", (sid,)).fetchone()[0]
+        assert rows == 0, "a proposal must write nothing"
+        # the block survives the union validation the chat boundary applies
+        from app.api.chat import _validated_blocks
+        assert _validated_blocks([block])[0]["kind"] == "tag_proposal"
+    finally:
+        conn.execute("DELETE FROM samples WHERE id = ?", (sid,))
+        conn.commit()
+        conn.close()
