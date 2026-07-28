@@ -278,6 +278,40 @@ body {
    title read as an empty crashed box. */
 .rail-library .saved-views { background: none; border: none; padding: 0 6px; margin-bottom: 4px; }
 
+/* ---- Hero --------------------------------------------------------------
+   The mock's front door, scaled to a working page: mint glow over warm
+   paper, one headline, four numbered doors into the product's jobs. It
+   renders only on the bare gallery and yields to any query or filter. */
+.hero {
+  display: grid; grid-template-columns: minmax(280px, 1.1fr) minmax(360px, 1fr);
+  gap: 26px; align-items: center;
+  padding: 26px 30px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 86% 10%, rgba(98, 213, 173, 0.17), transparent 31%),
+    linear-gradient(145deg, #fdfefd, #edf4ef);
+}
+.hero h1 { margin: 6px 0 8px; font-size: 30px; letter-spacing: -0.02em; line-height: 1.15; }
+.hero-sub { margin: 0; color: var(--text-dim); font-size: 13.5px; max-width: 46ch; }
+.hero-flows { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.flow-card {
+  display: flex; flex-direction: column; gap: 3px; text-align: left;
+  padding: 12px 14px; cursor: pointer;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-family: var(--font-sans); font-size: 13px; text-decoration: none;
+  transition: border-color var(--t-quick), transform var(--t-quick) var(--ease);
+}
+.flow-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.flow-no {
+  align-self: flex-start; padding: 1px 7px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-deep);
+  font-family: var(--font-mono); font-size: 10.5px;
+}
+.flow-name { font-weight: 650; }
+.flow-hint { color: var(--text-faint); font-size: 12px; }
+@media (max-width: 1100px) { .hero { grid-template-columns: 1fr; } }
+
 /* ---- Card hover details ------------------------------------------------
    The images lead; the diagnostics wait. The strips live in an overlay that
    paints on hover or keyboard focus — still in the DOM for tests and
