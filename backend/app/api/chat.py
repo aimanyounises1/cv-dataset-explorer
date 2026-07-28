@@ -181,7 +181,7 @@ def chat(
     _check_ollama()
     graph = _get_graph()
 
-    from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+    from langchain_core.messages import AIMessage, HumanMessage
 
     lc_messages = [
         HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
