@@ -1054,10 +1054,86 @@ mark {
 }
 .selection-bar input:focus { border-color: var(--accent); }
 
-/* Assistant */
-.chat-page { display: flex; flex-direction: column; height: calc(100vh - 112px); }
+/* Assistant. Past conversations live in a left register column, styled like
+   the library rail because that is what it is: navigation between work
+   products, not content. Sage marks the open one — opening a conversation is
+   a person's act; indigo stays reserved for the agents' voice inside the
+   transcript. */
+.chat-page { display: flex; gap: 20px; height: calc(100vh - 112px); }
+.chat-sessions {
+  flex: none; width: 218px; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); padding-right: 16px;
+  overflow-y: auto;
+}
+.chat-sessions-new { align-self: stretch; margin-bottom: 10px; }
+.chat-sessions-none {
+  font-size: 11.5px; color: var(--text-faint); line-height: 1.5; margin: 4px 2px;
+}
+.chat-session-list { list-style: none; margin: 0; padding: 0; }
+.chat-session {
+  display: flex; align-items: center; gap: 2px; margin-bottom: 1px;
+  border-radius: var(--radius-sm);
+}
+.chat-session:hover { background: var(--bg-hover); }
+/* The same "you are here" grammar as .rail-link.active: sage pill, left edge. */
+.chat-session.active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.chat-session-open {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;
+  padding: 6px 4px 6px 10px; border: none; background: none; cursor: pointer;
+  text-align: left; color: var(--text-dim); font: inherit;
+  border-radius: var(--radius-sm);
+}
+.chat-session-open:disabled { cursor: default; }
+.chat-session.active .chat-session-open { color: var(--accent-deep); font-weight: 600; }
+.chat-session-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px;
+}
+.chat-session-when { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
+/* Rename/delete surface on hover or keyboard focus; opacity only, so nothing
+   shifts. The reduced-motion contract at the end flattens the fade. */
+.chat-session-acts {
+  display: flex; align-items: center; gap: 1px; padding-right: 4px;
+  opacity: 0; transition: opacity var(--t-quick);
+}
+.chat-session:hover .chat-session-acts,
+.chat-session:focus-within .chat-session-acts { opacity: 1; }
+.chat-session-act {
+  border: none; background: none; cursor: pointer; color: var(--text-faint);
+  font-size: 12px; padding: 3px 5px; border-radius: var(--radius-sm);
+}
+.chat-session-act:hover:not(:disabled) { color: var(--text); background: var(--bg-inset); }
+.chat-session-act:disabled { opacity: 0.4; cursor: default; }
+/* Deleting takes two clicks: the ×, then the same spot reading "Delete?" —
+   an in-place confirm instead of a modal interrupting the page. */
+.chat-session-act.danger { color: var(--red); font-size: 11px; white-space: nowrap; }
+.chat-session-act.danger:hover { color: var(--red); background: var(--red-soft); }
+.chat-session-rename {
+  flex: 1; min-width: 0; margin: 2px; padding: 4px 8px;
+  border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  background: var(--bg-raised); color: var(--text); font-size: 12.5px;
+  outline: none; font-family: var(--font-sans);
+}
+.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .chat-scroll { flex: 1; overflow-y: auto; padding-bottom: 12px; }
 .chat-empty { padding-top: 22px; }
+/* The landing when past conversations exist and none is open: the register
+   leads, the empty canvas does not. */
+.chat-resume-list { display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
+.chat-resume {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); cursor: pointer; font: inherit; color: var(--text-dim);
+  text-align: left; transition: border-color var(--t-quick), color var(--t-quick);
+}
+.chat-resume:hover { color: var(--accent-deep); border-color: var(--accent); }
+.chat-resume-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-resume-when {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); flex: none;
+}
+@media (max-width: 900px) { .chat-sessions { width: 168px; } }
 .chat-turn { display: flex; margin-bottom: 13px; }
 .chat-turn.user { justify-content: flex-end; }
 .chat-bubble {
@@ -1206,6 +1282,132 @@ a.tag:hover { filter: brightness(1.15); }
 }
 .grid.dim .card { opacity: 0.45; transition: opacity var(--t-quick); }
 .grid.dim .card:hover { opacity: 1; }
+
+/* ---- Rail footer: model provenance + history --------------------------
+   The tool's word on what is doing the thinking, in the register of the
+   corpus count beside it: status is furniture until it is bad news, and bad
+   news arrives as amber plus a folded "why" — never as layout. Sage stays
+   the interactive accent; nothing here speaks in the agents' indigo. */
+.rail-history-btn {
+  align-self: flex-start;
+  padding: 3px 10px; margin-top: 2px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-raised); color: var(--text-dim);
+  font-family: var(--font-sans); font-size: 11.5px; cursor: pointer;
+  transition: color var(--t-quick), border-color var(--t-quick);
+}
+.rail-history-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.models-card {
+  margin-top: 8px; padding: 9px 10px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.models-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.models-role {
+  /* Wide enough for ENRICHMENT, the longest role, at this size — a narrower
+     column runs the label into the value. */
+  width: 78px; flex-shrink: 0;
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  font-weight: 600; color: var(--text-faint);
+}
+.models-name {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim);
+}
+.models-state { flex-shrink: 0; font-size: 10px; color: var(--text-faint); }
+.models-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.models-dot.ok { background: var(--green); }
+.models-dot.warn { background: var(--amber); }
+.models-chip {
+  flex-shrink: 0; padding: 0 6px; border-radius: 999px;
+  font-family: var(--font-mono); font-size: 9.5px; line-height: 1.7;
+  background: var(--amber-soft); color: var(--amber);
+  border: 1px solid rgba(154, 101, 18, 0.35);
+}
+/* The reason indents under its row's value column, so cause sits with the
+   thing it explains. */
+.models-why { margin: -2px 0 0 84px; }
+.models-why > summary {
+  display: inline; cursor: pointer; list-style: none;
+  font-size: 10px; color: var(--text-faint);
+  text-decoration: underline dotted;
+}
+.models-why > summary::-webkit-details-marker { display: none; }
+.models-why > p {
+  margin: 2px 0 0; font-size: 10.5px; line-height: 1.45; color: var(--text-dim);
+}
+.models-foot {
+  margin: 4px 0 0; font-size: 10px; line-height: 1.5; color: var(--text-faint);
+}
+
+/* Collapsed strip: the card folds to one dot in a keycap — degraded
+   retrieval must never be one of the things collapsing hides. */
+.rail-models-key {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 24px; margin: 6px auto 0; flex-shrink: 0;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-inset); cursor: pointer;
+  transition: border-color var(--t-quick);
+}
+.rail-models-key:hover { border-color: var(--border-strong); }
+@media (max-width: 1100px) { .rail-models-key { display: none; } }
+
+/* ---- History drawer ---------------------------------------------------
+   The activity trail as a glance: fixed on the right, paper on a dimmed
+   canvas, dismissed by Escape or the backdrop. Sage marks the rows that
+   travel (a stored query string); the rest are the record only. */
+.hist-backdrop {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(23, 35, 30, 0.28);
+}
+.hist-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 71;
+  width: 360px; max-width: calc(100vw - 40px);
+  display: flex; flex-direction: column;
+  background: var(--bg-raised); border-left: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  animation: hist-in var(--t-move) var(--ease);
+}
+@keyframes hist-in { from { transform: translateX(14px); opacity: 0; } }
+.hist-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.hist-close {
+  border: none; background: none; cursor: pointer; padding: 2px 6px;
+  font-size: 16px; line-height: 1; color: var(--text-faint);
+}
+.hist-close:hover { color: var(--text); }
+.hist-list { flex: 1; overflow-y: auto; padding: 8px 10px 20px; }
+.hist-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  padding: 7px 8px; border: none; background: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans); font-size: 12.5px; color: var(--text-dim);
+  text-align: left;
+}
+.hist-row.link { cursor: pointer; transition: background var(--t-quick), color var(--t-quick); }
+.hist-row.link:hover { background: var(--bg-hover); }
+.hist-row.link .hist-summary { color: var(--accent); }
+.hist-row.link:hover .hist-summary { color: var(--accent-deep); }
+.hist-kind {
+  flex-shrink: 0; width: 92px;
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em;
+  font-weight: 600; color: var(--text-faint);
+}
+.hist-summary {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hist-time {
+  flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 10px;
+  font-variant-numeric: tabular-nums; color: var(--text-faint);
+}
+.hist-empty { padding: 10px 8px; font-size: 12.5px; color: var(--text-faint); }
 
 /* ---- Reduced motion ---------------------------------------------------
    The tokens above are preferences, this is a contract: when the OS asks for
