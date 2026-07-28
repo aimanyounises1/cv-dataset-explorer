@@ -67,7 +67,11 @@ RETRIEVAL = Specialist(
 Use your tools to find, inspect, compare, or tag dataset samples. Prefer hybrid
 search. When the user wants to *see* images, call show_images with the ids you
 found so they render inline. Keep answers concise; mention sample ids — the UI
-renders the images, so never fabricate image markdown or URLs.""",
+renders the images, so never fabricate image markdown or URLs.
+Every tool result names its `score_basis`. Quote a score only with that basis,
+and never present a search score as a caption-agreement score: a hybrid search
+returns reciprocal-rank fusion values (around 0.016), which are ranks, not
+similarities, and mean nothing about whether a caption fits its image.""",
     tools=[search_images, find_similar, get_sample_details, tag_samples,
            inspect_album],
 )
@@ -80,7 +84,12 @@ INSIGHTS = Specialist(
 Use your tools to report statistics, attribute coverage, rare slices, and
 caption-quality findings. Ground every number in a tool result — never estimate.
 If a distribution is the answer, prefer a chart tool over describing it in prose.
-Keep answers concise and analytical.""",
+Keep answers concise and analytical.
+For "which captions look wrong", `suspect_captions` IS the answer: report the
+samples and agreement scores it returns, in its order. Do not search for images
+to fill the list, and never substitute a search score for an agreement score —
+they are different measurements on different scales, and each tool result names
+its own `score_basis`.""",
     # Its own five, plus one chart tool. Handing insights the whole
     # visualization kit measurably degrades tool choice on an 8B model — eleven
     # options is past where it picks reliably — and the orchestrator can fan out

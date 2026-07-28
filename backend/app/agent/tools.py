@@ -10,11 +10,40 @@ from langchain_core.tools import tool
 
 from .. import db
 
+# What a score MEANS, in one clause, keyed by the basis the service reports.
+# A number without its basis is not a measurement: cosine and reciprocal-rank
+# fusion share no range and no interpretation, so a tool that hands back a bare
+# `score` invites exactly the mistake of comparing them or averaging them.
+_BASIS_MEANING = {
+    "cosine": "cosine similarity between embeddings, 0-1, higher is more similar",
+    "cosine_adj": ("cosine similarity with the query-bank hubness penalty applied, "
+                   "0-1, higher is more similar"),
+    "rrf": ("reciprocal-rank fusion of the semantic and keyword rankings — a rank "
+            "score, NOT a similarity; small values are normal and it cannot be "
+            "compared with a cosine"),
+    "bm25": "BM25 relevance over caption text; not comparable with a cosine",
+    "composed": ("composed similarity against the reference image(s) and text, "
+                 "0-1 unless an exclusion pushes it negative"),
+    "image_caption_agreement": ("SigLIP cosine between this caption and its OWN "
+                                "image, 0-1 — low means the caption is not "
+                                "supported by the picture"),
+}
 
-def _cards(items) -> list[dict]:
+
+def _cards(items, basis: str | None = None) -> list[dict]:
+    """Cards for the model, with each score keyed by the basis that produced it.
+
+    The key carries the basis because a top-level `score_basis` sits too far from
+    the number to survive being read: an 8B model asked for "the worst captions"
+    was observed lifting `score: 0.0142857` out of a hybrid search — a
+    reciprocal rank, 1/(60+rank) — and presenting it as an image-caption
+    agreement score. `score_rrf` is much harder to copy into a column headed
+    "agreement", and if it happens the field name shows the error to the reader.
+    """
+    key = f"score_{basis}" if basis else "score"
     return [
         {"sample_id": it.id, "caption": it.match_caption or it.caption,
-         "split": it.split, "score": it.score}
+         "split": it.split, key: it.score}
         for it in items
     ]
 
@@ -29,9 +58,17 @@ def search_images(query: str, mode: str = "hybrid", top_k: int = 8) -> str:
     conn = db.connect()
     try:
         res = run_search(conn, query, mode=mode, top_k=min(top_k, 20))
+        # The basis travels with the scores it explains. Without it a reader —
+        # model or human — sees a bare number and has to guess whether 0.31 is a
+        # cosine or a reciprocal-rank fusion score, which are not comparable and
+        # do not share a range. `mode_used` is not a substitute: it names the
+        # strategy, not the arithmetic that produced the figure.
         return json.dumps({
             "mode_used": res.mode_used, "degraded": res.degraded,
-            "results": _cards(res.items),
+            "score_basis": res.score_basis,
+            "score_meaning": _BASIS_MEANING.get(
+                res.score_basis or "", "see score_basis"),
+            "results": _cards(res.items, res.score_basis),
             "sample_ids": [it.id for it in res.items],
         })
     finally:
@@ -52,6 +89,8 @@ def find_similar(sample_id: int, top_k: int = 8) -> str:
     try:
         caps = first_captions(conn, [sid for sid, _ in results])
         return json.dumps({
+            "score_basis": "cosine",
+            "score_meaning": _BASIS_MEANING["cosine"],
             "results": [{"sample_id": sid, "score": round(s, 4),
                          "caption": caps.get(sid)} for sid, s in results],
             "sample_ids": [sid for sid, _ in results],
@@ -165,6 +204,8 @@ def suspect_captions(limit: int = 8) -> str:
         if not rows:
             return json.dumps({"error": "QA scores not computed — run `python -m app.analyze`"})
         return json.dumps({
+            "score_basis": "image_caption_agreement",
+            "score_meaning": _BASIS_MEANING["image_caption_agreement"],
             "results": [{"sample_id": r["sample_id"], "caption": r["text"],
                          "agreement": round(r["agreement"], 4)} for r in rows],
             "sample_ids": [r["sample_id"] for r in rows],

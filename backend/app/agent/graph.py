@@ -29,18 +29,19 @@ All models run locally through Ollama. The deterministic search stack stays the
 platform's retrieval engine — agents are consumers of the same service functions
 the REST API uses, not a replacement for them.
 """
-import json
 import logging
 import operator
 import re
 import threading
 import time
-from typing import Annotated, Any
+from collections.abc import Sequence
+from typing import Annotated, Any, Literal, Optional
 
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel, Field, create_model
 
 from .. import config
 from . import registry
@@ -58,11 +59,19 @@ should handle the user's latest request:
 {registry.routing_menu()}
 
 Usually one specialist is right. Choose two only when the request genuinely has \
-two halves (for example "how are captions distributed and show me the worst \
-ones"). Never choose more than {registry.MAX_PARALLEL_LANES}.
+two halves needing DIFFERENT tools (for example "chart the split sizes and show \
+me examples from the smallest split"). Never choose more than \
+{registry.MAX_PARALLEL_LANES}.
 
-Reply with ONLY a JSON object:
-{{"routes": ["<specialist>"], "brief": "<one-line instruction for them>"}}"""
+ONE MEASUREMENT, ONE LANE. When the request asks about a measured quantity — \
+caption agreement, coverage, statistics, difficulty — route it to the single \
+specialist that owns that measurement, and do NOT add a second lane even if the \
+request also says "show me" or "give me the worst ones". A second lane answers \
+with its own scores on a different scale, and two sets of numbers about the same \
+question cannot be combined into one honest answer.
+
+Answer with the routing decision itself — the reply is schema-constrained, so \
+name the specialist(s) and give them one line of instruction."""
 
 
 SYNTHESIZER_PROMPT = """You are the quality gate and final voice of a dataset \
@@ -78,7 +87,21 @@ finding is Y" — then stop. Ground every claim in a tool result, mention sample
 ids rather than inventing links, and never end by offering further options: \
 answer the question that was asked.
 - If NO (wrong direction, missing the point, tool errors went unaddressed): \
-reply with exactly `RETRY: <one-line feedback on what to do differently>`."""
+reply with exactly `RETRY: <one-line feedback on what to do differently>`.
+
+NUMBERS. Tool results carry a `score_basis` with a `score_meaning` beside it. \
+Quote a score only together with the basis that produced it — "0.31 (rrf)", \
+"0.87 cosine", "agreement 0.09". NEVER merge, average, rank across or relabel \
+numbers that came from different lanes or different bases: a reciprocal-rank \
+fusion score and a cosine share no scale, and an image-caption agreement \
+measures a different thing from either. If two lanes report figures, keep them \
+in separate sentences with their own bases.
+
+When the user asks HOW MANY, or for a count, size, split or any other figure, \
+the answer must BE those figures, restated from the tool result — not a \
+description of what the tool can do and not a statement that the capability is \
+available. If the number is genuinely absent from every tool result, say that \
+plainly instead of substituting capability status for it."""
 
 
 class AgentState(MessagesState):
@@ -120,56 +143,84 @@ def _model() -> ChatOllama:
     # The request timeout is the outer bound on a single model call. Without it a
     # stalled Ollama pins the lane until the lane timeout fires, which is a much
     # blunter instrument.
+    # num_ctx is pinned rather than left to each model's default. Ollama sizes
+    # the KV cache from the context length, so an unpinned model can reserve a
+    # multiple of its own weights: qwen3:30b-a3b defaulted to a 262,144-token
+    # window and 44 GB resident, against 40,960 and 11 GB for qwen3:8b. That is
+    # not a comparison, and on a laptop it is not a safe default either.
     return ChatOllama(model=config.CHAT_MODEL, base_url=config.OLLAMA_URL,
-                      temperature=0.1,
+                      temperature=0.1, num_ctx=config.OLLAMA_NUM_CTX,
                       client_kwargs={"timeout": config.OLLAMA_TIMEOUT})
 
 
-def _parse_routes(text: str) -> tuple[list[str], str]:
-    """Extract routes + brief from the orchestrator's reply.
+def route_schema() -> type[BaseModel]:
+    """The router's output contract, built from the registry.
 
-    A 8-billion-parameter local model wraps JSON in prose, emits `route` instead
-    of `routes`, or names a specialist that does not exist. Each of those is
-    normal, so each is handled rather than raised: an unroutable reply falls back
-    to retrieval, which is the safe default because it is read-only and cheap.
+    The specialist names become a real enum in the JSON schema the model is
+    constrained to, so "which lanes exist" is stated once — a new specialist is
+    routable, and enumerable, the moment it is registered. Structured output
+    replaces parsing a name out of prose: the model is held to this shape by
+    Ollama's schema-constrained decoding rather than asked politely for JSON.
+
+    One lane is the SHAPE of the answer, not a list with a cap: a `list` field
+    invites filling, and measurably did. Asked for `routes: list[lane]`, qwen3:8b
+    chose two lanes for a caption-quality question in 3 runs of 3 — sending a
+    retrieval lane to fetch search scores for a question about agreement scores,
+    which is exactly how a reciprocal rank ends up printed as an agreement. The
+    same model given `route` plus an optional `also` picks one, because one is
+    what the type asks for and a second becomes a deliberate act.
+    """
+    lanes = Literal[tuple(registry.by_name()) + ("direct",)]   # type: ignore[valid-type]
+    return create_model(
+        "Route",
+        __doc__=("Which specialist should handle the user's latest request, and "
+                 "the one-line instruction they should act on."),
+        route=(lanes, Field(description="The ONE specialist that should handle "
+                                        "this request.")),
+        also=(Optional[lanes],                             # noqa: UP045
+              Field(default=None,
+                    description="A second specialist ONLY when the request has "
+                                "two halves needing different tools. Null "
+                                "otherwise — one specialist is the normal case, "
+                                "and two specialists reporting numbers about the "
+                                "same question cannot be combined.")),
+        brief=(str, Field(default="", description="One line telling the "
+                                                  "specialist what to do.")),
+    )
+
+
+def normalise_routes(routes: Sequence[str], brief: str = "") -> tuple[list[str], str]:
+    """Apply the routing rules the schema cannot express.
+
+    Validation guarantees the SHAPE (known names, at least one, at most the cap);
+    these are the domain rules on top of it, kept pure so they can be tested
+    without a model. An empty or unusable selection falls back to retrieval,
+    which is the safe default because it is read-only and cheap.
     """
     known = registry.by_name()
-    try:
-        data = json.loads(text[text.index("{"): text.rindex("}") + 1])
-    except (ValueError, IndexError):
-        logger.warning("Orchestrator returned non-JSON; defaulting to retrieval.")
-        return ["retrieval"], ""
-
-    raw = data.get("routes", data.get("route", []))
-    if isinstance(raw, str):
-        raw = [raw]
-    routes, seen = [], set()
-    for r in raw:
-        r = str(r).strip().lower()
-        if r in seen:
+    seen: set[str] = set()
+    picked: list[str] = []
+    for r in routes:
+        name = str(r).strip().lower()
+        if name in seen or (name not in known and name != "direct"):
             continue
-        seen.add(r)
-        if r in known or r == "direct":
-            routes.append(r)
+        seen.add(name)
+        picked.append(name)
 
-    if not routes:
-        logger.warning("Orchestrator named no known specialist (%r); using retrieval.",
-                       raw)
-        return ["retrieval"], str(data.get("brief", ""))
+    if not picked:
+        logger.warning("Router named no known specialist (%r); using retrieval.", routes)
+        return ["retrieval"], brief
 
     # "direct" means no specialist is needed, so it cannot be combined with one.
-    if "direct" in routes:
-        routes = ["direct"] if len(routes) == 1 else [r for r in routes if r != "direct"]
+    if "direct" in picked:
+        picked = ["direct"] if len(picked) == 1 else [r for r in picked if r != "direct"]
 
     # An expensive lane runs alone. Booting a browser as a side effect of a
     # question about captions is not a trade the user agreed to.
-    expensive = [r for r in routes if r in known and known[r].cost == "expensive"]
+    expensive = [r for r in picked if r in known and known[r].cost == "expensive"]
     if expensive:
-        routes = expensive[:1]
-    else:
-        routes = routes[:registry.MAX_PARALLEL_LANES]
-
-    return routes, str(data.get("brief", ""))
+        return expensive[:1], brief
+    return picked[:registry.MAX_PARALLEL_LANES], brief
 
 
 def build_graph(model=None, specialists=None):
@@ -188,14 +239,22 @@ def build_graph(model=None, specialists=None):
         for s in specialists
     }
 
+    router = model.with_structured_output(route_schema())
+
     def orchestrate(state: AgentState):
         try:
-            reply = model.invoke([SystemMessage(orchestrator_prompt())] + state["messages"])
-            routes, brief = _parse_routes(reply.content or "")
+            # Schema-constrained decoding, not prose parsed for a name: the model
+            # can only answer with lanes that exist, and validation — not a
+            # substring search — is what decides the reply was usable.
+            decision = router.invoke(
+                [SystemMessage(orchestrator_prompt())] + state["messages"])
+            picked = [decision.route] + ([decision.also] if decision.also else [])
+            routes, brief = normalise_routes(picked, decision.brief)
         except Exception as exc:
-            # The orchestrator itself failing must not end the turn: retrieval is
-            # read-only and answers most requests acceptably.
-            logger.warning("Orchestrator call failed (%s); defaulting to retrieval.", exc)
+            # Structured output can still fail — a model that ignores the schema,
+            # a validation error, an Ollama hiccup. None of those may end the
+            # turn: retrieval is read-only and answers most requests acceptably.
+            logger.warning("Routing failed (%s); defaulting to retrieval.", exc)
             routes, brief = ["retrieval"], ""
 
         msgs = []
