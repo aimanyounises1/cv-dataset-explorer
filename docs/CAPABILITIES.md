@@ -9,7 +9,7 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 52 HTTP endpoints · 4 agent specialists · 18 agent tools · 17 tested workflows
+- 56 HTTP endpoints · 4 agent specialists · 20 agent tools · 17 tested workflows
 
 ## Views
 
@@ -47,9 +47,12 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 
 | Endpoint | |
 | --- | --- |
+| `POST /api/detect` | Detect Regions |
+| `GET /api/detect/status` | Detect Status |
 | `GET /api/search` | Search |
 | `POST /api/search` | Search Post |
 | `POST /api/search/by-image` | Search By Image |
+| `POST /api/search/by-region` | Search By Region |
 | `POST /api/search/composed` | Search Composed |
 | `POST /api/search/scenarios` | Search Scenarios |
 
@@ -58,6 +61,7 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | Endpoint | |
 | --- | --- |
 | `GET /api/attributes/coverage` | Coverage |
+| `GET /api/describe` | Describe Set |
 | `GET /api/map` | Embedding Map |
 | `GET /api/stats/captions` | Caption Stats |
 | `GET /api/stats/duplicates` | Duplicates |
@@ -83,6 +87,23 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 
 | Endpoint | |
 | --- | --- |
+| `DELETE /api/activity` | Clear Activity |
+| `GET /api/activity` | List Activity |
+| `POST /api/activity` | Add Activity |
+| `DELETE /api/activity/{event_id}` | Delete Activity |
+| `GET /api/albums` | List Albums |
+| `POST /api/albums` | Create Album |
+| `POST /api/albums/from-tag` | Album From Tag |
+| `PUT /api/albums/order` | Reorder Albums |
+| `DELETE /api/albums/{album_id}` | Delete Album |
+| `GET /api/albums/{album_id}` | Get Album |
+| `PATCH /api/albums/{album_id}` | Update Album |
+| `GET /api/albums/{album_id}/analysis` | Album Analysis |
+| `POST /api/albums/{album_id}/analysis/summary` | Album Summary Generate |
+| `POST /api/albums/{album_id}/items` | Add Items |
+| `PUT /api/albums/{album_id}/items/order` | Reorder Items |
+| `DELETE /api/albums/{album_id}/items/{sample_id}` | Remove Item |
+| `DELETE /api/annotations/{annotation_id}` | Delete Annotation |
 | `GET /api/tags` | List Tags |
 | `POST /api/tags/bulk` | Bulk Tag |
 | `GET /api/views` | List Views |
@@ -97,7 +118,15 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `GET /api/agent/graph` | Agent Topology |
 | `POST /api/chat` | Chat |
 | `GET /api/chat/status` | Chat Status |
+| `POST /api/chat/stream` | Chat Stream |
 | `GET /api/reports/{name}` | Download Report |
+
+### Other agents (MCP)
+
+| Endpoint | |
+| --- | --- |
+| `GET /mcp` | Mcp Info |
+| `POST /mcp` | Mcp Endpoint |
 
 ### Application self-QA
 
@@ -117,31 +146,6 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `POST /api/admin/reload` | Reload Indexes |
 | `GET /api/health` | Health |
 
-### Ungrouped
-
-| Endpoint | |
-| --- | --- |
-| `DELETE /api/activity` | |
-| `GET /api/activity` | |
-| `POST /api/activity` | |
-| `DELETE /api/activity/{event_id}` | |
-| `GET /api/albums` | |
-| `POST /api/albums` | |
-| `POST /api/albums/from-tag` | |
-| `PUT /api/albums/order` | |
-| `DELETE /api/albums/{album_id}` | |
-| `GET /api/albums/{album_id}` | |
-| `PATCH /api/albums/{album_id}` | |
-| `GET /api/albums/{album_id}/analysis` | |
-| `POST /api/albums/{album_id}/analysis/summary` | |
-| `POST /api/albums/{album_id}/items` | |
-| `PUT /api/albums/{album_id}/items/order` | |
-| `DELETE /api/albums/{album_id}/items/{sample_id}` | |
-| `DELETE /api/annotations/{annotation_id}` | |
-| `GET /api/describe` | |
-| `GET /mcp` | |
-| `POST /mcp` | |
-
 ## Assistant
 
 Model `qwen3:8b` via local Ollama. The orchestrator selects up to
@@ -156,6 +160,7 @@ Finding or showing images: search, similar images, inspecting or tagging specifi
 - `find_similar`
 - `get_sample_details`
 - `tag_samples`
+- `inspect_album`
 
 ### `insights`
 
@@ -166,6 +171,7 @@ Dataset statistics, attribute coverage, rare or long-tail slices, caption qualit
 - `rare_slice_examples`
 - `suspect_captions`
 - `get_sample_details`
+- `inspect_album`
 - `plot_distribution`
 
 ### `visualization`

@@ -42,7 +42,22 @@ jobs:
       - run: pytest -q
       # The docs/CAPABILITIES.md contract: fails when the documented surface
       # drifts from the actual routers. README cites this check by name.
-      - run: python ../scripts/capabilities.py --check
+      # It reads the LIVE surface — openapi.json, the agent graph, the flow
+      # registry — so the app has to be serving; uvicorn is installed above for
+      # exactly this. Start and check in one step: a background process does
+      # not reliably survive into the next one.
+      - name: capabilities contract (against the running app)
+        run: |
+          python -m uvicorn app.main:app --port 8000 --log-level warning &
+          api=$!
+          for _ in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8000/api/health >/dev/null && break
+            sleep 1
+          done
+          status=0
+          python ../scripts/capabilities.py --check || status=$?
+          kill "$api" 2>/dev/null || true
+          exit $status
 
   frontend:
     name: frontend (tsc + build)
