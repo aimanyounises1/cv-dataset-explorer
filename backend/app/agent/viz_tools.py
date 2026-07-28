@@ -461,8 +461,8 @@ def system_diagram() -> str:
     # The diagram names the ACTIVE retrieval provider — a hard-coded model
     # name here would credit the wrong model the moment the provider flips.
     pstate = providers.resolve()
-    prov_short = {"qwen3_vl": "Qwen3-VL", "siglip2": "SigLIP 2",
-                  "mock": "mock"}.get(pstate.active or "", "no embedder")
+    prov_short = {"qwen3_vl": "Qwen3-VL",
+                  "siglip2": "SigLIP 2"}.get(pstate.active or "", "no embedder")
     nodes = [
         {"id": "ui", "label": "React UI\ngallery · map · chat", "group": "ui"},
         {"id": "api", "label": "FastAPI\nREST + agent", "group": "api"},

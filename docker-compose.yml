@@ -32,7 +32,7 @@ services:
       - hf-cache:/opt/hf
     environment:
       CVDE_DATA_DIR: /data
-      # siglip2 | qwen3_vl | mock. The default matches the host default and is
+      # siglip2 | qwen3_vl. The default matches the host default and is
       # the provider that measures better on this corpus's own benchmark;
       # qwen3_vl additionally needs backend/requirements-qwen.txt, which this
       # image does not install (docs/DEPLOY.md says how).
