@@ -180,6 +180,7 @@ const ROUTES: { label: string; path: string; keywords: string }[] = [
   { label: "Quality", path: "/quality", keywords: "qa agreement suspect captions consistency" },
   { label: "Benchmark", path: "/eval", keywords: "eval retrieval recall mrr evaluation" },
   { label: "Assistant", path: "/chat", keywords: "chat agent llm ask" },
+  { label: "Compare", path: "/compare", keywords: "compare loupe side by side regions diff" },
 ];
 
 function shortDate(iso: string): string {

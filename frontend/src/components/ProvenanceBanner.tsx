@@ -20,6 +20,10 @@ const BASIS = new Map<string, string>([
   // the raw cosine, but the ordering is not comparable with a plain one.
   ["cosine_adj", "cosine*, hubness-ranked"],
   ["rrf", "RRF"],
+  // The blended-query score. Missing from this map once, which silently
+  // voided the WHOLE banner for composed click-throughs — an unknown basis
+  // must never erase the provenance around it.
+  ["composed", "composed"],
 ]);
 /** Only used when no basis travelled with the score, which is a link built by
  * hand or by an older build. Mode is the weakest honest guess available. */
@@ -32,12 +36,10 @@ const MODES: readonly SearchMode[] = ["hybrid", "semantic", "keyword"];
  * rather than an object literal because the key comes from a URL: `SOURCE.get`
  * cannot return `Object.prototype.constructor` where `SOURCE[src]` would. */
 const SOURCE = new Map<string, string>([
+  // The two values ImageCard actually writes. Other surfaces hand over bare
+  // links on purpose — what they are is already visible around them.
   ["search", "search"],
-  ["similar", "the similar-images grid"],
-  ["map", "the embedding map"],
-  ["quality", "the caption review queue"],
-  ["duplicates", "the near-duplicate list"],
-  ["chat", "the assistant"],
+  ["browse", "browsing"],
 ]);
 
 const TOKEN = /^[a-z][a-z0-9_-]{0,23}$/;
@@ -50,7 +52,7 @@ const MAX_TERMS = 6;
 /**
  * Why this frame is on screen, read from the URL query.
  *
- * The inspector is reached from six different places and, once reached, looked
+ * The inspector is reached from several places and, once reached, looked
  * identical from all of them: the one thing a reviewer needs to know first —
  * "this is result 4 of 60 for the query I typed" — was thrown away by the
  * navigation. This puts it back.

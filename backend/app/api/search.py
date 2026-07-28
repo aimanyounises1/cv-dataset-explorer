@@ -36,6 +36,7 @@ from ..ml.providers import get_encoder as get_embedder
 from ..schemas import (
     ComposedSearchRequest,
     MatchPath,
+    RegionSearchRequest,
     SampleCard,
     ScenarioGroup,
     ScenarioResponse,
@@ -523,16 +524,29 @@ def _composed_ranking(conn, body: ComposedSearchRequest):
         parts.append(_unit(embedder.encode_texts([normalize_query_text(body.text)])[0]))
     if pos:
         parts.append(_unit(np.mean(np.stack(pos), axis=0)))
-    qvec = _unit(np.mean(np.stack(parts), axis=0))
 
     axes = {a: (b.get("min"), b.get("max")) for a, b in (body.axes or {}).items()}
     allowed = filtered_id_set(conn, body.split, body.tag, body.vlm_tag, body.attr,
                               axes, None, False, body.max_agreement, None,
                               body.album)
-    scores = index.embeddings @ qvec
-    if neg:
+    if parts:
+        qvec = _unit(np.mean(np.stack(parts), axis=0))
+        scores = index.embeddings @ qvec
+        if neg:
+            sims = index.embeddings @ np.stack(neg).T
+            scores = scores - 0.5 * np.maximum(0.0, sims.max(axis=1))
+    else:
+        # Negative-only: nothing to steer toward, so the ranking IS the
+        # distance from the excluded examples — unclamped, or the whole far
+        # hemisphere would tie at a zero penalty and the order would be
+        # arbitrary. The excluded images themselves cannot appear in a search
+        # away from themselves.
+        qvec = None
         sims = index.embeddings @ np.stack(neg).T
-        scores = scores - 0.5 * np.maximum(0.0, sims.max(axis=1))
+        scores = -sims.max(axis=1)
+        neg_rows = [r for r in (index.row_of(s) for s in body.negative_ids)
+                    if r is not None]
+        scores[neg_rows] = -np.inf
     if allowed is not None:
         allowed_arr = np.fromiter(allowed, dtype=index.ids.dtype,
                                   count=len(allowed))
@@ -590,7 +604,92 @@ def run_composed(conn: sqlite3.Connection, body: ComposedSearchRequest) -> Searc
         items.append(card)
     return SearchResponse(items=items, mode_used="composed", score_basis="composed",
                           offset=body.offset, has_more=has_more,
-                          depth_limit=depth, depth_reached=end >= depth)
+                          depth_limit=depth, depth_reached=end >= depth,
+                          # qvec is None exactly when the query was negative-only:
+                          # say what this ranking IS, because "results for
+                          # nothing, minus X" is not guessable from the grid.
+                          message=(None if qvec is not None else
+                                   "Ranked by distance from the excluded "
+                                   "example(s) — add text or a positive "
+                                   "reference to steer toward something."))
+
+
+@router.post("/search/by-region", response_model=SearchResponse)
+def search_by_region(body: RegionSearchRequest,
+                     conn: sqlite3.Connection = Depends(get_conn)):
+    """A region of an existing sample as search evidence — positive ("more
+    like this crop", optionally blended with steering text through the same
+    composed arithmetic) or negative ("away from this crop").
+
+    The server crops the original file from the request's normalized geometry,
+    so the query is reproducible without shipping pixels. Scores carry basis
+    `composed`; the negative role ranks by distance, unclamped, and never
+    returns the source sample it was told to move away from.
+    """
+    index = get_index()
+    embedder = get_embedder()
+    if index is None or embedder is None:
+        raise HTTPException(503, "Embeddings not computed yet — run `python -m app.ingest`.")
+    row = conn.execute("SELECT filename FROM samples WHERE id = ?",
+                       (body.sample_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Sample not found")
+    path = config.IMAGES_DIR / row["filename"]
+    try:
+        img = PILImage.open(path).convert("RGB")
+    except OSError as exc:
+        raise HTTPException(503, f"Image file unreadable: {row['filename']}") from exc
+    W, H = img.size
+    box = (int(body.x * W), int(body.y * H),
+           max(int((body.x + body.w) * W), int(body.x * W) + 8),
+           max(int((body.y + body.h) * H), int(body.y * H) + 8))
+    crop_vec = _unit(embedder.encode_images([img.crop(box)])[0])
+
+    if body.role == "positive":
+        parts = [crop_vec]
+        if body.text and body.text.strip():
+            parts.append(_unit(
+                embedder.encode_texts([normalize_query_text(body.text)])[0]))
+        qvec = _unit(np.mean(np.stack(parts), axis=0))
+        scores = index.embeddings @ qvec
+        message = None
+    else:
+        qvec = None
+        scores = -(index.embeddings @ crop_vec)
+        src = index.row_of(body.sample_id)
+        if src is not None:
+            scores[src] = -np.inf
+        message = ("Ranked by distance from the marked region — add text or "
+                   "a positive reference to steer toward something.")
+
+    order = np.argsort(-scores, kind="stable")
+    ranked = [(int(index.ids[i]), float(scores[i])) for i in order
+              if np.isfinite(scores[i])]
+    depth = len(ranked)
+    end = min(body.offset + body.top_k, depth)
+    window = [sid for sid, _ in ranked[body.offset:end]]
+    if not window:
+        return SearchResponse(items=[], mode_used="composed", degraded=False,
+                              score_basis="composed", offset=body.offset,
+                              has_more=False, depth_limit=depth,
+                              depth_reached=True, message=message)
+    qmarks = ",".join("?" * len(window))
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT * FROM samples WHERE id IN ({qmarks})", window)}
+    captions = first_captions(conn, window)
+    smap = dict(ranked)
+    items = []
+    for rank0, sid in enumerate(window):
+        if sid not in rows:
+            continue
+        card = row_to_card(rows[sid], caption=captions.get(sid),
+                           score=round(smap[sid], 4))
+        card.match_paths = [MatchPath(path="composed", rank=body.offset + rank0 + 1)]
+        items.append(card)
+    return SearchResponse(items=items, mode_used="composed",
+                          score_basis="composed", offset=body.offset,
+                          has_more=end < depth, depth_limit=depth,
+                          depth_reached=end >= depth, message=message)
 
 
 @router.post("/search/composed", response_model=SearchResponse)

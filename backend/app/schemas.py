@@ -440,8 +440,41 @@ class ComposedSearchRequest(BaseModel):
 
     @model_validator(mode="after")
     def _needs_a_direction(self):
-        if not (self.text and self.text.strip()) and not self.positive_ids:
-            raise ValueError("Provide text or at least one positive example id")
+        # Negative-only is a real direction — "away from this" — and ranks by
+        # distance from the excluded examples. Only a fully empty query has
+        # nothing to rank by.
+        if (not (self.text and self.text.strip()) and not self.positive_ids
+                and not self.negative_ids):
+            raise ValueError(
+                "Provide text, a positive example id, or a negative example id")
+        return self
+
+
+class RegionSearchRequest(BaseModel):
+    """A region of an existing sample used as search evidence.
+
+    The server crops the ORIGINAL image itself — the client sends geometry,
+    never pixels — so the evidence is reproducible from the request alone.
+    Coordinates are normalized 0..1 like annotations; slivers are rejected
+    because a 3-pixel crop embeds as noise dressed up as a query.
+    """
+    sample_id: int = Field(..., ge=1, le=2**63 - 1)
+    x: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    y: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    w: float = Field(..., gt=0.0, le=1.0, allow_inf_nan=False)
+    h: float = Field(..., gt=0.0, le=1.0, allow_inf_nan=False)
+    role: Literal["positive", "negative"] = "positive"
+    text: Optional[str] = Field(None, max_length=500)
+    top_k: int = Field(24, ge=1, le=100)
+    offset: int = Field(0, ge=0, le=100_000)
+
+    @model_validator(mode="after")
+    def _fits_and_not_a_sliver(self):
+        if self.x + self.w > 1.0001 or self.y + self.h > 1.0001:
+            raise ValueError("Region extends outside the image")
+        if self.w < 0.02 or self.h < 0.02:
+            raise ValueError("Region too small to embed meaningfully "
+                             "(minimum 2% of each dimension)")
         return self
 
 

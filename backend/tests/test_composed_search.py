@@ -132,12 +132,30 @@ def test_negative_examples_push_a_concept_down(ctx):
     assert set(_ids(r)) == set(s["dog"])     # soccer repelled below every dog
 
 
-def test_requires_text_or_positive(ctx):
+def test_only_a_fully_empty_query_is_rejected(ctx):
     client, s = ctx
     assert client.post("/api/search/composed", json={}).status_code == 422
     assert client.post("/api/search/composed", json={"text": "   "}).status_code == 422
-    assert client.post("/api/search/composed",
-                       json={"negative_ids": [s["dog"][0]]}).status_code == 422
+
+
+def test_negative_only_ranks_away_from_the_example(ctx):
+    """"Away from this" is a real direction: results come back ranked by
+    distance from the excluded example, the excluded image itself never
+    appears, and the response says what the ranking means."""
+    client, s = ctx
+    neg = s["dog"][0]
+    body = client.post("/api/search/composed",
+                       json={"negative_ids": [neg]}).json()
+    assert body["mode_used"] == "composed" and body["degraded"] is False
+    assert body["score_basis"] == "composed"
+    ids = [it["id"] for it in body["items"]]
+    assert ids, "negative-only must return a ranking"
+    assert neg not in ids, "a search away from X must not return X"
+    # the other dog images sit closest to the excluded dog, so they rank last
+    other_dogs = set(s["dog"][1:])
+    tail = set(ids[-len(other_dogs):]) if other_dogs else set()
+    assert other_dogs & tail, "near-duplicates of the negative belong at the tail"
+    assert "distance from the excluded" in (body["message"] or "")
 
 
 def test_unknown_example_is_a_404_naming_it(ctx):
