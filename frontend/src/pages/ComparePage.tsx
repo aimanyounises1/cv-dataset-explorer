@@ -29,7 +29,6 @@ const STAGE_TITLE =
   "Wheel zooms toward the cursor, drag pans, double-click resets — both panes "
   + "move together. Keyboard: + / - zoom, arrow keys pan, 0 resets.";
 
-interface Caption { text: string; agreement: number | null }
 interface SampleDetail {
   id: number;
   filename: string;
@@ -38,7 +37,6 @@ interface SampleDetail {
   height: number;
   image_url: string;
   thumb_url: string;
-  captions: Caption[];
   vlm_tags: string[];
   attributes: Record<string, string>;
   cluster: number | null;
@@ -152,7 +150,7 @@ export default function ComparePage() {
     return () => { live = false; };
   }, [aId, bId]);
 
-  // The annotations API is being landed separately. Probed, not assumed: a 404
+  // The annotations API shipped. Probed, not assumed: a 404
   // disables Save (with the reason in its title) while region search keeps
   // working. Anything else leaves the button live and lets the POST speak.
   const [annApiUp, setAnnApiUp] = useState<boolean | null>(null);
