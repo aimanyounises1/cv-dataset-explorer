@@ -262,7 +262,7 @@ cd frontend && npx tsc --noEmit && npm run build
 cd backend && python ../scripts/ui_smoke.py   # real-Chrome sweep, 17 workflows
 ```
 
-The last full sweep at this commit: **106/106 checks across 17/17 workflows**
+The last full sweep at this commit: **108/108 checks across 17/17 workflows**
 (run id in `backend/data/qa/`). Re-run rather than quote — the registry grows,
 and every number above is only true of the day it was measured. CI runs the
 light install (no torch/langgraph — those modules skip), ruff, tsc, the build,
