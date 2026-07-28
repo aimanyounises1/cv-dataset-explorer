@@ -252,13 +252,38 @@ export default function GalleryPage() {
   const getDragIds = (id: number) =>
     picked.has(id) && picked.size > 0 ? [...picked] : [id];
 
-  const togglePick = (id: number) =>
+  /* Where a shift-extend measures from: the last card whose check was clicked,
+   * not the last member of the set — after a range, extending again continues
+   * from where the hand last was. */
+  const lastPickRef = useRef<number | null>(null);
+
+  const togglePick = (id: number, extend = false) => {
+    // Read the anchor BEFORE queueing the update, and move it in the same
+    // breath. A functional updater does not run at call time, so a ref written
+    // straight after `setPicked` is already the card just clicked by the time
+    // the updater reads it — `from === id`, every range collapses to a plain
+    // toggle, and the feature silently does nothing. Measured exactly that:
+    // click #0 then shift-click #20 gave 2 picked instead of 21.
+    const from = lastPickRef.current;
+    lastPickRef.current = id;
     setPicked((prev) => {
       const next = new Set(prev);
+      const order = items.map((s) => s.id);
+      const a = from == null ? -1 : order.indexOf(from);
+      const b = order.indexOf(id);
+      if (extend && a !== -1 && b !== -1 && a !== b) {
+        // A range only ever ADDS. Making it mirror the anchor's state would
+        // mean a stray shift-click could silently drop dozens of picks, and
+        // this set is now durable enough that losing it quietly is the worst
+        // thing the control could do. Un-picking stays one deliberate click.
+        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(order[i]);
+        return next;
+      }
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  };
 
   const saveAlbum = () => {
     const name = albumName.trim();

@@ -50,7 +50,7 @@ interface Props {
    * carries its own check control, and the card itself stays a plain link —
    * click, middle-click and "open in new tab" always navigate. */
   selected?: boolean;
-  onToggleSelect?: (id: number) => void;
+  onToggleSelect?: (id: number, extend?: boolean) => void;
   /** What a drag from this card carries. Defaults to just this sample; the
    * gallery passes the whole picked set when this card is part of it, so a
    * selection drags as one bundle. */
@@ -161,11 +161,16 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
                   aria-label={selected
                     ? `Remove image ${sample.id} from the picked set`
                     : `Pick image ${sample.id}`}
-                  title={selected ? "Picked — click to remove" : "Pick this image"}
+                  title={selected
+                    ? "Picked — click to remove, shift-click to pick through here"
+                    : "Pick this image — shift-click to pick everything since the last one"}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    onToggleSelect(sample.id);
+                    // Shift extends from the last pick, the way every file
+                    // manager and photo tool does it. Reaching a set of 200 by
+                    // clicking 200 checks is not a workflow anyone completes.
+                    onToggleSelect(sample.id, e.shiftKey);
                   }}>
             ✓
           </button>
