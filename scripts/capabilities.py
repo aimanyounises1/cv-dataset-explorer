@@ -228,8 +228,6 @@ def render() -> str:
       "query plans, retrieval maths, frontend, measured performance")
     w("- `docs/DESIGN.md` — retrieval design, trade-offs, and the production "
       "scale path")
-    w("- `docs/PRISM.md` — the retrieval-accuracy research programme and the "
-      "method this project proposes")
     w("- `docs/AGENTS.md` — orchestration, the render-block contract, self-QA")
     w("- `docs/DEMO.md` — an eight-minute walkthrough")
     w("- `docs/screenshots/` — one image per view")

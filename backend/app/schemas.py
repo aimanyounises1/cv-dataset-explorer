@@ -84,7 +84,7 @@ class SearchResponse(BaseModel):
     mode_used: str                      # actual mode after any fallback
     degraded: bool = False              # true if the requested ranking fell back
     message: Optional[str] = None
-    # What `score` means: cosine | cosine_adj | rrf | prism_ll | composed | None.
+    # What `score` means: cosine | cosine_adj | rrf | composed | None.
     # `composed` is a cosine minus a chosen negative-example penalty — only
     # comparable within its own response, never against any other basis.
     score_basis: Optional[str] = None
@@ -245,9 +245,9 @@ class EvalModeResult(BaseModel):
     # ranking quality if there was something to rank.
     mean_candidates: float = 0.0
     empty_query_rate: float = 0.0       # fraction of queries with no candidates
-    # Set on rows measured over a different query set than the main sample
-    # (the PRISM rows use test-split queries only). A number without its
-    # sample size and its reason invites a comparison it cannot support.
+    # Set on rows measured over a different query set than the main sample.
+    # A number without its sample size and its reason invites a comparison it
+    # cannot support.
     queries: Optional[int] = None
     note: Optional[str] = None
 

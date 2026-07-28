@@ -20,9 +20,6 @@ const SCORE_LABEL: Record<string, string> = {
   // similarity is what comes back — so it stays comparable with every other
   // `cos` in the app. Only the ordering differs, and the star is what says so.
   cosine_adj: "cos*",
-  // Not a cosine at all — a log-likelihood under the image's trained speaker
-  // model — so it gets its own label rather than borrowing one it would lie in.
-  prism_ll: "fit",
   // Spelled out, not abbreviated: a blended-query score has no everyday name,
   // and "cmp"-style shorthand would only pretend it has one.
   composed: "composed",
@@ -34,16 +31,12 @@ const SCORE_HELP: Record<string, string> = {
             + "raw cosine and is comparable with any other; the ordering is not, because "
             + "each image was scored against how close it sits to queries in general.",
   rrf: "Reciprocal-rank fusion weight — derived from ranks, not a similarity.",
-  prism_ll: "Log-likelihood of the query under this image's trained speaker model "
-          + "(PRISM, boosted mode). Higher is better and the ordering is what was "
-          + "measured; the value is only comparable within this result list — it is "
-          + "not a cosine and not a probability.",
   composed: "Cosine to the blended query (steering text averaged with the positive "
           + "reference images), minus half the strongest negative-example cosine. "
           + "Only comparable within this result list.",
 };
 
-const PATH_LABEL: Record<string, string> = { keyword: "kw", semantic: "sem", boosted: "boost" };
+const PATH_LABEL: Record<string, string> = { keyword: "kw", semantic: "sem" };
 
 interface Props {
   sample: SampleCard;

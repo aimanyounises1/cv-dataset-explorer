@@ -21,7 +21,7 @@ export interface AxisScores {
 }
 
 export interface MatchPath {
-  path: string; // "keyword" | "semantic" | "boosted"
+  path: string; // "keyword" | "semantic"
   rank: number; // 1-based rank within that path
 }
 
@@ -82,7 +82,7 @@ export interface SearchResponse {
   mode_used: string;
   degraded: boolean;
   message?: string | null;
-  score_basis?: string | null; // "cosine" | "cosine_adj" | "rrf" | "prism_ll" | null
+  score_basis?: string | null; // "cosine" | "cosine_adj" | "rrf" | null
   rrf_k?: number | null;
   term_stats: TermStat[];
   offset: number;
@@ -308,8 +308,8 @@ export interface EvalModeResult {
   median_rank?: number | null;
   mean_candidates: number;
   empty_query_rate: number;
-  /** Rows measured on their own query set (the PRISM rows use test-split
-   * queries only) say how many queries, and why, so the table can too. */
+  /** Rows measured on their own query set say how many queries, and why,
+   * so the table can too. */
   queries?: number | null;
   note?: string | null;
 }
@@ -355,7 +355,7 @@ export interface ChatStatus {
   specialists?: string[];
 }
 
-export type SearchMode = "hybrid" | "semantic" | "keyword" | "boosted";
+export type SearchMode = "hybrid" | "semantic" | "keyword";
 
 // ---- Albums ----------------------------------------------------------------
 

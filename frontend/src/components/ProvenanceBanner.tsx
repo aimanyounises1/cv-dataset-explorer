@@ -20,14 +20,13 @@ const BASIS = new Map<string, string>([
   // the raw cosine, but the ordering is not comparable with a plain one.
   ["cosine_adj", "cosine*, hubness-ranked"],
   ["rrf", "RRF"],
-  ["prism_ll", "PRISM fit"],
 ]);
 /** Only used when no basis travelled with the score, which is a link built by
  * hand or by an older build. Mode is the weakest honest guess available. */
 const BASIS_BY_MODE: Record<SearchMode, string> = {
-  hybrid: "RRF", semantic: "cosine", keyword: "keyword score", boosted: "PRISM fit",
+  hybrid: "RRF", semantic: "cosine", keyword: "keyword score",
 };
-const MODES: readonly SearchMode[] = ["hybrid", "semantic", "keyword", "boosted"];
+const MODES: readonly SearchMode[] = ["hybrid", "semantic", "keyword"];
 
 /** Surfaces that can hand a sample over, phrased so the sentence reads. A Map
  * rather than an object literal because the key comes from a URL: `SOURCE.get`

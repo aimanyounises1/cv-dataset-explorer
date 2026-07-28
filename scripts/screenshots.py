@@ -165,8 +165,6 @@ SHOTS = [
     ("1-gallery.png", "/?q=a+crowded+street+at+night&mode=hybrid", 3000, None),
     ("2-describe.png",
      "/?attr=time_of_day%3Anight&attr=setting%3Aindoor", 2200, _open_describe),
-    ("3-boosted.png",
-     "/?q=a+crowded+street+at+night&mode=boosted&sort=rarity_desc", 3500, None),
     ("4-axes.png", "/?difficulty_min=8&legibility_min=8", 2600, None),
     ("5-map.png", "/map", 6000, None),
     ("6-quality.png", "/quality", 4000, None),
