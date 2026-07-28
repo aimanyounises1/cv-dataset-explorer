@@ -28,10 +28,14 @@ pytest.importorskip("langchain_core")
 from langchain_core.language_models import BaseChatModel  # noqa: E402
 from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
-from pydantic import Field  # noqa: E402
+from pydantic import Field, ValidationError  # noqa: E402
 
 from app.agent import blocks, registry  # noqa: E402
-from app.agent.graph import _parse_routes, build_graph  # noqa: E402
+from app.agent.graph import (  # noqa: E402
+    build_graph,
+    normalise_routes,
+    route_schema,
+)
 from app.agent.report_md import report_to_markdown  # noqa: E402
 
 # --------------------------------------------------------------- test doubles
@@ -65,6 +69,29 @@ class StubModel(BaseChatModel):
         """A no-op: the specialists under test are prebuilt lanes, so the stub is
         only ever asked to route and to synthesize, never to call a tool."""
         return self
+
+    def with_structured_output(self, schema, **kwargs):
+        """Stand in for Ollama's schema-constrained decoding.
+
+        Production routing is `model.with_structured_output(Route)`, so the stub
+        has to answer that call too. It returns the scripted routes as a
+        validated instance of the real schema — which means a stub that scripts
+        a lane the registry does not have fails here exactly as the live model
+        would, rather than sneaking past into the graph.
+        """
+        stub = self
+
+        class _Router:
+            def invoke(self, messages, config=None, **kw):
+                stub.calls.append("orchestrate")
+                if "orchestrate" in stub.fail_on:
+                    raise RuntimeError("stub model refused to orchestrate")
+                r = list(stub.routes) or ["retrieval"]
+                return schema(route=r[0],
+                              also=r[1] if len(r) > 1 else None,
+                              brief="go")
+
+        return _Router()
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         system = str(getattr(messages[0], "content", ""))
@@ -120,35 +147,57 @@ def run(model, lanes, message="do the thing"):
 
 # ------------------------------------------------------------- route selection
 
-@pytest.mark.parametrize("text,expected", [
-    ('{"routes": ["visualization"], "brief": "x"}', ["visualization"]),
-    # A local model routinely wraps its JSON in prose or a code fence.
-    ('Sure!\n```json\n{"route":"insights","brief":"x"}\n```', ["insights"]),
-    ('{"routes":["insights","visualization"],"brief":"x"}', ["insights", "visualization"]),
+@pytest.mark.parametrize("routes,expected", [
+    (["visualization"], ["visualization"]),
+    (["insights"], ["insights"]),
+    (["insights", "visualization"], ["insights", "visualization"]),
     # More lanes than the cap allows are truncated, not honoured.
-    ('{"routes":["insights","visualization","retrieval"],"brief":"x"}',
-     ["insights", "visualization"]),
+    (["insights", "visualization", "retrieval"], ["insights", "visualization"]),
     # "direct" means no specialist, so it cannot ride along with one.
-    ('{"routes":["direct","insights"],"brief":"x"}', ["insights"]),
-    ('{"routes":["direct"],"brief":"x"}', ["direct"]),
-    # Unroutable replies fall back to the cheap read-only lane.
-    ('{"routes":["nonsense"],"brief":"x"}', ["retrieval"]),
-    ('no json here at all', ["retrieval"]),
-    ('{"routes":[],"brief":"x"}', ["retrieval"]),
+    (["direct", "insights"], ["insights"]),
+    (["direct"], ["direct"]),
+    # A name outside the registry cannot reach a lane.
+    (["nonsense"], ["retrieval"]),
+    ([], ["retrieval"]),
 ])
-def test_parse_routes(text, expected):
-    assert _parse_routes(text)[0] == expected
+def test_normalise_routes(routes, expected):
+    assert normalise_routes(routes)[0] == expected
+
+
+def test_the_router_schema_only_admits_lanes_that_exist():
+    """The names are an enum in the schema the model is constrained to, so an
+    invented specialist is a validation error rather than a silent bad route."""
+    Route = route_schema()
+    assert Route(route="insights", brief="x").route == "insights"
+    assert Route(route="insights", also="visualization").also == "visualization"
+    # One lane is the default shape: a second is opt-in, not a list to fill.
+    assert Route(route="insights").also is None
+    with pytest.raises(ValidationError):
+        Route(route="nonsense", brief="x")
+    with pytest.raises(ValidationError):
+        Route(route="insights", also="nonsense")
+    with pytest.raises(ValidationError):       # a lane must be named
+        Route(brief="x")
+
+
+def test_routing_survives_a_router_that_fails():
+    """Structured output can still fail — a refusing model, a validation error,
+    an Ollama hiccup. The turn must continue on the cheap read-only lane."""
+    lanes = [RecordingLane("retrieval")]
+    out = run(StubModel(["insights"], fail_on={"orchestrate"}), lanes)
+    assert lanes[0].window is not None, "retrieval did not run after a router failure"
+    assert any(getattr(m, "name", "") == "final" for m in out["messages"])
 
 
 def test_expensive_lane_never_rides_along():
     """An expensive lane runs alone: a question about captions must not boot a
     browser as a side effect of the orchestrator hedging."""
-    routes, _ = _parse_routes('{"routes":["qa","insights"],"brief":"x"}')
+    routes, _ = normalise_routes(["qa", "insights"])
     assert routes == ["qa"]
 
 
 def test_duplicate_routes_collapse():
-    routes, _ = _parse_routes('{"routes":["insights","insights"],"brief":"x"}')
+    routes, _ = normalise_routes(["insights", "insights"])
     assert routes == ["insights"]
 
 
@@ -274,7 +323,7 @@ def test_registering_a_specialist_needs_no_graph_edit():
         assert "weather" in registry.routing_menu()
         assert registry.routing_menu() != before_menu
         # And it is immediately routable.
-        assert _parse_routes('{"routes":["weather"],"brief":"x"}')[0] == ["weather"]
+        assert normalise_routes(["weather"])[0] == ["weather"]
     finally:
         registry.unregister("weather")
 

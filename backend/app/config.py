@@ -56,6 +56,10 @@ CHAT_MODEL = os.environ.get("CVDE_CHAT_MODEL", "qwen3:8b")  # needs tool calling
 # the HTTP request open until the client gives up. Three nested bounds, outermost
 # last: one model call, one specialist lane, and the tool-call loop inside a lane.
 OLLAMA_TIMEOUT = float(os.environ.get("CVDE_OLLAMA_TIMEOUT", "120"))
+# Context window for the chat model. Pinned so memory does not depend on which
+# model is configured: left to its own default, qwen3:30b-a3b asks for a
+# 262,144-token window and 44 GB resident where qwen3:8b takes 40,960 and 11 GB.
+OLLAMA_NUM_CTX = int(os.environ.get("CVDE_OLLAMA_NUM_CTX", "40960"))
 AGENT_LANE_TIMEOUT = float(os.environ.get("CVDE_AGENT_LANE_TIMEOUT", "240"))
 AGENT_RECURSION_LIMIT = int(os.environ.get("CVDE_AGENT_RECURSION_LIMIT", "25"))
 # Reports the assistant generates are written here so they can be downloaded
