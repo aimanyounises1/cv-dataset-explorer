@@ -111,7 +111,7 @@ speculatively alongside another lane). It drives real Chrome over every register
 workflow and returns a status block inline:
 
 - a `DONE` badge and the pass count — **106/106 checks · 17/17 workflows** on run
-  `20260728-155424-154f`, the last full sweep recorded in `backend/data/qa/`;
+  `20260728-233210-9847`, the last full sweep recorded in `backend/data/qa/`;
   the registry grows, so expect a different denominator;
 - one row per workflow — Routes, Gallery, Similarity map, Statistics, Quality,
   Benchmark, Sample detail, Assistant, Axis legend, Set description, Train/test
