@@ -158,17 +158,23 @@ def _fingerprint(index: EmbeddingIndex) -> str:
     alignment. Captions can only change via re-ingestion, which rewrites
     `image_embeddings.npy` and moves that mtime.
     """
+    from . import providers
+
     stamp = 0.0
     for name in ("image_embeddings.npy", "sample_ids.npy"):
-        p = config.EMB_DIR / name
+        p = providers.active_emb_dir() / name
         if p.exists():
             stamp = max(stamp, p.stat().st_mtime)
-    return (f"{config.EMBED_MODEL}|{config.HUBNESS_TEMPERATURE}|"
+    return (f"{providers.active_model_id()}|{config.HUBNESS_TEMPERATURE}|"
             f"{config.HUBNESS_BANK_SIZE}|{len(index.ids)}|{int(stamp)}")
 
 
 def _path():
-    return config.EMB_DIR / "hubness.npz"
+    # Provider-scoped: a penalty estimated in one embedding space is
+    # meaningless in another, so each provider's index dir carries its own.
+    from . import providers
+
+    return providers.active_emb_dir() / "hubness.npz"
 
 
 def build(conn, encode: Encoder, index: Optional[EmbeddingIndex] = None

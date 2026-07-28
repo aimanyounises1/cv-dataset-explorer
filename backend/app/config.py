@@ -15,8 +15,27 @@ DB_PATH = DATA_DIR / "explorer.db"
 
 # Embedding model ------------------------------------------------------------
 # SigLIP 2 base: strong zero-shot retrieval, ~1.5GB, runs on MPS/CUDA/CPU.
+# CVDE_EMBED_MODEL keeps its historical meaning: the SigLIP checkpoint.
 EMBED_MODEL = os.environ.get("CVDE_EMBED_MODEL", "google/siglip2-base-patch16-256")
 EMBED_BATCH_SIZE = int(os.environ.get("CVDE_EMBED_BATCH", "32"))
+
+# Retrieval provider ----------------------------------------------------------
+# Preferred multimodal retrieval provider. "qwen3_vl" runs
+# Qwen/Qwen3-VL-Embedding-2B in-process through sentence-transformers (Ollama
+# serves the language models only — it cannot host an image-embedding model)
+# and falls back to "siglip2" with a visible, named reason whenever its stack,
+# weights or index are missing. "siglip2" pins the original behavior exactly;
+# "mock" is the deterministic test provider.
+EMBED_PROVIDER = os.environ.get("CVDE_EMBED_PROVIDER", "qwen3_vl")
+QWEN_EMBED_MODEL = os.environ.get("CVDE_QWEN_EMBED_MODEL", "Qwen/Qwen3-VL-Embedding-2B")
+QWEN_EMBED_BATCH = int(os.environ.get("CVDE_QWEN_EMBED_BATCH", "8"))
+
+
+def emb_dir_for(provider: str) -> Path:
+    """siglip2 keeps the original flat embeddings layout (an existing install
+    keeps working, untouched); every other provider gets its own subdirectory
+    so two vector spaces can never mix in one index."""
+    return EMB_DIR if provider == "siglip2" else EMB_DIR / provider
 
 # Optional local VLM enrichment + assistant (via Ollama) ---------------------
 OLLAMA_URL = os.environ.get("CVDE_OLLAMA_URL", "http://localhost:11434")

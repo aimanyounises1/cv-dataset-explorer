@@ -27,7 +27,10 @@ from PIL import Image as PILImage
 
 from .. import config, db
 from ..ml import hubness
-from ..ml.embedder import get_embedder
+# Provider-aware: the active retrieval provider's encoder (Qwen3-VL or SigLIP)
+# behind the same duck type. eval.py and hubness reach the model through this
+# name, so the whole query path switches provider in one place.
+from ..ml.providers import get_encoder as get_embedder
 from ..ml.index import get_caption_index, get_index
 from ..ml.prism import get_prism_index
 from ..schemas import (

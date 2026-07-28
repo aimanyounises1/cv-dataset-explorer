@@ -25,7 +25,8 @@ _ENV_KEYS = ("_embed_model", "_corpus")
 
 def _current_env(conn: sqlite3.Connection) -> dict[str, str]:
     n = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
-    return {"_embed_model": config.EMBED_MODEL,
+    from ..ml import providers
+    return {"_embed_model": providers.active_model_id(),
             "_corpus": f"{n}:{embeddings_fingerprint()}"}
 
 

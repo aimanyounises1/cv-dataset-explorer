@@ -47,10 +47,19 @@ def embeddings_fingerprint() -> str:
     are identical. The embedding files change exactly when a re-ingest or
     re-embed changes what a query returns — the event worth catching.
     """
-    parts = []
+    from ..ml import providers
+
+    emb_dir = providers.active_emb_dir()
+    # Provider-scoped: the same corpus embedded by two providers is two
+    # different retrieval environments, so the provider name (and, for
+    # prompt-bearing providers, the prompt version) joins the hash.
+    parts = [f"provider:{providers.active_provider()}"]
+    manifest = providers.read_manifest(emb_dir)
+    if manifest and manifest.get("prompt_version"):
+        parts.append(f"prompt:{manifest['prompt_version']}")
     for name in ("image_embeddings.npy", "caption_embeddings.npy"):
         try:
-            st = (config.EMB_DIR / name).stat()
+            st = (emb_dir / name).stat()
             parts.append(f"{name}:{st.st_size}:{int(st.st_mtime)}")
         except OSError:
             parts.append(f"{name}:absent")

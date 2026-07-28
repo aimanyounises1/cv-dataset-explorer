@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from .. import config
 from ..db import AXES
+from ..ml import providers
 from ..ml.index import get_index
 from ..schemas import CaptionOut, SampleCard, SampleDetail, SampleList
 from .deps import (
@@ -254,7 +255,7 @@ def export_subset(
              # Named so a consumer can tell whether two exports are comparable:
              # the axes are percentile ranks over whatever corpus was loaded,
              # and the fingerprint pins which embeddings produced the scores.
-             "embed_model": config.EMBED_MODEL,
+             "embed_model": providers.active_model_id(),
              "corpus_samples": conn.execute(
                  "SELECT COUNT(*) FROM samples").fetchone()[0],
              "embeddings_fingerprint": embeddings_fingerprint(),

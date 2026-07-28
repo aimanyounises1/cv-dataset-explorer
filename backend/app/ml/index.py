@@ -30,19 +30,23 @@ class EmbeddingIndex:
 
     # -- persistence ---------------------------------------------------------
     @classmethod
-    def load(cls, kind: str = "image") -> Optional["EmbeddingIndex"]:
+    def load(cls, kind: str = "image", emb_dir=None) -> Optional["EmbeddingIndex"]:
+        d = emb_dir if emb_dir is not None else config.EMB_DIR
         ids_file, embs_file = FILES[kind]
-        ids_path, embs_path = config.EMB_DIR / ids_file, config.EMB_DIR / embs_file
+        ids_path, embs_path = d / ids_file, d / embs_file
         if not ids_path.exists() or not embs_path.exists():
             return None
         return cls(np.load(ids_path), np.load(embs_path))
 
     @classmethod
-    def save(cls, ids: np.ndarray, embeddings: np.ndarray, kind: str = "image") -> None:
+    def save(cls, ids: np.ndarray, embeddings: np.ndarray, kind: str = "image",
+             emb_dir=None) -> None:
         config.ensure_dirs()
+        d = emb_dir if emb_dir is not None else config.EMB_DIR
+        d.mkdir(parents=True, exist_ok=True)
         ids_file, embs_file = FILES[kind]
-        np.save(config.EMB_DIR / ids_file, ids)
-        np.save(config.EMB_DIR / embs_file, embeddings)
+        np.save(d / ids_file, ids)
+        np.save(d / embs_file, embeddings)
 
     # -- queries -------------------------------------------------------------
     def row_of(self, item_id: int) -> Optional[int]:
@@ -153,13 +157,19 @@ _cache: dict[str, Optional[EmbeddingIndex]] = {}
 
 
 def _get(kind: str) -> Optional[EmbeddingIndex]:
-    if kind not in _cache:
+    # The active provider owns the index directory: query vectors and index
+    # rows always come from the same embedding space. Cache is keyed by
+    # provider so a runtime fallback flip reloads rather than mixing spaces.
+    from . import providers
+
+    key = f"{providers.active_provider()}:{kind}"
+    if key not in _cache:
         with _lock:
-            if kind not in _cache:  # double-checked: load once
-                _cache[kind] = EmbeddingIndex.load(kind)
-                if _cache[kind] is None:
+            if key not in _cache:  # double-checked: load once
+                _cache[key] = EmbeddingIndex.load(kind, emb_dir=providers.active_emb_dir())
+                if _cache[key] is None:
                     logger.warning("No %s embedding index found.", kind)
-    return _cache[kind]
+    return _cache[key]
 
 
 def get_index() -> Optional[EmbeddingIndex]:
