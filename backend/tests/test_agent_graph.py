@@ -601,3 +601,60 @@ def test_inspect_album_reports_measured_analysis():
         conn.execute("DELETE FROM samples WHERE id = ?", (sid,))
         conn.commit()
         conn.close()
+
+
+def test_a_proposal_lists_every_id_it_proposes_and_writes_nothing():
+    """The approval UI renders one togglable member per proposed id, so the
+    block has to carry them all — a preview would let an approval tag samples
+    the reviewer never saw. Ids that do not exist are reported separately
+    rather than padding the list, and proposing writes no tag at all: the
+    mutation belongs to the human click that follows."""
+    import json as _json
+
+    from app import db as _db
+    from app.agent.tools import tag_samples
+
+    conn = _db.connect()
+    _db.init_db(conn)
+    made = []
+    for i in range(3):
+        cur = conn.execute(
+            "INSERT INTO samples(dataset, filename, split, width, height, "
+            "filesize) VALUES ('flickr8k', ?, 'train', 10, 10, 1)",
+            (f"propose_{i}.jpg",))
+        made.append(cur.lastrowid)
+    conn.commit()
+    ghost = 10_000_000 + made[0]
+    try:
+        out = _json.loads(tag_samples.func(
+            tag="Night-Probe", sample_ids=[*made, ghost],
+            reason="  three real frames and one that does not exist  "))
+        block = out["blocks"][0]
+        assert block["kind"] == "tag_proposal"
+        # Every real id survives, in order, so the grid can render each one.
+        assert block["sample_ids"] == made
+        assert block["missing"] == [ghost]
+        assert block["tag"] == "night-probe"          # normalized for the write
+        assert block["reason"] == "three real frames and one that does not exist"
+
+        # The proposal is a proposal: no tag row, no membership, nothing.
+        assert conn.execute(
+            "SELECT COUNT(*) c FROM tags WHERE name = 'night-probe'"
+        ).fetchone()["c"] == 0
+
+        # An entirely invented proposal is refused rather than half-built.
+        bad = _json.loads(tag_samples.func(tag="ghosts", sample_ids=[ghost],
+                                            reason="none of these exist"))
+        assert "error" in bad and "blocks" not in bad
+
+        # The block is bounded, so "render every member" stays a finite promise.
+        wide = _json.loads(tag_samples.func(
+            tag="wide", sample_ids=[*made, *range(ghost, ghost + 500)],
+            reason="more ids than the cap"))
+        assert len(wide["blocks"][0]["sample_ids"]) <= 200
+    finally:
+        for sid in made:
+            conn.execute("DELETE FROM samples WHERE id = ?", (sid,))
+        conn.execute("DELETE FROM tags WHERE name IN ('night-probe','wide')")
+        conn.commit()
+        conn.close()

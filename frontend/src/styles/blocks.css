@@ -537,6 +537,46 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
   width: 64px; height: 64px; object-fit: cover;
   border-radius: 8px; border: 1px solid var(--border);
 }
+/* Every proposed member is listed, so the list scrolls rather than truncating —
+   a proposal must never tag something the reviewer could not see and refuse. */
+.tag-proposal .tp-thumbs.picking {
+  max-height: 232px; overflow-y: auto; padding: 2px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.tag-proposal .tp-bulk {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 8px;
+  font-size: 12.5px; color: var(--text-dim);
+}
+.tag-proposal .tp-count { font-variant-numeric: tabular-nums; }
+.tag-proposal .tp-item {
+  position: relative; padding: 0; border: 0; background: none; cursor: pointer;
+  line-height: 0; border-radius: 8px;
+}
+.tag-proposal .tp-item img { opacity: 0.45; transition: opacity var(--t-quick); }
+.tag-proposal .tp-item.on img { opacity: 1; }
+.tag-proposal .tp-item.on { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tag-proposal .tp-item:focus-visible { outline: 2px solid var(--accent-deep); outline-offset: 2px; }
+/* The mark is always drawn, filled or empty: on an approval surface the state
+   of every member has to be readable without hovering it. */
+.tag-proposal .tp-pick {
+  position: absolute; top: 3px; right: 3px; width: 17px; height: 17px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1.5px solid var(--border-strong);
+  background: rgba(255, 255, 255, 0.92); color: transparent;
+  font-size: 11px; line-height: 1;
+}
+.tag-proposal .tp-item.on .tp-pick {
+  background: var(--accent-deep); border-color: var(--accent-deep); color: #fff;
+}
+.tag-proposal .tp-idtile {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 64px; height: 64px; border-radius: 8px;
+  border: 1px dashed var(--border); background: var(--bg-raised);
+  font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+  line-height: 1;
+}
+.tag-proposal .tp-note { margin: 8px 0 0; color: var(--text-faint); font-size: 12px; }
 .tag-proposal .tp-more { color: var(--text-faint); font-size: 12px; }
 .tag-proposal .tp-missing { margin: 8px 0 0; color: var(--amber); font-size: 12px; }
 .tag-proposal .tp-actions { display: flex; gap: 8px; margin-top: 12px; }
