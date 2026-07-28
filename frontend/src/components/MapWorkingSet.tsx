@@ -56,6 +56,12 @@ interface Props {
   onToggleDrop: (id: number) => void;
   onRestoreDropped: () => void;
   onClear: () => void;
+  /** Put the kept ids into the URL as the map's own selection. Until this
+   *  existed a lasso lived in component state: it could be handed to the
+   *  gallery through a one-way link, but it could not be shared, reloaded,
+   *  saved as a view, exported from the rail or added to an album — the very
+   *  things the rest of the app does with a selection. */
+  onScopeMap: () => void;
   /** Measured entry points into a set, and what the last one reported. */
   nnStats: NeighbourStats | null;
   dupNote: string | null;
@@ -76,7 +82,7 @@ interface Props {
  * tag field; the set, the drops and the ring live with the map. */
 export default function MapWorkingSet({
   workingSet, byId, kept, dropped, marked,
-  onHighlight, onUnhighlight, onToggleDrop, onRestoreDropped, onClear,
+  onHighlight, onUnhighlight, onToggleDrop, onRestoreDropped, onClear, onScopeMap,
   nnStats, dupNote, onSelectIsolated, onSelectDuplicates,
   busy, onTag, toast, lastTag,
 }: Props) {
@@ -151,6 +157,12 @@ export default function MapWorkingSet({
             {dropped.size > 0 && (
               <button className="ghost" type="button" onClick={onRestoreDropped}>
                 Restore {dropped.size} dropped
+              </button>
+            )}
+            {kept.length > 0 && kept.length <= HANDOFF_LIMIT && (
+              <button className="ghost" type="button" onClick={onScopeMap}
+                      title="Narrow the map to exactly these images and put them in the address bar, so the set can be shared, reloaded, saved as a view or added to an album">
+                Keep {kept.length} on the map
               </button>
             )}
             {kept.length > 0 && kept.length <= HANDOFF_LIMIT ? (

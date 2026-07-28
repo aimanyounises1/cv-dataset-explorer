@@ -405,12 +405,39 @@ export default function MapPage() {
             </div>
           ) : (
             <div className="legend-swatches">
-              {(ramp.categories ?? []).slice(0, 12).map((c) => (
-                <span className="legend-swatch" key={c.label}>
-                  <i className="legend-dot" style={{ background: c.color }} />
-                  {c.label}
-                </span>
-              ))}
+              {/* A nominal legend names groups the URL can already select on —
+                  `cluster` and `split` are both in useSelection's SCALARS and
+                  this page filters by both. Until now they were labels only:
+                  the map could paint twelve clusters and count them, and the
+                  only way to look at one was to type ?cluster=N in the address
+                  bar. Each swatch is the control for its own group, and the
+                  one in force says so and turns itself off. */}
+              {(ramp.categories ?? []).slice(0, 12).map((c) => {
+                const facet = activeMode === "cluster" ? "cluster"
+                  : activeMode === "split" ? "split" : null;
+                if (!facet) {
+                  return (
+                    <span className="legend-swatch" key={c.label}>
+                      <i className="legend-dot" style={{ background: c.color }} />
+                      {c.label}
+                    </span>
+                  );
+                }
+                const value = facet === "cluster" ? c.label.replace(/^#/, "") : c.label;
+                const on = String(params[facet] ?? "") === value;
+                return (
+                  <button type="button" key={c.label} aria-pressed={on}
+                          className={`legend-swatch legend-pick${on ? " on" : ""}`}
+                          title={on
+                            ? `Showing only ${c.label} — click to show every group again`
+                            : `Show only ${c.label}`}
+                          onClick={() => selection.set(
+                            { [facet]: on ? "" : value, page: "" })}>
+                    <i className="legend-dot" style={{ background: c.color }} />
+                    {c.label}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
@@ -496,6 +523,7 @@ export default function MapPage() {
         onToggleDrop={toggleDrop}
         onRestoreDropped={restoreDropped}
         onClear={clearSet}
+        onScopeMap={() => selection.set({ ids: kept.join(","), page: "" })}
         nnStats={nnStats}
         dupNote={dupNote}
         onSelectIsolated={selectIsolated}
