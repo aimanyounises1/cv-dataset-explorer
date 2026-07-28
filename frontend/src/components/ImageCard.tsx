@@ -169,22 +169,35 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
             ✓
           </button>
         )}
-        {/* The images lead; the diagnostics wait. Everything below stays in
-            the DOM (tests count it, keyboard focus reveals it) but paints
-            only on hover — the mock's rule: hide secondary detail until it
-            is requested. The sample page still shows all of it, always. */}
+        {/* The images lead; the diagnostics wait — and when they arrive they
+            take a strip, not the frame. This overlay used to grow with its
+            content: on a 190px column it stood 147px tall inside a 151px
+            media box, so hovering a result replaced the picture with its own
+            metadata. It now carries only what is worth knowing mid-scan —
+            the score with its basis, the split, the paths that found the
+            frame, the difficulty glyph — beside the two steering buttons.
+            Everything underneath those numbers (each axis decomposed into
+            its measured components, all five captions, the neighbours) is on
+            the sample page, which the link above already carries the
+            provenance for. Hover and keyboard focus reveal exactly the same
+            strip, and it paints with opacity alone, so no row ever moves. */}
         <div className="card-details">
           {(onLike || onExclude) && (
             <div className="card-actions">
               {onLike && (
                 <button type="button"
+                        aria-label="More like this — add as a positive reference and re-rank"
                         title="More like this — add as a positive reference and re-rank"
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onLike(sample.id); }}>
-                  ⊕ More like this
+                  {/* The word drops away on the smallest thumbnails, where the
+                      strip has room for the sign but not the sentence; the
+                      accessible name and the tooltip carry it either way. */}
+                  ⊕<span className="ca-label"> More like this</span>
                 </button>
               )}
               {onExclude && (
                 <button type="button"
+                        aria-label="Exclude images like this — add as a negative example"
                         title="Exclude images like this — add as a negative example"
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onExclude(sample.id); }}>
                   ⊖
@@ -193,6 +206,14 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
             </div>
           )}
           <div className="card-evidence">
+            {/* The score leads the strip. It is the reason this frame is on
+                screen at this rank, and in a row that wraps on a narrow
+                column it must not be the part that wraps out of sight. */}
+            {sample.score != null && basis && (
+              <span className="ev ev-score" title={SCORE_HELP[basis] ?? "Search relevance"}>
+                {SCORE_LABEL[basis] ?? basis} {sample.score.toFixed(3)}
+              </span>
+            )}
             <span className="ev">{sample.split}</span>
             {sample.match_paths?.map((p) => (
               <span key={p.path} className="ev ev-path"
@@ -200,30 +221,32 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
                 {PATH_LABEL[p.path] ?? p.path} {p.rank}
               </span>
             ))}
-            {sample.score != null && basis && (
-              <span className="ev ev-score" title={SCORE_HELP[basis] ?? "Search relevance"}>
-                {SCORE_LABEL[basis] ?? basis} {sample.score.toFixed(3)}
+            {sample.axes && (
+              /* Inline with the evidence rather than on a row of its own: the
+                 four bars are a glyph, and a strip that fits on one line at
+                 density L is a strip that leaves the picture visible. */
+              <span className="card-axis-row">
+                <AxisSparkline axes={sample.axes} />
+                {hardest && (
+                  <span className={`axis-lead ${heatBand(hardest.v)}`}
+                        title={`Highest axis: ${AXIS_META[hardest.axis].label} ${hardest.v}/10 `
+                               + `(${AXIS_META[hardest.axis].low} → ${AXIS_META[hardest.axis].high}). `
+                               + AXIS_META[hardest.axis].hint
+                               /* The reason phrases used to occupy their own line
+                                  under the bars. They are the hard-tail components
+                                  named, so they belong with the badge they explain
+                                  — and in full, with their measured values, on the
+                                  sample page. */
+                               + (reasons.length > 0
+                                   ? `\n\nWhat scores hard here: ${reasons.join(" · ")} `
+                                     + "— templated from the measured components, not generated."
+                                   : "")}>
+                    {AXIS_ABBR[hardest.axis]} {hardest.v}
+                  </span>
+                )}
               </span>
             )}
           </div>
-          {sample.axes && (
-            <div className="card-axis-row">
-              <AxisSparkline axes={sample.axes} />
-              {hardest && (
-                <span className={`axis-lead ${heatBand(hardest.v)}`}
-                      title={`Highest axis: ${AXIS_META[hardest.axis].label} ${hardest.v}/10 `
-                             + `(${AXIS_META[hardest.axis].low} → ${AXIS_META[hardest.axis].high}). `
-                             + AXIS_META[hardest.axis].hint}>
-                  {AXIS_ABBR[hardest.axis]} {hardest.v}
-                </span>
-              )}
-            </div>
-          )}
-          {reasons.length > 0 && (
-            <div className="axis-why" title="Templated from the measured components, not generated">
-              {reasons.join(" · ")}
-            </div>
-          )}
         </div>
       </div>
       <div className="card-body">

@@ -12,6 +12,11 @@ import "../styles/region.css";
  * Detection is an optional layer: the "Suggest regions" control renders only
  * after /api/detect/status says ready, and its absence explains itself in the
  * title of nothing — no fake buttons.
+ *
+ * The stage is the sample page's ONLY photograph — it carries `.detail-image`
+ * and the caption as alt text, because a second copy of the same picture above
+ * it was duplication, not context. `alt` is required for that reason: the
+ * page's primary subject may not go out with an empty accessible name.
  */
 interface Rect { x: number; y: number; w: number; h: number }
 interface DetBox extends Rect { label: string; score: number }
@@ -30,8 +35,8 @@ const detectStatus = () => {
   return detectStatusPromise;
 };
 
-export default function RegionSearch({ sampleId, imageUrl }:
-    { sampleId: number; imageUrl: string }) {
+export default function RegionSearch({ sampleId, imageUrl, alt }:
+    { sampleId: number; imageUrl: string; alt: string }) {
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [marking, setMarking] = useState(false);
   const [rect, setRect] = useState<Rect | null>(null);
@@ -156,7 +161,8 @@ export default function RegionSearch({ sampleId, imageUrl }:
                        w: Math.abs(p.x - drag.x), h: Math.abs(p.y - drag.y) });
            }}
            onMouseUp={() => { if (drag) { setDrag(null); setMarking(false); } }}>
-        <img ref={imgRef} src={imageUrl} alt="" draggable={false} />
+        <img ref={imgRef} className="detail-image" src={imageUrl} alt={alt}
+             draggable={false} />
         {rect && rect.w > 0.005 && (
           <div className="rs-rect" style={{
             left: `${rect.x * 100}%`, top: `${rect.y * 100}%`,

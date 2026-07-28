@@ -278,40 +278,6 @@ body {
    title read as an empty crashed box. */
 .rail-library .saved-views { background: none; border: none; padding: 0 6px; margin-bottom: 4px; }
 
-/* ---- Hero --------------------------------------------------------------
-   The mock's front door, scaled to a working page: mint glow over warm
-   paper, one headline, four numbered doors into the product's jobs. It
-   renders only on the bare gallery and yields to any query or filter. */
-.hero {
-  display: grid; grid-template-columns: minmax(280px, 1.1fr) minmax(360px, 1fr);
-  gap: 26px; align-items: center;
-  padding: 26px 30px; margin-bottom: 16px;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background:
-    radial-gradient(circle at 86% 10%, rgba(98, 213, 173, 0.17), transparent 31%),
-    linear-gradient(145deg, #fdfefd, #edf4ef);
-}
-.hero h1 { margin: 6px 0 8px; font-size: 30px; letter-spacing: -0.02em; line-height: 1.15; }
-.hero-sub { margin: 0; color: var(--text-dim); font-size: 13.5px; max-width: 46ch; }
-.hero-flows { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.flow-card {
-  display: flex; flex-direction: column; gap: 3px; text-align: left;
-  padding: 12px 14px; cursor: pointer;
-  background: var(--bg-raised); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); color: var(--text);
-  font-family: var(--font-sans); font-size: 13px; text-decoration: none;
-  transition: border-color var(--t-quick), transform var(--t-quick) var(--ease);
-}
-.flow-card:hover { border-color: var(--accent); transform: translateY(-1px); }
-.flow-no {
-  align-self: flex-start; padding: 1px 7px; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent-deep);
-  font-family: var(--font-mono); font-size: 10.5px;
-}
-.flow-name { font-weight: 650; }
-.flow-hint { color: var(--text-faint); font-size: 12px; }
-@media (max-width: 1100px) { .hero { grid-template-columns: 1fr; } }
-
 /* ---- Reference chips + scenario proposals ------------------------------
    The chips ARE the similarity trail: each one is a step the URL remembers,
    sage ring pulls, red ring pushes, and Back walks the trail. Scenario cards
@@ -344,26 +310,95 @@ body {
 }
 .link-btn:hover { text-decoration: underline; }
 .scenario-row {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 10px; margin-bottom: 14px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
 }
 .scenario-card {
+  display: flex; flex-direction: column;
   padding: 12px 14px;
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
 .scenario-head { display: flex; align-items: baseline; gap: 8px; }
+.scenario-head strong { min-width: 0; }
 .scenario-count {
-  font-family: var(--font-mono); font-size: 11px; color: var(--text-faint);
+  margin-left: auto; flex-shrink: 0;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--text-faint);
 }
-.scenario-evidence { font-size: 11.5px; color: var(--text-faint); margin: 3px 0 8px; }
-.scenario-actions { display: flex; align-items: center; gap: 10px; }
+.scenario-evidence {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 10.5px; line-height: 1.55; color: var(--text-faint); margin: 4px 0 9px;
+}
+/* Faces, not just a count: a label and a number describe a group, but only the
+   pictures say whether the grouping is any good — images lead here too. */
+/* Four columns, two rows, always full: seven faces and the remainder chip fill
+   the grid exactly, so three groups side by side line up instead of each
+   raggedly wrapping at its own width. */
+.scenario-thumbs {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px;
+  margin-bottom: 10px;
+}
+.scenario-thumbs img, .scenario-thumb-ph, .scenario-thumb-more {
+  width: 100%; aspect-ratio: 4 / 3; min-width: 0;
+  border-radius: 5px; background: var(--bg-inset);
+  border: 1px solid var(--border);
+}
+.scenario-thumbs img { object-fit: cover; display: block; }
+.scenario-thumb-more {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 10.5px; color: var(--text-faint); background: none;
+}
+.scenario-actions {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: auto;
+}
+.scenario-actions .ghost { padding: 5px 12px; font-size: 12.5px; }
+
+/* ---- Ranked vs grouped -------------------------------------------------
+   One result set, two readings. The switch is a segmented pill in the same
+   grammar as mode and density — the chosen segment lifts off the page — and
+   it stays on screen in both views, so returning to the ranking is the same
+   one click that left it. */
+.result-bar-right {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-left: auto;
+}
+.view-switch {
+  display: flex; gap: 3px; padding: 3px; flex-shrink: 0;
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: 999px;
+}
+.view-switch button {
+  border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+  padding: 5px 13px; border-radius: 999px;
+  font-family: var(--font-sans); font-size: 12.5px;
+  transition: color var(--t-quick), background var(--t-quick), box-shadow var(--t-quick);
+}
+.view-switch button:hover:not(:disabled) { color: var(--text); }
+.view-switch button:disabled { opacity: 0.45; cursor: default; }
+.view-switch button.on {
+  background: var(--bg-raised); color: var(--accent-deep);
+  font-weight: 600; box-shadow: var(--shadow-sm);
+}
+.view-switch button:focus-visible { outline-offset: -3px; }
+
+.groups-panel { margin-bottom: 16px; }
+.groups-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 9px;
+}
+/* The proposal's own terms, stated once above the cards: what they are over,
+   how they were made, and that none of it survives unless it is saved. */
+.groups-note { font-size: 11.5px; color: var(--text-faint); flex: 1 1 240px; }
+.groups-back { margin-left: auto; font-size: 12.5px; white-space: nowrap; }
 
 /* Steering buttons inside the hover overlay: the overlay itself ignores the
-   pointer so the card stays a link, but these two act. */
-.card-actions { display: flex; gap: 6px; pointer-events: auto; }
+   pointer so the card stays a link, but these two act. Sized to the strip
+   they now live in — every pixel of button height is a pixel of picture. */
+.card-actions { display: flex; gap: 5px; pointer-events: auto; flex: 0 0 auto; }
 .card-actions button {
-  padding: 2px 8px; font-size: 11px; cursor: pointer;
+  padding: 1px 7px; font-size: 10.5px; cursor: pointer;
   border: 1px solid var(--border); border-radius: 999px;
   background: var(--bg-raised); color: var(--text-dim);
   transition: color var(--t-quick), border-color var(--t-quick);
@@ -371,23 +406,58 @@ body {
 .card-actions button:hover { color: var(--accent-deep); border-color: var(--accent); }
 
 /* ---- Card hover details ------------------------------------------------
-   The images lead; the diagnostics wait. The strips live in an overlay that
-   paints on hover or keyboard focus — still in the DOM for tests and
-   assistive tech, still permanent on the sample page. Opacity+transform
-   only, so the grid never reflows and reduced-motion flattens the entry. */
+   The images lead; the diagnostics wait — as a strip along the bottom of the
+   media box, never as a panel over the picture. Three properties are load
+   bearing and each is measured in the browser, not assumed:
+
+   * it cannot escape the frame — absolutely positioned inside .card-media,
+     capped at that box's height, and the box clips, so the strip can neither
+     reach the caption below nor paint outside the card;
+   * it cannot move anything — opacity and transform only, nothing enters or
+     leaves the flow, so every row is the same height hovered and unhovered,
+     before and after a "Load more";
+   * hover and keyboard focus reveal the identical strip.
+
+   What it carries is the mid-scan set: the score with its basis, the split,
+   the paths that found the frame, the difficulty glyph, and the two steering
+   buttons. The components behind those numbers are on the sample page. */
 .card-details {
   position: absolute; left: 0; right: 0; bottom: 0;
-  display: flex; flex-direction: column; gap: 5px;
-  padding: 8px 10px 9px;
-  background: rgba(255, 255, 255, 0.95);
+  box-sizing: border-box;
+  /* The frame is the ceiling. Content is sized to sit well under it; this is
+     the guarantee that holds even if a caption-length string ever appears. */
+  max-height: 100%; overflow: hidden;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px;
+  padding: 5px 8px 6px;
+  background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(4px);
   border-top: 1px solid var(--border);
-  opacity: 0; transform: translateY(6px);
-  transition: opacity var(--t-quick) var(--ease), transform var(--t-quick) var(--ease);
+  opacity: 0;
+  transition: opacity var(--t-quick) var(--ease);
   pointer-events: none;
 }
+/* The strip itself never moves — a resting transform on the box would put its
+   rect over the caption even while invisible. The rows slide up inside it
+   instead, and the strip clips them, so the entrance costs no geometry. */
+.card-details > * {
+  transform: translateY(4px);
+  transition: transform var(--t-quick) var(--ease);
+}
 .card:hover .card-details,
-.card:focus-visible .card-details { opacity: 1; transform: none; }
+.card:focus-visible .card-details { opacity: 1; }
+.card:hover .card-details > *,
+.card:focus-visible .card-details > * { transform: none; }
+/* Density S: a 128px frame is a contact sheet, and five pieces of evidence on
+   it would be four wrapped lines over a 97px picture. The score and the split
+   stay — they are what the strip is for — and the buttons keep their signs;
+   the retrieval paths and the difficulty bars are read at a size where they
+   can be read, one click away on the sample page. Nothing is clipped: what
+   does not fit is not drawn. */
+@container (max-width: 175px) {
+  .card-details .ev-path,
+  .card-details .card-axis-row { display: none; }
+  .card-actions .ca-label { display: none; }
+}
 
 /* ---- Search settings ---------------------------------------------------
    The command bar's one secondary button. Everything inside is a dial on the
@@ -833,7 +903,13 @@ select:hover { border-color: var(--border-strong); }
 /* Renamed from .axis-row: AxisFilters already owns that name for its
    4-column grid, and this flex rule was overriding it by source order —
    so the filter panel's columns silently never applied. */
-.card-axis-row { display: flex; align-items: flex-end; gap: 7px; margin-top: 7px; }
+/* Inline in the evidence line, separated like an .ev because it reads as one:
+   the four bars plus the single axis worth naming. */
+.card-axis-row {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding-left: 7px; border-left: 1px solid var(--border);
+}
+.card-axis-row:first-child { padding-left: 0; border-left: none; }
 .axis-spark { display: block; flex-shrink: 0; }
 .axis-lead {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
@@ -929,27 +1005,60 @@ select:hover { border-color: var(--border-strong); }
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
   margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--border);
 }
+
+/* ---- First view -------------------------------------------------------
+   /quality and /stats each have one finding worth arriving at, and both used
+   to spend the opening screen on furniture: three restated summary numbers
+   above the review line, five corpus counts above the leakage headline, and a
+   paragraph of method between the reviewer and the rows. What survives above
+   the fold is the finding; the method folds, the counts move, nothing is
+   deleted. Measured at 1440x900 and 390x844 before and after. */
+.section-title.tight { margin-top: 16px; }
+.meta-line.tight { margin-bottom: 9px; max-width: 78ch; }
+
+/* Method, folded to one line. Same honesty-panel register as the provenance
+   disclosure — quieter, because this one is instructions rather than a
+   limitation of the numbers. */
+.caveat.review-guide { padding: 8px 13px; margin-bottom: 12px; }
+.review-guide > summary { font-size: 12.5px; font-weight: 500; color: var(--text-dim); }
+.review-guide > p { margin: 8px 0 0; font-size: 12.5px; line-height: 1.6; }
+
+@media (max-width: 900px) {
+  /* Below tablet width the summary cards stop being a row and start being a
+     column of nearly-empty boxes. One figure per line, label alongside: the
+     same five facts in two fifths of the height. */
+  .stat-cards {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px; margin-bottom: 14px;
+  }
+  .stat-card {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; padding: 9px 11px;
+  }
+  .stat-card .value { font-size: 16px; flex-shrink: 0; }
+  .stat-card .label { margin-top: 0; text-align: right; }
+  /* The histogram's job is shape, not amplitude: it survives being shorter,
+     and the review line below it does not survive being pushed off screen. */
+  .dist-bars { height: 62px; }
+  .dist-panel { padding: 12px 13px; }
+  .dist-actions { gap: 7px; margin-top: 11px; padding-top: 10px; }
+  .dist-actions .primary.button-link { padding: 7px 13px; }
+  .leak-curve { height: 76px; }
+  .leakage-head { gap: 10px; margin-bottom: 8px; }
+  .leak-control { margin: 4px 0 10px; }
+  .meta-line.tight { font-size: 12.5px; }
+  .section-title.tight { margin-top: 12px; }
+  /* A pair is judged side by side, so the width of each frame is what has to
+     survive a phone — the square crop only spent height. Two pairs now clear
+     the fold at 390x844 instead of one and a fragment. */
+  .leak-pair img { aspect-ratio: 4 / 3; }
+  .leak-pairs { gap: 10px; }
+}
 .dist-control { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .dist-control input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; }
 .dist-readout {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 11.5px; color: var(--accent); white-space: nowrap;
-}
-
-/* What makes this sample hard, in words. Set in the prose face, not the mono
-   one: it is a description, not a figure the tool is asserting. */
-.axis-why {
-  margin-top: 5px;
-  font-size: 10.5px;
-  line-height: 1.4;
-  color: var(--text-faint);
-  font-style: italic;
-  /* Two lines at most: four axes can each contribute a phrase, and an
-     unbounded reason line would make card heights ragged across the grid. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 /* Collapsible honesty panels: caveats a user can open, not modal noise. */
@@ -991,15 +1100,25 @@ select:hover { border-color: var(--border-strong); }
 .card {
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius); overflow: hidden; cursor: pointer;
-  transition: border-color var(--t-quick), transform var(--t-quick), box-shadow var(--t-quick);
+  transition: border-color var(--t-quick), box-shadow var(--t-quick);
   text-decoration: none; color: inherit; display: block; position: relative;
 }
+/* Border and shadow, no lift: the strip arriving is the hover feedback, and a
+   card that translates under the cursor moves its own rect — which is the one
+   thing this grid must be able to promise it never does. */
 .card:hover {
-  border-color: var(--border-strong); transform: translateY(-2px);
+  border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
 }
 .card:hover .frame-no { color: var(--accent); border-color: var(--accent); }
-.card-media { position: relative; display: block; }
+/* The positioned parent for everything laid over the picture — and the clip
+   that keeps the hover strip inside it. It is also the container the strip
+   measures itself against: density S draws 128px frames, and what fits a
+   280px frame is not what fits those. */
+.card-media {
+  position: relative; display: block; overflow: hidden;
+  container-type: inline-size;
+}
 .card img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; background: var(--bg-inset); }
 /* Frame number, as on a contact sheet: cite or find an image without opening it. */
 .frame-no {
@@ -1016,12 +1135,15 @@ select:hover { border-color: var(--border-strong); }
   min-height: 33px;
 }
 
-/* The evidence strip: why this frame is here, in the margin, always in the
-   same order — provenance, then the paths that found it, then the score. */
+/* The evidence line inside the hover strip: why this frame is here, always in
+   the same order — the score with its basis first, then the split, then the
+   paths that found it, then the difficulty glyph. Wrapping, never clipping: a
+   truncated "kw 10" would read as rank 1, and a number the tool cuts in half
+   is worse than one it does not show. */
 .card-evidence {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 0;
-  margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--border);
-  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 1px 0;
+  flex: 1 1 100%; min-width: 0;
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
   color: var(--text-faint);
 }
 .ev { padding: 0 7px; border-left: 1px solid var(--border); white-space: nowrap; }
@@ -1148,32 +1270,171 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
      unmissable over any photo grid. */
   position: fixed; bottom: 18px; left: calc(50% + var(--rail-l) / 2);
   transform: translateX(-50%);
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  max-width: calc(100vw - 24px); z-index: 40;
-  padding: 10px 14px;
+  display: flex; align-items: center; flex-wrap: wrap; row-gap: 8px;
+  /* Explicit max-content, because a fixed box positioned by `left` alone
+     shrink-to-fits into the space to its RIGHT — at 1440 that is 600px, so the
+     tray wrapped to two rows while 780px of empty page sat under its left half.
+     The max-width still bounds it, and 24px keeps it clear of the edge. */
+  width: max-content; max-width: min(calc(100vw - 24px), 880px); z-index: 40;
+  padding: 9px 12px;
   background: var(--text); color: #f2f5f3;
-  border: 1px solid var(--text); border-radius: 999px;
+  border: 1px solid var(--text);
+  /* Not a 999px pill: the tray wraps to a second row the moment the album
+     name and the pair rule share a narrow pane, and a full pill turns that
+     into two enormous semicircular ends. 22px is a pill at one row's height
+     and a rounded card at two. */
+  border-radius: 22px;
   box-shadow: var(--shadow);
+  /* Every figure in here is compared with another one — the count against the
+     button that acts on it — so they are set to line up. */
+  font-variant-numeric: tabular-nums;
   animation: tray-in var(--t-move) var(--ease);
 }
-.selection-tray .select-count { color: #cdd6d1; }
-.selection-tray input {
-  background: rgba(255, 255, 255, 0.12); color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 999px;
+/* The horizontal gap is a margin, not `gap`: Chrome leaves column gaps out of a
+   wrapping flex container's max-content width, so the tray sized itself 40px
+   short of its own contents and pushed "Clear" onto a second row. */
+.selection-tray > * + * { margin-left: 10px; }
+.selection-tray .select-count {
+  color: #a7b5ad; font-size: 11.5px; letter-spacing: 0.01em;
+  padding-left: 4px; flex-shrink: 0;
 }
-.selection-tray input::placeholder { color: #aab5af; }
+.selection-tray .select-n {
+  color: #ffffff; font-size: 14px; font-weight: 600; margin-right: 3px;
+}
+/* The album field: paper's grammar inverted for ink. The label lives inside
+   the control, so the field names itself without spending a row, and the whole
+   thing lights up on focus the way the sage-ringed inputs do on the canvas. */
+.selection-tray .tray-field {
+  display: inline-flex; align-items: center; gap: 8px;
+  /* Basis, not a shrinkable basis: Chrome sizes a wrapping flex container's
+     max-content from a shrinkable item's CONTENT width, not its flex-basis, so
+     `0 1 260px` under-reported the tray by the 40px the field could have given
+     up — and "Clear" wrapped onto a row of its own at 1440. */
+  flex: 0 0 260px; min-width: 0;
+  padding: 2px 4px 2px 11px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid rgba(255, 255, 255, 0.20); border-radius: 999px;
+  cursor: text;
+  transition: border-color var(--t-quick), background var(--t-quick);
+}
+.selection-tray .tray-field:hover { border-color: rgba(255, 255, 255, 0.34); }
+.selection-tray .tray-field:focus-within {
+  border-color: var(--accent-soft); background: rgba(255, 255, 255, 0.16);
+}
+.selection-tray .tray-field-label {
+  flex-shrink: 0;
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em;
+  font-weight: 600; color: #a7b5ad;
+}
+.selection-tray input {
+  flex: 1; min-width: 0; width: 100%;
+  padding: 7px 10px 7px 0; margin: 0;
+  background: none; border: none; outline: none;
+  color: #ffffff; caret-color: var(--accent-soft);
+  font-family: var(--font-sans); font-size: 13px; line-height: 1.2;
+}
+.selection-tray input::placeholder { color: #8d9a93; }
+
+/* Suggestions the product draws itself. A datalist popup arrives in the OS's
+   type and colours, which on the tray's ink reads as a hole; this opens upward
+   because the tray is pinned to the bottom of the viewport. */
+.combo { position: relative; flex: 1; min-width: 0; display: flex; }
+.combo-list {
+  position: absolute; left: -11px; right: -4px; bottom: calc(100% + 10px);
+  z-index: 3; margin: 0; padding: 4px; list-style: none;
+  max-height: 210px; overflow-y: auto;
+  background: var(--bg-raised); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+}
+.combo-list li {
+  padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.combo-list li.active { background: var(--accent-wash); color: var(--accent-deep); }
+/* The field carries the focus state, so the input inside it does not also
+   draw a ring — one control, one outline. */
+.selection-tray input:focus-visible { outline: none; }
 .selection-tray .ghost {
   color: #e6ece9; border-color: rgba(255, 255, 255, 0.28); background: none;
+  padding: 7px 14px; border-radius: 999px; font-size: 12.5px;
 }
-.selection-tray .primary { background: var(--accent); border-radius: 999px; }
+.selection-tray .ghost:hover:not(:disabled) {
+  color: #ffffff; border-color: rgba(255, 255, 255, 0.55);
+}
+.selection-tray .ghost:disabled { opacity: 0.45; }
+.selection-tray .primary {
+  background: var(--accent); border-radius: 999px;
+  padding: 8px 16px; font-size: 13px;
+}
+/* The two exits are one wrapping unit: below ~740px the tray breaks between
+   the album action and these, instead of leaving "Clear" alone on row two. */
+.selection-tray .tray-acts {
+  display: inline-flex; align-items: center; flex-shrink: 0;
+}
+.selection-tray .tray-acts > * + * { margin-left: 10px; }
+/* Compare is only defined on a pair, and the rule travels with the control
+   rather than the control vanishing. The two wrap as one unit. */
+.selection-tray .tray-compare {
+  display: inline-flex; align-items: center; gap: 7px; min-width: 0;
+}
+.selection-tray .tray-rule {
+  font-size: 10.5px; color: #a7b5ad; white-space: nowrap;
+}
+/* Sage at full strength disappears against the tray's ink; the soft tier is
+   the same brand hand, read the other way round. */
+.selection-tray :focus-visible { outline-color: var(--accent-soft); }
 @keyframes tray-in {
   from { opacity: 0; transform: translate(-50%, 10px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
-.selection-tray input { width: 250px; }
 .select-count {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 12px; color: var(--text-dim); white-space: nowrap;
+}
+/* Below 1100px the left rail is a horizontal strip, so there is no column to
+   offset against — and this has to be stated AFTER the tray's own `left`,
+   which otherwise wins on source order and pushed the tray 120px off the
+   right edge of a phone viewport. */
+@media (max-width: 1100px) {
+  .selection-tray { left: 50%; }
+  /* A narrower field keeps the whole tray on one row down to ~740px, and where
+     it does wrap the break lands between the album action and the pair action
+     rather than stranding "Clear" alone on a second row. */
+  .selection-tray .tray-field { flex-basis: 220px; }
+}
+/* Phone: five controls cannot share one row honestly. A three-row grid keeps
+   the count and the exits on the edges, gives the album field the full width
+   it needs to be typed into, and pairs each action with its rule. */
+@media (max-width: 620px) {
+  .selection-tray {
+    left: 12px; right: 12px; transform: none; width: auto; max-width: none;
+    display: grid; grid-template-columns: 1fr auto; gap: 9px 10px;
+    grid-template-areas:
+      "count clear"
+      "field field"
+      "add   compare";
+    padding: 11px 13px; border-radius: var(--radius);
+    animation-name: tray-in-flat;
+  }
+  /* Grid tracks carry the spacing here; the desktop margin would offset the
+     cells inside them. `display: contents` dissolves the exits' wrapper so
+     Compare and Clear land in their own cells rather than as one block. */
+  .selection-tray > * + * { margin-left: 0; }
+  .selection-tray .tray-acts { display: contents; }
+  .selection-tray .tray-acts > * + * { margin-left: 0; }
+  .selection-tray .select-count { grid-area: count; align-self: center; padding-left: 2px; }
+  .selection-tray .tray-clear { grid-area: clear; justify-self: end; }
+  .selection-tray .tray-field { grid-area: field; flex: 1 1 auto; }
+  .selection-tray .primary { grid-area: add; }
+  .selection-tray .tray-compare {
+    grid-area: compare; justify-self: end;
+    flex-direction: column; align-items: flex-end; gap: 2px;
+  }
+}
+@keyframes tray-in-flat {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
 }
 /* An engaged toggle (Compare's draw mode) wears the accent to say so. */
 .ghost.select-on { color: var(--accent); border-color: var(--accent); }
@@ -1297,7 +1558,10 @@ mark {
 .suspect-more { margin-top: 10px; }
 @media (max-width: 700px) {
   .suspect-sib, .suspect-head .suspect-sib { display: none; }
-  .suspect-split, .suspect-head .suspect-split { width: 46px; }
+  /* 64px, because "validation" is the widest split name and a 46px column had
+     it spilling past the row's right edge; the caption column absorbs the
+     difference, which is what it is there for. */
+  .suspect-split, .suspect-head .suspect-split { width: 64px; }
 }
 .agree-badge {
   font-size: 10.5px; padding: 1px 7px; border-radius: 999px; margin-left: 6px;
@@ -1363,8 +1627,15 @@ mark {
 }
 .chat-session-open:disabled { cursor: default; }
 .chat-session.active .chat-session-open { color: var(--accent-deep); font-weight: 600; }
+/* Two lines, then an ellipsis. A conversation's title is the question that
+   started it, and one clipped line of a question — "How many images in the
+   train split have…" — rarely tells two of them apart. The full text stays
+   available as the tooltip and the accessible name; this is only what fits.
+   `anywhere` because a pasted id list or URL has no space to break at. */
 .chat-session-title {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px;
+  font-size: 12.5px; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere;
 }
 .chat-session-when { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); }
 /* Rename/delete surface on hover or keyboard focus; opacity only, so nothing
@@ -1398,15 +1669,24 @@ mark {
    leads, the empty canvas does not. */
 .chat-resume-list { display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
 .chat-resume {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
   padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-raised); cursor: pointer; font: inherit; color: var(--text-dim);
   text-align: left; transition: border-color var(--t-quick), color var(--t-quick);
 }
 .chat-resume:hover { color: var(--accent-deep); border-color: var(--accent); }
-.chat-resume-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Same two-line contract as the register entries, so a title reads the same
+   in both places a person meets it. */
+.chat-resume-title {
+  min-width: 0; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere;
+}
 .chat-resume-when {
   font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); flex: none;
+  /* Holds the timestamp on the first line's baseline now that the title beside
+     it can be two lines tall. */
+  line-height: 1.4;
 }
 @media (max-width: 900px) { .chat-sessions { width: 168px; } }
 /* Phone width: a fixed-width register beside the transcript leaves neither
@@ -1422,6 +1702,9 @@ mark {
   .chat-sessions-none { margin: 0 0 0 8px; }
   .chat-session-list { display: flex; gap: 4px; margin-left: 8px; }
   .chat-session { flex: none; max-width: 200px; margin-bottom: 0; }
+  /* The register is a horizontal shelf here, so a second title line costs
+     every entry its height. One line, then the ellipsis. */
+  .chat-session-title { -webkit-line-clamp: 1; }
   .chat-main { min-height: 0; }
 }
 .chat-turn { display: flex; margin-bottom: 13px; }
@@ -1452,7 +1735,6 @@ mark {
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
-  .card:hover { transform: none; }
 }
 
 /* ---- Sample inspector: difficulty, expanded ---------------------------
