@@ -704,3 +704,52 @@ def assistant_canvas(pg, ok):
         ok("drilling a chart lands on that slice in the gallery",
            bool(chips) and len(pg.query_selector_all(".grid .card")) > 0,
            f"{len(pg.query_selector_all('.grid .card'))} cards; {'; '.join(chips)[:50]}")
+
+
+@flow("Compare", budget_s=60.0)
+def compare(pg, ok):
+    """Two samples under one loupe: the transform is genuinely shared, the
+    shared/different readout renders, and region drawing is reachable.
+
+    The wheel is dispatched as a raw WheelEvent because the page's zoom
+    listener is a native non-passive one (React's delegated wheel is passive,
+    so preventDefault would be ignored) — Playwright's mouse.wheel would work
+    too, but the dispatch pins the coordinates to pane A's centre exactly.
+
+    The annotations endpoint is optional (same contract as saved views in the
+    palette: 404 means "not mounted", and the page must stay quiet). But the
+    probe's 404 still hits the browser console, and the sweep's health verdict
+    is zero console errors — so the endpoint is stubbed empty here. This flow
+    tests the compare canvas, not the annotations router; whether that router
+    is mounted must not decide whether the whole application is healthy.
+    """
+    pg.route("**/api/samples/*/annotations",
+             lambda r: r.fulfill(status=200, content_type="application/json",
+                                 body="[]"))
+    pg.goto(url("/compare?a=76&b=2259"), wait_until="domcontentloaded")
+    pg.wait_for_selector(".compare-pane img", timeout=25000)
+    pg.wait_for_timeout(800)
+    imgs = pg.eval_on_selector_all(
+        ".compare-pane img", "els=>els.filter(e=>e.naturalWidth>0).length")
+    ok("both panes render an image", imgs == 2, f"{imgs} decoded")
+
+    # One wheel on pane A must move BOTH layers, identically: the inline
+    # transform is the single shared view state, so the two strings are equal
+    # by construction — if they ever differ, the panes have grown two views.
+    pg.eval_on_selector(".compare-pane[data-slot='a'] .pane-stage", """e=>{
+        const r = e.getBoundingClientRect();
+        e.dispatchEvent(new WheelEvent('wheel', {
+            deltaY: -240, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2,
+            bubbles: true, cancelable: true}));
+    }""")
+    pg.wait_for_timeout(400)
+    t = pg.eval_on_selector_all(".compare-img-layer", "els=>els.map(e=>e.style.transform)")
+    ok("wheel zoom applies one shared transform",
+       len(t) == 2 and t[0] == t[1] and "scale(1)" not in t[0],
+       " == ".join(t)[:110])
+
+    rows = len(pg.query_selector_all(".compare-diff .diff-row"))
+    ok("shared/different panel renders attribute rows", rows >= 3, f"{rows} rows")
+    toggles = len(pg.query_selector_all(".compare-pane .draw-toggle"))
+    ok("region drawing is reachable on both panes", toggles == 2,
+       f"{toggles} Draw region toggles")

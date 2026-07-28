@@ -14,6 +14,7 @@ const StatsPage = lazy(() => import("./pages/StatsPage"));
 const QualityPage = lazy(() => import("./pages/QualityPage"));
 const EvalPage = lazy(() => import("./pages/EvalPage"));
 const ChatPage = lazy(() => import("./pages/ChatPage"));
+const ComparePage = lazy(() => import("./pages/ComparePage"));
 
 /**
  * Three columns: inputs on the left, the artifact in the middle, the set on the
@@ -42,6 +43,7 @@ export default function App() {
             <Route path="/quality" element={<QualityPage />} />
             <Route path="/eval" element={<EvalPage />} />
             <Route path="/chat" element={<ChatPage />} />
+            <Route path="/compare" element={<ComparePage />} />
             {/* An unmatched path must say so — on a near-black theme, an
                 empty <Routes> is indistinguishable from a crashed build. */}
             <Route path="*" element={
