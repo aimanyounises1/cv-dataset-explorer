@@ -253,8 +253,15 @@ function ModelsCard({ overview: ov, chat }:
   const total = ov?.total_samples ?? 0;
   const tagged = ov?.vlm_enriched ?? 0;
   const pct = total > 0 ? Math.round((100 * tagged) / total) : 0;
-  const enrichState = tagged === 0 ? "not run"
+  // vlm_ready = is the model pulled NOW; vlm_enriched = past work. A corpus
+  // can be tagged while the model is gone, or untagged while it waits.
+  const vlmReady = ov?.vlm_ready === true;
+  const enrichState = tagged === 0
+    ? (ov && !vlmReady ? "model not pulled" : "not run")
     : pct === 0 ? "<1% tagged" : `${pct}% tagged`;
+  const enrichHint = ov && !vlmReady
+    ? `ollama pull ${ov.vlm_model ?? "qwen2.5vl:7b"} — nothing downloads without you`
+    : undefined;
 
   return (
     <div className="models-card">
@@ -281,7 +288,7 @@ function ModelsCard({ overview: ov, chat }:
         <span className="models-name" title={ov?.vlm_model ?? undefined}>
           {shortModel(ov?.vlm_model) ?? "VLM tags"}
         </span>
-        <span className="models-state">{enrichState}</span>
+        <span className="models-state" title={enrichHint}>{enrichState}</span>
       </div>
       {/* Verbatim by requirement: the tool's one-sentence privacy statement. */}
       <p className="models-foot">

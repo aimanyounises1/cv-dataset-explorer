@@ -27,6 +27,9 @@ def clear_caches() -> None:
             f.unlink(missing_ok=True)
 
 
+_VLM_PROBE: tuple[float, bool] | None = None
+
+
 @router.get("/stats/overview", response_model=StatsOverview)
 def overview(conn: sqlite3.Connection = Depends(get_conn)):
     total = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
@@ -51,6 +54,28 @@ def overview(conn: sqlite3.Connection = Depends(get_conn)):
     from .. import config
     from ..ml import providers
 
+    def _vlm_model_ready() -> bool:
+        """Is the enrichment model actually pulled in Ollama? Cached for 60 s
+        so a wedged Ollama cannot slow every overview call; connection refused
+        is instant. Never triggers a download — readiness is reported, the
+        command to fix it is the UI's job."""
+        global _VLM_PROBE
+        import time as _time
+
+        import httpx
+        now = _time.monotonic()
+        if _VLM_PROBE is not None and now - _VLM_PROBE[0] < 60:
+            return _VLM_PROBE[1]
+        ok = False
+        try:
+            r = httpx.get(f"{config.OLLAMA_URL}/api/tags", timeout=1.0)
+            names = [m.get("name", "") for m in r.json().get("models", [])]
+            ok = any(n.startswith(config.VLM_MODEL.split(":")[0]) for n in names)
+        except Exception:
+            ok = False
+        _VLM_PROBE = (now, ok)
+        return ok
+
     pstate = providers.resolve()
     return StatsOverview(
         total_samples=total, total_captions=total_caps, splits=splits,
@@ -66,6 +91,7 @@ def overview(conn: sqlite3.Connection = Depends(get_conn)):
         embed_fallback_reason=pstate.fallback_reason,
         sim_floor=pstate.sim_floor,
         vlm_model=config.VLM_MODEL,
+        vlm_ready=_vlm_model_ready(),
         chat_model=config.CHAT_MODEL,
     )
 
