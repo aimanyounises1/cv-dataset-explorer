@@ -120,7 +120,7 @@ workflow and returns a status block inline:
 - a **screenshot of each workflow**, click to enlarge;
 - an expandable list of every individual check;
 - **`markdown` and `deck` download buttons.** The deck is a real `.pptx`
-  (18 slides, ~12 MB on that run): a title slide with the tally, then one slide
+  (18 slides, ~10 MB on that run): a title slide with the tally, then one slide
   per workflow with its status, screenshot and checks.
 
 Observed on that run: 106/106 checks, 17/17 flows, no console

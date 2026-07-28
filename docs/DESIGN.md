@@ -20,14 +20,22 @@ jobs-to-be-done, mirrored by the four views:
 ### SigLIP 2 embeddings, exact brute-force search
 Text-to-image retrieval is the single most useful capability for this user, and
 bi-encoder embeddings are the industry-standard first stage for it (this is what
-FiftyOne's semantic search does under the hood). SigLIP 2 base was chosen over
-original CLIP for strictly better zero-shot retrieval at similar cost; it runs
-on MPS/CUDA/CPU.
+FiftyOne's semantic search does under the hood). SigLIP 2 base was chosen on its
+published zero-shot retrieval results and its size; no CLIP baseline was ever
+run here, so this repo cannot claim a margin over CLIP. The one head-to-head it
+*did* measure is SigLIP 2 against Qwen3-VL — R@1 55.2 vs 50.2 at ~5x the encode
+speed (`scripts/bench_providers.py`, n=1000) — which is why SigLIP 2 is the
+default. It runs on MPS/CUDA/CPU.
 
-At 8k × 768 floats (~24 MB), an exact numpy matmul answers a query in ~1 ms.
-A vector database or ANN index would add operational and build complexity for
-zero benefit below ~400k vectors — measured, see docs/TECHNICAL.md. The `EmbeddingIndex` class is the seam where
-FAISS/sqlite-vec would slot in if the dataset grew.
+At 8k × 768 floats (24.6 MB), an exact numpy matmul answers a query in 0.18 ms —
+against the 7–8 ms SigLIP text encode it waits behind, so the scan is not what
+costs anything at this size (docs/TECHNICAL.md). A vector database or ANN index
+would add operational and build complexity for no benefit anyone here has been
+able to measure. The ~400k crossover quoted elsewhere is arithmetic on a scan
+trend, an *estimated* crossover rather than permission to adopt: it says nothing
+about recall, and a real FAISS recall/latency benchmark would have to come first.
+The `EmbeddingIndex` class is the seam where FAISS/sqlite-vec would slot in if
+the dataset grew.
 
 ### Hybrid search (RRF)
 Embeddings miss exact-term queries ("Frisbee"), FTS misses paraphrases ("pet
