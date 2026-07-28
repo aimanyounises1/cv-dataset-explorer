@@ -33,6 +33,7 @@ from ..ml.prism import get_prism_index
 from ..schemas import MatchPath, SampleCard, SearchRequest, SearchResponse, TermStat
 from .deps import (
     MAX_ID_LIST,
+    MAX_SQLITE_INT,
     SORT_KEYS,
     axis_bounds,
     build_filters,
@@ -54,7 +55,7 @@ router = APIRouter()
 def _keyword_ranking(
     conn, q: str, top_k: int,
     split=None, tag=None, vlm_tag=None, attr=None, axes=None, ids=None,
-    ids_staged=False, max_agreement=None,
+    ids_staged=False, max_agreement=None, album=None,
 ) -> tuple[list[int], dict[int, str]]:
     """Ranked sample ids + the best-matching caption per sample.
     Filters — including axis ranges — are part of the SQL, applied before LIMIT."""
@@ -62,7 +63,7 @@ def _keyword_ranking(
     if not match:
         return [], {}
     where, params = build_filters(split, tag, vlm_tag, attr, axes, ids, ids_staged,
-                                  max_agreement)
+                                  max_agreement, album=album)
     and_where = where.replace(" WHERE ", " AND ", 1) if where else ""
     rows = conn.execute(
         "SELECT c.sample_id AS sid, MIN(rank) AS best, c.text AS caption_text "
@@ -257,6 +258,7 @@ def run_search(
     attr: Optional[Union[str, list[str]]] = None,
     offset: int = 0, axes: Optional[dict] = None, sort: Optional[str] = None,
     ids: Optional[list[str]] = None, max_agreement: Optional[float] = None,
+    album: Optional[int] = None,
 ) -> SearchResponse:
     """Core search service — used by the API endpoint, the export route, and the
     assistant's agent tools (same code path, same behavior).
@@ -278,7 +280,7 @@ def run_search(
     # IN (...) list would exceed SQLite's host-parameter ceiling.
     ids_staged = stage_id_list(conn, ids) if ids else False
     allowed = filtered_id_set(conn, split, tag, vlm_tag, attr, axes, ids, ids_staged,
-                              max_agreement)
+                              max_agreement, album=album)
     # How many pasted entries actually exist here. Reported rather than enforced:
     # a list carried over from a bigger corpus is a normal thing to paste, and
     # the useful response is "412 of your 500 are in this dataset", not an error.
@@ -337,7 +339,7 @@ def run_search(
     elif mode == "keyword":
         ranked, match_captions = _keyword_ranking(
             conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged,
-            max_agreement)
+            max_agreement, album)
         record("keyword", ranked)
         # The terms that actually constrained the match, so highlighting
         # marks what was searched for rather than every word typed.
@@ -345,7 +347,7 @@ def run_search(
     else:  # hybrid: reciprocal-rank fusion
         keyword, kw_captions = _keyword_ranking(
             conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged,
-            max_agreement)
+            max_agreement, album)
         rrf_k = config.RRF_K
         fused: dict[int, float] = {}
         for rank, (sid, _s) in enumerate(semantic):
@@ -423,11 +425,15 @@ def search(
     attr: Optional[list[str]] = Query(
         None, description="Attribute facet 'group:label'. Repeatable: several "
                           "are intersected."),
+    album: Optional[int] = Query(None, ge=1, le=MAX_SQLITE_INT,
+                                 description="Restrict candidates to members "
+                                             "of this album"),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     return run_search(conn, q, mode=mode, top_k=top_k, split=split, tag=tag,
                       vlm_tag=vlm_tag, attr=attr, offset=offset, axes=axes,
-                      sort=sort, ids=ids, max_agreement=max_agreement)
+                      sort=sort, ids=ids, max_agreement=max_agreement,
+                      album=album)
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -448,7 +454,7 @@ def search_post(body: SearchRequest, conn: sqlite3.Connection = Depends(get_conn
                       split=body.split, tag=body.tag, vlm_tag=body.vlm_tag,
                       attr=body.attr, offset=body.offset, axes=axes,
                       sort=body.sort, ids=entries,
-                      max_agreement=body.max_agreement)
+                      max_agreement=body.max_agreement, album=body.album)
 
 
 # A query image is one file, so it needs no form envelope — the raw request
