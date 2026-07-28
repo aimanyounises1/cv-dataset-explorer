@@ -152,51 +152,49 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
             opening it. */}
         <span className="frame-no">{sample.id}</span>
         {selected && <span className="pick-mark" aria-hidden="true">✓</span>}
+        {/* The images lead; the diagnostics wait. Everything below stays in
+            the DOM (tests count it, keyboard focus reveals it) but paints
+            only on hover — the mock's rule: hide secondary detail until it
+            is requested. The sample page still shows all of it, always. */}
+        <div className="card-details">
+          <div className="card-evidence">
+            <span className="ev">{sample.split}</span>
+            {sample.match_paths?.map((p) => (
+              <span key={p.path} className="ev ev-path"
+                    title={`Retrieved by ${p.path} search at rank ${p.rank}`}>
+                {PATH_LABEL[p.path] ?? p.path} {p.rank}
+              </span>
+            ))}
+            {sample.score != null && basis && (
+              <span className="ev ev-score" title={SCORE_HELP[basis] ?? "Search relevance"}>
+                {SCORE_LABEL[basis] ?? basis} {sample.score.toFixed(3)}
+              </span>
+            )}
+          </div>
+          {sample.axes && (
+            <div className="card-axis-row">
+              <AxisSparkline axes={sample.axes} />
+              {hardest && (
+                <span className={`axis-lead ${heatBand(hardest.v)}`}
+                      title={`Highest axis: ${AXIS_META[hardest.axis].label} ${hardest.v}/10 `
+                             + `(${AXIS_META[hardest.axis].low} → ${AXIS_META[hardest.axis].high}). `
+                             + AXIS_META[hardest.axis].hint}>
+                  {AXIS_ABBR[hardest.axis]} {hardest.v}
+                </span>
+              )}
+            </div>
+          )}
+          {reasons.length > 0 && (
+            <div className="axis-why" title="Templated from the measured components, not generated">
+              {reasons.join(" · ")}
+            </div>
+          )}
+        </div>
       </div>
       <div className="card-body">
         <div className="card-caption" title={caption}>
           <Highlight text={caption} terms={sample.matched_terms} />
         </div>
-        {/* Evidence strip: provenance, then the paths that retrieved this
-            frame and where it placed in each, then the score. Same order
-            every time, so it can be read at a glance across a grid. */}
-        <div className="card-evidence">
-          <span className="ev">{sample.split}</span>
-          {sample.match_paths?.map((p) => (
-            <span key={p.path} className="ev ev-path"
-                  title={`Retrieved by ${p.path} search at rank ${p.rank}`}>
-              {PATH_LABEL[p.path] ?? p.path} {p.rank}
-            </span>
-          ))}
-          {sample.score != null && basis && (
-            <span className="ev ev-score" title={SCORE_HELP[basis] ?? "Search relevance"}>
-              {SCORE_LABEL[basis] ?? basis} {sample.score.toFixed(3)}
-            </span>
-          )}
-        </div>
-        {/* Difficulty axes. The strip above answers "why did the search return
-            this?"; this row answers "why is this one worth my time?"
-            One sparkline instead of four numbers: the profile is the signal, and
-            exact values live in the tooltip and on the detail page. */}
-        {sample.axes && (
-          <div className="card-axis-row">
-            <AxisSparkline axes={sample.axes} />
-            {hardest && (
-              <span className={`axis-lead ${heatBand(hardest.v)}`}
-                    title={`Highest axis: ${AXIS_META[hardest.axis].label} ${hardest.v}/10 `
-                           + `(${AXIS_META[hardest.axis].low} → ${AXIS_META[hardest.axis].high}). `
-                           + AXIS_META[hardest.axis].hint}>
-                {AXIS_ABBR[hardest.axis]} {hardest.v}
-              </span>
-            )}
-          </div>
-        )}
-        {/* One templated line naming what actually makes this sample hard. */}
-        {reasons.length > 0 && (
-          <div className="axis-why" title="Templated from the measured components, not generated">
-            {reasons.join(" · ")}
-          </div>
-        )}
       </div>
     </Link>
   );
