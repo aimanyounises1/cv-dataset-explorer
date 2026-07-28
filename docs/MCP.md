@@ -14,6 +14,8 @@ assistant use, so every client sees identical answers.
 | `search_images` | ranked search, any mode, with `score_basis` and degradation message | — |
 | `get_sample` | captions + agreement, tags, difficulty axes, metadata | — |
 | `find_similar` | nearest neighbours in the ACTIVE embedding index | — |
+| `list_annotations` | paginated saved rectangles and object masks, including label ancestry and mask URLs | — |
+| `find_similar_to_annotation` | retrieval from one accepted object mask, with its exact score basis | — |
 | `dataset_stats` | corpus counts, splits, active retrieval provider + fallback reason | — |
 | `audit_captions` | lowest image–caption agreement first (ingest-time SigLIP scores) | — |
 | `get_album` | album metadata + ordered member ids | — |
@@ -49,7 +51,7 @@ Any MCP client that speaks Streamable HTTP connects with just the URL:
   `http://localhost:8000/mcp`.
 - **LangGraph / LangChain**: `pip install langchain-mcp-adapters`, then
   `MultiServerMCPClient({"cvde": {"transport": "streamable_http", "url":
-  "http://localhost:8000/mcp"}})` yields the six tools as LangChain tools.
+  "http://localhost:8000/mcp"}})` yields the eight tools as LangChain tools.
   (The in-app assistant does NOT go through MCP — it calls the service layer
   directly; MCP is the door for agents living outside this process.)
 - **Anything else**: POST the three requests above; notifications (requests

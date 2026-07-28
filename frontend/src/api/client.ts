@@ -4,6 +4,9 @@ import type {
   AlbumDetail, AlbumSummary, ComposedQuery, ScenarioResponse,
   DescribeResponse, LeakageReport,
   DuplicatePair, EvalResponse, MapPoint, QASelection, QASummary, SampleCard,
+  DetectResponse, DetectStatus, ObjectLabel, RegionSearchRequest,
+  SegmentAnnotation, SegmentAnnotationCreate, SegmentResult,
+  SegmentRequest, SegmentStatus,
   SampleDetail, SampleList, SearchMode, SearchResponse, StatsOverview,
   SuspectCaption, TagInfo,
 } from "./types";
@@ -26,9 +29,11 @@ async function get<T>(path: string, params?: Params, signal?: AbortSignal): Prom
   return res.json() as Promise<T>;
 }
 
-async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function send<T>(
+  path: string, method: string, body?: unknown, signal?: AbortSignal,
+): Promise<T> {
   const res = await fetch(`/api${path}`, {
-    method,
+    method, signal,
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -76,6 +81,36 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
     return res.json() as Promise<SampleCard[]>;
   },
+
+  segmentStatus: (signal?: AbortSignal) =>
+    get<SegmentStatus>("/segment/status", undefined, signal),
+  segment: (body: SegmentRequest, signal?: AbortSignal) =>
+    send<SegmentResult>("/segment", "POST", body, signal),
+  listSegmentAnnotations: (sampleId: number, signal?: AbortSignal) =>
+    get<SegmentAnnotation[]>(
+      `/samples/${sampleId}/segment-annotations`, undefined, signal),
+  saveSegmentAnnotation: (
+    sampleId: number, body: SegmentAnnotationCreate, signal?: AbortSignal,
+  ) => send<SegmentAnnotation>(
+    `/samples/${sampleId}/segment-annotations`, "POST", body, signal),
+  deleteSegmentAnnotation: (annotationId: number, signal?: AbortSignal) =>
+    send<{ ok: boolean }>(
+      `/segment-annotations/${annotationId}`, "DELETE", undefined, signal),
+  searchByAnnotation: (
+    annotationId: number, topK = 24, signal?: AbortSignal,
+  ) => send<SearchResponse>(
+    "/search/by-annotation", "POST",
+    { annotation_id: annotationId, top_k: topK }, signal),
+  searchByRegion: (body: RegionSearchRequest, signal?: AbortSignal) =>
+    send<SearchResponse>("/search/by-region", "POST", body, signal),
+  detectStatus: (signal?: AbortSignal) =>
+    get<DetectStatus>("/detect/status", undefined, signal),
+  detectRegions: (
+    sampleId: number, queries: string, signal?: AbortSignal,
+  ) => send<DetectResponse>(
+    "/detect", "POST", { sample_id: sampleId, queries }, signal),
+  objectLabels: (signal?: AbortSignal) =>
+    get<ObjectLabel[]>("/object-labels", undefined, signal),
 
   overview: () => get<StatsOverview>("/stats/overview"),
   /** The workspace trail, newest first. A bare array by contract — see

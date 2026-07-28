@@ -24,6 +24,10 @@ _BASIS_MEANING = {
     "bm25": "BM25 relevance over caption text; not comparable with a cosine",
     "composed": ("composed similarity against the reference image(s) and text, "
                  "0-1 unless an exclusion pushes it negative"),
+    "segment_cosine": ("cosine similarity from a masked-object image query "
+                       "against the full-image index"),
+    "segment_composed": ("normalized mean of masked-object image evidence and "
+                         "its leaf-label text, ranked against the full-image index"),
     "image_caption_agreement": ("SigLIP cosine between this caption and its OWN "
                                 "image, 0-1 — low means the caption is not "
                                 "supported by the picture"),
@@ -100,6 +104,75 @@ def find_similar(sample_id: int, top_k: int = 8) -> str:
 
 
 @tool
+def list_annotations(
+    sample_id: int,
+    limit: int = 20,
+    offset: int = 0,
+) -> str:
+    """List the human-saved regions and object masks for one sample, including
+    explicit object-label ancestry and mask URLs. Results are paginated; limit
+    is capped at 50. This tool never writes."""
+    from ..api.annotations import _row_out
+
+    conn = db.connect()
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM samples WHERE id = ?", (sample_id,)).fetchone()
+        if exists is None:
+            return json.dumps({"error": f"sample {sample_id} not found"})
+        page_size = max(1, min(limit, 50))
+        start = max(0, offset)
+        total = conn.execute(
+            "SELECT COUNT(*) FROM annotations WHERE sample_id = ?",
+            (sample_id,),
+        ).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM annotations WHERE sample_id = ? ORDER BY id "
+            "LIMIT ? OFFSET ?",
+            (sample_id, page_size, start),
+        )
+        annotations = [_row_out(conn, row).model_dump() for row in rows]
+        next_offset = start + len(annotations)
+        return json.dumps({
+            "sample_id": sample_id,
+            "total": total,
+            "offset": start,
+            "next_offset": next_offset if next_offset < total else None,
+            "annotations": annotations,
+        })
+    finally:
+        conn.close()
+
+
+@tool
+def find_similar_to_annotation(annotation_id: int, top_k: int = 8) -> str:
+    """Find other images resembling one saved object mask. A semantic leaf
+    label, when present, is blended with the masked-object image evidence."""
+    from ..api.search import run_annotation_search
+    from ..schemas import AnnotationSearchRequest
+
+    conn = db.connect()
+    try:
+        try:
+            result = run_annotation_search(
+                conn, AnnotationSearchRequest(
+                    annotation_id=annotation_id, top_k=min(top_k, 20)))
+        except Exception as exc:  # service errors become tool-readable errors
+            return json.dumps({"error": str(getattr(exc, "detail", exc))})
+        return json.dumps({
+            "mode_used": result.mode_used,
+            "score_basis": result.score_basis,
+            "score_meaning": _BASIS_MEANING.get(
+                result.score_basis or "", "see score_basis"),
+            "message": result.message,
+            "results": _cards(result.items, result.score_basis),
+            "sample_ids": [item.id for item in result.items],
+        })
+    finally:
+        conn.close()
+
+
+@tool
 def get_sample_details(sample_id: int) -> str:
     """Get full details for one sample: all captions (with image-caption
     agreement scores), user tags, VLM tags, zero-shot attributes, metadata."""
@@ -117,10 +190,24 @@ def get_sample_details(sample_id: int) -> str:
         tags = [r["name"] for r in conn.execute(
             "SELECT t.name FROM tags t JOIN sample_tags st ON st.tag_id = t.id "
             "WHERE st.sample_id = ?", (sample_id,))]
+        annotation_count = conn.execute(
+            "SELECT COUNT(*) FROM annotations WHERE sample_id = ?",
+            (sample_id,),
+        ).fetchone()[0]
+        annotation_summary = [
+            {"id": r["id"], "kind": r["kind"], "label": r["label"]}
+            for r in conn.execute(
+                "SELECT id, kind, label FROM annotations "
+                "WHERE sample_id = ? ORDER BY id LIMIT 10",
+                (sample_id,),
+            )
+        ]
         return json.dumps({
             "sample_id": sample_id, "filename": row["filename"], "split": row["split"],
             "width": row["width"], "height": row["height"],
             "captions": captions, "attributes": attrs, "tags": tags,
+            "annotation_count": annotation_count,
+            "annotation_summary": annotation_summary,
             "sample_ids": [sample_id],
         })
     finally:

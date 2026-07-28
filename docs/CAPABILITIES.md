@@ -9,14 +9,14 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 56 HTTP endpoints · 4 agent specialists · 20 agent tools · 17 tested workflows
+- 63 HTTP endpoints · 4 agent specialists · 22 agent tools · 17 tested workflows
 
 ## Views
 
 | Job | Route | View | What it is for |
 | --- | --- | --- | --- |
 | Find | `/` | Browse | Browse and search; every filter and the paging depth live in the URL. |
-| — | `/samples/:id` | Sample | One image: all captions with agreement scores, attributes, tags, difficulty axes, exact nearest neighbours. |
+| — | `/samples/:id` | Sample | One image: captions, attributes, exact neighbours, and a promptable object-mask editor with annotation search. |
 | Find | `/map` | Embedding map | UMAP projection of all embeddings. Lasso a region to hand that exact set to the gallery. |
 | Trust | `/stats` | Overview | Splits, caption lengths, vocabulary, image sizes, zero-shot attribute coverage. Bars open their slice. |
 | Audit | `/quality` | Caption quality | Caption agreement distribution with a review threshold; the selection can leave as a gallery filter or an export. |
@@ -39,6 +39,8 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `GET /api/samples/{sample_id}` | Get Sample |
 | `GET /api/samples/{sample_id}/annotations` | List Annotations |
 | `POST /api/samples/{sample_id}/annotations` | Add Annotation |
+| `GET /api/samples/{sample_id}/segment-annotations` | List Segment Annotations |
+| `POST /api/samples/{sample_id}/segment-annotations` | Accept Segment Annotation |
 | `GET /api/samples/{sample_id}/similar` | Similar Samples |
 | `POST /api/samples/{sample_id}/tags` | Add Tag |
 | `DELETE /api/samples/{sample_id}/tags/{name}` | Remove Tag |
@@ -51,10 +53,14 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `GET /api/detect/status` | Detect Status |
 | `GET /api/search` | Search |
 | `POST /api/search` | Search Post |
+| `POST /api/search/by-annotation` | Search By Annotation |
 | `POST /api/search/by-image` | Search By Image |
 | `POST /api/search/by-region` | Search By Region |
 | `POST /api/search/composed` | Search Composed |
 | `POST /api/search/scenarios` | Search Scenarios |
+| `POST /api/segment` | Preview Segment |
+| `DELETE /api/segment-annotations/{annotation_id}` | Delete Segment Annotation |
+| `GET /api/segment/status` | Segment Status |
 
 ### Statistics and map
 
@@ -104,6 +110,8 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `PUT /api/albums/{album_id}/items/order` | Reorder Items |
 | `DELETE /api/albums/{album_id}/items/{sample_id}` | Remove Item |
 | `DELETE /api/annotations/{annotation_id}` | Delete Annotation |
+| `GET /api/annotations/{annotation_id}/mask` | Get Annotation Mask |
+| `GET /api/object-labels` | List Object Labels |
 | `GET /api/tags` | List Tags |
 | `POST /api/tags/bulk` | Bulk Tag |
 | `GET /api/views` | List Views |
@@ -158,7 +166,9 @@ Finding or showing images: search, similar images, inspecting or tagging specifi
 
 - `search_images`
 - `find_similar`
+- `find_similar_to_annotation`
 - `get_sample_details`
+- `list_annotations`
 - `tag_samples`
 - `inspect_album`
 
@@ -227,6 +237,8 @@ and by the assistant on request — one registry, three consumers.
 | --- | --- | --- |
 | Semantic search, map, benchmark | `requirements.txt` + `app.ingest` | Browsing, keyword search and stats still work; the UI says which features are unavailable. |
 | Caption QA, attributes, difficulty axes | `app.analyze` | Those views explain the command to run. |
+| Region suggestions | cached Grounding DINO tiny weights | Manual point/box prompting remains available; the UI names the fetch command. |
+| Promptable masks | cached SAM 2.1 tiny weights | Rectangle search remains available; the UI names the fetch command and never downloads on request. |
 | Assistant | `requirements-agent.txt` + Ollama | The tab shows exact setup instructions; nothing else is affected. |
 | Application self-QA | `requirements-qa.txt` (Playwright) | `POST /api/qa/run` returns 503 with setup instructions. |
 | PowerPoint deck | `python-pptx` | The Markdown report is still produced and says the deck was skipped. |

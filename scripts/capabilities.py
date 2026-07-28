@@ -32,14 +32,14 @@ GROUPS = [
     ("Browse and inspect", ("/api/samples", "/api/export")),
     # The detector exists only to propose regions for a search to use, so it
     # is documented where its results are consumed.
-    ("Search", ("/api/search", "/api/detect")),
+    ("Search", ("/api/search", "/api/detect", "/api/segment")),
     ("Statistics and map", ("/api/stats", "/api/map", "/api/attributes",
                             "/api/describe")),
     ("Annotation QA", ("/api/qa/summary", "/api/qa/captions", "/api/qa/consistency",
                        "/api/qa/selection")),
     ("Retrieval benchmark", ("/api/eval",)),
     ("Curation", ("/api/tags", "/api/vlm-tags", "/api/views", "/api/albums",
-                  "/api/annotations", "/api/activity")),
+                  "/api/annotations", "/api/object-labels", "/api/activity")),
     ("Assistant", ("/api/chat", "/api/agent", "/api/reports")),
     ("Other agents (MCP)", ("/mcp",)),
     ("Application self-QA", ("/api/qa/run", "/api/qa/flows", "/api/qa/artifact")),
@@ -114,8 +114,8 @@ def render() -> str:
     w("| --- | --- | --- | --- |")
     purpose = {
         "/": "Browse and search; every filter and the paging depth live in the URL.",
-        "/samples/:id": "One image: all captions with agreement scores, attributes, "
-                        "tags, difficulty axes, exact nearest neighbours.",
+        "/samples/:id": "One image: captions, attributes, exact neighbours, and "
+                        "a promptable object-mask editor with annotation search.",
         "/map": "UMAP projection of all embeddings. Lasso a region to hand that "
                 "exact set to the gallery.",
         "/stats": "Splits, caption lengths, vocabulary, image sizes, zero-shot "
@@ -219,6 +219,10 @@ def render() -> str:
       "are unavailable. |")
     w("| Caption QA, attributes, difficulty axes | `app.analyze` | Those views "
       "explain the command to run. |")
+    w("| Region suggestions | cached Grounding DINO tiny weights | Manual "
+      "point/box prompting remains available; the UI names the fetch command. |")
+    w("| Promptable masks | cached SAM 2.1 tiny weights | Rectangle search remains "
+      "available; the UI names the fetch command and never downloads on request. |")
     w("| Assistant | `requirements-agent.txt` + Ollama | The tab shows exact setup "
       "instructions; nothing else is affected. |")
     w("| Application self-QA | `requirements-qa.txt` (Playwright) | "

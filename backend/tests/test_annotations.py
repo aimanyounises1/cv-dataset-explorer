@@ -68,6 +68,7 @@ def test_rect_geometry_is_validated(ctx):
     bad = [
         {"x": 1.5, "y": 0.2, "w": 0.3, "h": 0.4},     # out of range
         {"x": 0.1, "y": 0.2, "w": 0.0, "h": 0.4},     # zero width
+        {"x": 0.9, "y": 0.2, "w": 0.3, "h": 0.4},     # extends past right edge
         {"x": 0.1, "y": 0.2, "w": 0.3},               # missing key
         {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.4, "z": 1},  # extra key
         {"x": "0.1", "y": 0.2, "w": 0.3, "h": 0.4},   # string coordinate

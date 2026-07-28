@@ -5,11 +5,10 @@ a model ships with numbers or not at all: ~330 ms per image warm (p50 over a
 30-image sample; 267 ms fastest, 448 ms p95), ~1 GB resident, correct boxes
 ("a person", "a dog") on a real corpus image; cold load ~6 s once the weights
 are cached, plus a one-time ~700 MB download. `scripts/bench_detector.py`
-re-measures every number in this paragraph. SAM 2.1 hiera tiny was measured
-too (69 ms/mask warm, accurate masks, no instability) and is deliberately NOT
-shipped: erasing the background moves 63% of the top-10 while a caption-word
-proxy moves the on-target share +0.01, so a mask buys a different ranking
-rather than a better one. scripts/bench_sam2.py holds that measurement.
+re-measures every number in this paragraph. Grounding DINO proposals can feed
+the separately measured SAM 2.1 editor; masks are exposed for refinement,
+annotation and explicit object search, never presented as an automatic ranking
+improvement. ``scripts/bench_sam2.py`` records that product boundary.
 
 Same optional-layer contract as every ML capability: lazy singleton, its own
 inference lock (Metal cannot run one module concurrently), a cheap readiness
@@ -64,9 +63,10 @@ class _Detector:
 
         self.device = _pick_device()
         logger.info("Loading %s on %s", DETECT_MODEL, self.device)
-        self.processor = AutoProcessor.from_pretrained(DETECT_MODEL)
+        self.processor = AutoProcessor.from_pretrained(
+            DETECT_MODEL, local_files_only=True)
         self.model = GroundingDinoForObjectDetection.from_pretrained(
-            DETECT_MODEL).to(self.device).eval()
+            DETECT_MODEL, local_files_only=True).to(self.device).eval()
         self._torch = torch
         self._infer = threading.Lock()
 

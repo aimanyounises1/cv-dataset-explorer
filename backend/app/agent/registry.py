@@ -21,8 +21,10 @@ from .tools import (
     attribute_coverage,
     dataset_overview,
     find_similar,
+    find_similar_to_annotation,
     get_sample_details,
     inspect_album,
+    list_annotations,
     rare_slice_examples,
     search_images,
     suspect_captions,
@@ -72,8 +74,8 @@ Every tool result names its `score_basis`. Quote a score only with that basis,
 and never present a search score as a caption-agreement score: a hybrid search
 returns reciprocal-rank fusion values (around 0.016), which are ranks, not
 similarities, and mean nothing about whether a caption fits its image.""",
-    tools=[search_images, find_similar, get_sample_details, tag_samples,
-           inspect_album],
+    tools=[search_images, find_similar, find_similar_to_annotation,
+           get_sample_details, list_annotations, tag_samples, inspect_album],
 )
 
 INSIGHTS = Specialist(

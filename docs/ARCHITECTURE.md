@@ -15,7 +15,7 @@ flowchart TB
   end
 
   subgraph be["Backend — FastAPI, one process, sync endpoints on the threadpool"]
-    RT["Routers: samples · search · stats · map · tags · views · describe · attributes<br/>qa · qa_run · eval · leakage · admin · chat · albums · activity · annotations"]
+    RT["Routers: samples · search · segment · detect · stats · map · tags · views · describe · attributes<br/>qa · qa_run · eval · leakage · admin · chat · albums · activity · annotations"]
     SV["Service layer: run_search · build_filters · filtered_id_set<br/>one implementation, shared by REST, export and the agent tools"]
   end
 
@@ -23,10 +23,12 @@ flowchart TB
     EM["Embedder: SigLIP 2 text/image towers<br/>MPS · CUDA · CPU, inference serialized by a lock"]
     IX["EmbeddingIndex: exact cosine, 8,000 x 768 float32<br/>candidate mask applied before top-k"]
     HB["Hubness penalty: per-image scalar from a held-out caption bank"]
+    OD["Grounding DINO tiny: text-conditioned object boxes"]
+    SG["SAM 2.1 tiny: point/box-prompted masks"]
   end
 
   subgraph st["Local state — all of it under backend/data, gitignored"]
-    DB[("SQLite in WAL mode<br/>samples · captions · FTS5 porter · tags · attributes · axes · saved_views<br/>albums · album_items · annotations · activity_events")]
+    DB[("SQLite in WAL mode<br/>samples · captions · FTS5 porter · tags · attributes · axes · saved_views<br/>albums · annotations + mask PNGs · object-label hierarchy · activity_events")]
     NP[["embeddings/*.npy — image, caption, hubness penalty"]]
     IM[["images/ and thumbs/ on disk, served read-only under /media"]]
     CA[["cache/ — benchmark results, keyed by protocol version and artifact stamps"]]
@@ -47,6 +49,8 @@ flowchart TB
   SV -->|"always available"| CA
   SV -.->|"absent: keyword only, response says degraded"| IX
   SV -.-> EM
+  RT -.->|"optional box proposals"| OD
+  RT -.->|"optional mask preview/accept"| SG
   IX --> NP
   IX -.->|"positionally aligned, invalidated together"| HB
   AG -->|"calls the same service functions, never the DB"| SV
@@ -87,10 +91,13 @@ SigLIP-derived signals and the docs say so.
 
 ## What the request path is allowed to do
 
-A request does SQLite lookups plus, at most, one text-encoder forward pass.
-Everything else -- embeddings, the UMAP projection, clusters, thumbnails,
-agreement scores, attributes, difficulty axes -- is precomputed by
-a batch CLI and read as an artifact.
+A normal retrieval request does SQLite lookups plus, at most, one encoder
+forward pass. The two explicit editor actions are the exceptions: region
+suggestions run one Grounding DINO forward, and mask preview/acceptance runs one
+SAM2 forward against the immutable source image. Everything else -- corpus
+embeddings, the UMAP projection, clusters, thumbnails, agreement scores,
+attributes and difficulty axes -- is precomputed by a batch CLI and read as an
+artifact.
 
 Endpoints are deliberately sync `def`. FastAPI runs them on a threadpool and
 NumPy and torch release the GIL, while an `async def` endpoint calling blocking
@@ -166,6 +173,8 @@ under the same label.
 | Opt-in retrieval provider (qwen3_vl) | provider probe: stack imports, cached weights, index manifest | falls back to SigLIP 2 with the named reason and the rerun command; the flat SigLIP index is never touched |
 | Semantic and hybrid search | `get_index()` and `get_embedder()` | ranks by BM25 instead, sets `degraded`, `mode_used: keyword`, and a message naming the command to run |
 | Composed search (`?like=`/`?unlike=`) | index + encoder presence | ranks the steering text by keyword instead, says so, and reports the references as ignored |
+| Region proposals | Grounding DINO imports + cached weights | the editor keeps manual point/box prompting and names the weight-fetch command |
+| Promptable masks | SAM2 API + cached weights | the editor keeps rectangle search and names the weight-fetch command; no request downloads weights |
 | Embedding map, duplicates, similar images | index presence | the view states what to run |
 | Caption QA, attributes, difficulty axes | analysis columns | the view states what to run |
 | Retrieval benchmark | image + caption indexes | `available: false` with the command; with no embedder it falls back to stored caption vectors and says the rows understate the shipped path |

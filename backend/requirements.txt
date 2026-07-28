@@ -12,7 +12,8 @@ huggingface_hub>=0.23
 
 # Embeddings (SigLIP 2). Runs on Apple Silicon (MPS), CUDA, or CPU.
 torch>=2.2
-transformers>=4.49
+# 4.56 is the first supported baseline exposing Sam2Model/Sam2Processor.
+transformers>=4.56
 
 # Analytics
 scikit-learn>=1.4

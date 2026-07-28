@@ -16,6 +16,7 @@ Correctness notes:
   and the UI labels it. Ranks, not scores, are what fusion combines.
 """
 import io
+import json
 import logging
 import re
 import sqlite3
@@ -34,6 +35,7 @@ from ..ml.index import get_caption_index, get_index
 # name, so the whole query path switches provider in one place.
 from ..ml.providers import get_encoder as get_embedder
 from ..schemas import (
+    AnnotationSearchRequest,
     ComposedSearchRequest,
     MatchPath,
     RegionSearchRequest,
@@ -690,6 +692,116 @@ def search_by_region(body: RegionSearchRequest,
                           score_basis="composed", offset=body.offset,
                           has_more=end < depth, depth_limit=depth,
                           depth_reached=end >= depth, message=message)
+
+
+def run_annotation_search(
+    conn: sqlite3.Connection,
+    body: AnnotationSearchRequest,
+) -> SearchResponse:
+    """Rank full images against one persisted masked object.
+
+    When the annotation has a semantic leaf label, its unit text vector and the
+    unit masked-object vector receive equal weight through the same normalized
+    mean used by composed region search. This is query-time evidence against the
+    existing full-image index, not a precomputed object-patch index.
+    """
+    index = get_index()
+    embedder = get_embedder() if index is not None else None
+    if index is None or embedder is None:
+        raise HTTPException(
+            503, "Embeddings not computed yet — run `python -m app.ingest`.")
+    row = conn.execute(
+        "SELECT a.sample_id, a.geometry, s.filename, m.png, m.width, m.height, "
+        "l.name AS label_name "
+        "FROM annotations a "
+        "JOIN samples s ON s.id = a.sample_id "
+        "LEFT JOIN annotation_masks m ON m.annotation_id = a.id "
+        "LEFT JOIN annotation_object_labels al ON al.annotation_id = a.id "
+        "LEFT JOIN object_labels l ON l.id = al.label_id "
+        "WHERE a.id = ?",
+        (body.annotation_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "Annotation not found")
+    if row["png"] is None:
+        raise HTTPException(422, "Annotation has no persisted mask")
+    path = config.IMAGES_DIR / row["filename"]
+    try:
+        image = PILImage.open(path).convert("RGB")
+        mask = PILImage.open(io.BytesIO(row["png"])).convert("L")
+    except OSError as exc:
+        raise HTTPException(503, "Annotation image or mask is unreadable") from exc
+    if mask.size != image.size or mask.size != (row["width"], row["height"]):
+        raise HTTPException(503, "Persisted mask dimensions do not match its image")
+    try:
+        bbox = json.loads(row["geometry"])
+        x0 = int(bbox["x"] * image.width)
+        y0 = int(bbox["y"] * image.height)
+        x1 = max(int((bbox["x"] + bbox["w"]) * image.width), x0 + 1)
+        y1 = max(int((bbox["y"] + bbox["h"]) * image.height), y0 + 1)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(503, "Persisted mask bbox is invalid") from exc
+    crop_box = (max(x0, 0), max(y0, 0),
+                min(x1, image.width), min(y1, image.height))
+    crop = image.crop(crop_box)
+    alpha = mask.crop(crop_box)
+    neutral = PILImage.new("RGB", crop.size, (128, 128, 128))
+    masked_object = PILImage.composite(crop, neutral, alpha)
+    parts = [_unit(embedder.encode_images([masked_object])[0])]
+    label_name = row["label_name"]
+    if label_name:
+        parts.append(_unit(embedder.encode_texts(
+            [normalize_query_text(label_name)])[0]))
+    query = _unit(np.mean(np.stack(parts), axis=0))
+    scores = index.embeddings @ query
+    source_row = index.row_of(row["sample_id"])
+    if source_row is not None:
+        scores[source_row] = -np.inf
+    order = np.argsort(-scores, kind="stable")
+    ranked = [(int(index.ids[i]), float(scores[i])) for i in order
+              if np.isfinite(scores[i])]
+    depth = len(ranked)
+    end = min(body.offset + body.top_k, depth)
+    window = [sid for sid, _ in ranked[body.offset:end]]
+    basis = "segment_composed" if label_name else "segment_cosine"
+    message = (
+        f"Masked-object image evidence blended equally with leaf label "
+        f"{label_name!r}; ranked against the full-image index."
+        if label_name else
+        "Masked-object image evidence ranked against the full-image index."
+    )
+    if not window:
+        return SearchResponse(
+            items=[], mode_used="segment", score_basis=basis,
+            offset=body.offset, has_more=False, depth_limit=depth,
+            depth_reached=True, message=message)
+    qmarks = ",".join("?" * len(window))
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT * FROM samples WHERE id IN ({qmarks})", window)}
+    captions = first_captions(conn, window)
+    score_map = dict(ranked)
+    items = []
+    for rank0, sample_id in enumerate(window):
+        sample = rows.get(sample_id)
+        if sample is None:
+            continue
+        card = row_to_card(
+            sample, caption=captions.get(sample_id),
+            score=round(score_map[sample_id], 4))
+        card.match_paths = [
+            MatchPath(path="segment", rank=body.offset + rank0 + 1)]
+        items.append(card)
+    return SearchResponse(
+        items=items, mode_used="segment", score_basis=basis,
+        offset=body.offset, has_more=end < depth, depth_limit=depth,
+        depth_reached=end >= depth, message=message)
+
+
+@router.post("/search/by-annotation", response_model=SearchResponse)
+def search_by_annotation(
+    body: AnnotationSearchRequest,
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    return run_annotation_search(conn, body)
 
 
 @router.post("/search/composed", response_model=SearchResponse)

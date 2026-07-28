@@ -66,12 +66,16 @@ def test_tools_list_names_schemas_and_readonly_hints(ctx):
     tools = rpc(client, "tools/list").json()["result"]["tools"]
     byname = {t["name"]: t for t in tools}
     assert set(byname) == {"search_images", "get_sample", "find_similar",
+                           "list_annotations", "find_similar_to_annotation",
                            "dataset_stats", "audit_captions", "get_album"}
     for t in tools:
         assert t["inputSchema"]["type"] == "object"
         # Strictly read-only: a tool without this annotation set to True is a
         # regression, not a feature.
         assert t["annotations"]["readOnlyHint"] is True, t["name"]
+    annotation_props = byname["list_annotations"]["inputSchema"]["properties"]
+    assert annotation_props["limit"]["maximum"] == 50
+    assert annotation_props["offset"]["minimum"] == 0
 
 
 def test_search_tool_uses_the_real_service_layer(ctx):
@@ -94,6 +98,34 @@ def test_get_sample_and_audit(ctx):
         {"name": "audit_captions", "arguments": {"limit": 3}}
     ).json()["result"]["content"][0]["text"])
     assert audit["captions"][0]["agreement"] <= audit["captions"][-1]["agreement"]
+
+
+def test_annotation_tool_is_paginated(ctx):
+    client, sids = ctx
+    created = []
+    for i in range(3):
+        response = client.post(
+            f"/api/samples/{sids[0]}/annotations",
+            json={
+                "kind": "rect",
+                "geometry": {"x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2},
+                "label": f"mcp-page-{i}",
+            },
+        )
+        assert response.status_code == 201
+        created.append(response.json()["id"])
+
+    payload = json.loads(rpc(client, "tools/call", {
+        "name": "list_annotations",
+        "arguments": {"sample_id": sids[0], "limit": 2, "offset": 1},
+    }).json()["result"]["content"][0]["text"])
+    assert payload["total"] == 3
+    assert payload["offset"] == 1
+    assert len(payload["annotations"]) == 2
+    assert payload["next_offset"] is None
+
+    for annotation_id in created:
+        assert client.delete(f"/api/annotations/{annotation_id}").status_code == 200
 
 
 def test_removed_propose_tag_stays_removed(ctx):

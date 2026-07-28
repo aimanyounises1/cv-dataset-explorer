@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..ml import detect as detect_ml
+from .annotations import canonical_object_name, lookup_object_label
 from .deps import get_conn
 
 router = APIRouter()
@@ -49,9 +50,18 @@ def detect_regions(body: DetectRequest,
         img = PILImage.open(config.IMAGES_DIR / row["filename"]).convert("RGB")
     except OSError as exc:
         raise HTTPException(503, f"Image file unreadable: {row['filename']}") from exc
+    boxes = detector.detect(img, body.queries)
+    for box in boxes:
+        resolved = lookup_object_label(conn, box["label"])
+        box["label_name"] = (resolved.name if resolved is not None
+                             else canonical_object_name(box["label"]))
+        box["parent_name"] = (
+            resolved.path[-2] if resolved is not None and len(resolved.path) > 1
+            else None)
+        box["label_path"] = resolved.path if resolved is not None else []
     return {"sample_id": body.sample_id, "model": detect_ml.DETECT_MODEL,
             "queries": body.queries,
-            "boxes": detector.detect(img, body.queries),
+            "boxes": boxes,
             "note": "zero-shot proposals — click one to use it as region "
                     "evidence; scores are detector confidences, not "
                     "retrieval scores"}
