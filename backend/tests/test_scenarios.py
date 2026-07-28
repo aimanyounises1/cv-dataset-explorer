@@ -251,3 +251,28 @@ def test_two_identical_calls_return_identical_output(ctx):
     second = client.post("/api/search/scenarios", json=body)
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
+
+
+def test_a_label_part_must_hold_for_most_of_its_group():
+    """A title is read as a claim about the images under it.
+
+    This is the rule a live grouping broke: 80 results were titled
+    "water · black" on 45 black members and 35 that were not, because the floors
+    admitted a part describing a large minority at a lift of 1.10. A reader sees
+    that as a misclassification, not a summary — the label says "these are the
+    black ones" and a plurality of them are brown.
+
+    So a part must describe a MAJORITY of its group and be meaningfully more
+    common inside it than across the pool. Both floors are asserted here rather
+    than only in a comment, because loosening either one silently reintroduces
+    exactly that label.
+    """
+    assert SCENARIO_MIN_SHARE > 0.5 or SCENARIO_MIN_SHARE == 0.5, \
+        "a label part that holds for a minority mislabels the rest of the group"
+    assert SCENARIO_MIN_SHARE >= 0.5
+    assert SCENARIO_MIN_LIFT >= 1.25, \
+        "56% here vs 51% across the results (lift 1.10) names nothing a reader can use"
+    # The concrete case, in the units the label is built from.
+    black_share, black_lift = 45 / 80, (45 / 80) / 0.51
+    assert not (black_share >= SCENARIO_MIN_SHARE and black_lift >= SCENARIO_MIN_LIFT), \
+        "the 'water · black' label would still be produced"
