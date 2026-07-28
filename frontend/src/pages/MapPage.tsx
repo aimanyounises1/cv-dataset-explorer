@@ -5,6 +5,7 @@ import { AXES } from "../api/types";
 import type { MapPoint } from "../api/types";
 import MapWorkingSet, { ISOLATED_N } from "../components/MapWorkingSet";
 import ScatterPlot from "../components/ScatterPlot";
+import { Listbox } from "../components/controls";
 import { useSelection } from "../hooks/useSelection";
 import {
   COLOR_MODES, ColorMode, NO_DATA, Ramp, buildColorScale, formatDomainValue,
@@ -226,6 +227,18 @@ export default function MapPage() {
   const activeMode: MapColorMode =
     colorMode === NEIGHBOUR_MODE && !nnAvailable ? "difficulty" : colorMode;
 
+  /* The same rule as a list of options: the neighbour mode joins only once its
+     measurement is loaded, so the control never offers a dimension the map
+     cannot paint. */
+  const colorModeOptions = useMemo(
+    () => [
+      ...COLOR_MODES.map((m) => ({ value: m.value as string, label: m.label })),
+      ...(nnAvailable
+        ? [{ value: NEIGHBOUR_MODE, label: "Neighbour similarity (10-NN cosine)" }]
+        : []),
+    ],
+    [nnAvailable]);
+
   // Rebuilt only when the data or the dimension changes: the canvas redraws on
   // every pan and zoom, so the scale must not be reconstructed per frame.
   const { colorOf: dimensionColor, ramp } = useMemo<{
@@ -380,15 +393,16 @@ export default function MapPage() {
           which dimension it carries is the most consequential control here. */}
       <div className="map-toolbar">
         <span className="density-label">Colour by</span>
-        <select value={activeMode} aria-label="Colour points by"
-                onChange={(e) => setColorMode(e.target.value as MapColorMode)}>
-          {COLOR_MODES.map((m) => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-          {nnAvailable && (
-            <option value={NEIGHBOUR_MODE}>Neighbour similarity (10-NN cosine)</option>
-          )}
-        </select>
+        {/* The rail's own listbox, not a native <select>: this was the last
+            browser-voiced control in the app, and it sits on the one setting
+            that decides what the map is saying. */}
+        <Listbox
+          label="Colour points by"
+          trigger={colorModeOptions.find((o) => o.value === activeMode)?.label ?? "Colour by"}
+          selected={activeMode}
+          options={colorModeOptions}
+          onPick={(v) => setColorMode(v as MapColorMode)}
+        />
 
         <div className="map-legend">
           {ramp.kind === "quantity" && ramp.domain ? (

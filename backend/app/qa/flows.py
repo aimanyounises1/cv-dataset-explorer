@@ -200,7 +200,11 @@ def similarity_map(pg, ok):
     pg.wait_for_selector(".map-canvas")
     pg.wait_for_timeout(1500)
     for mode in ("cluster", "split", "agreement", "difficulty"):
-        pg.select_option("select[aria-label='Colour points by']", mode)
+        # The colour dial is the app's own listbox, not a native <select>: open
+        # it, then pick the option carrying that mode's value.
+        pg.click(".map-toolbar .listbox-btn")
+        pg.wait_for_selector(".map-toolbar [role='option']")
+        pg.click(f".map-toolbar [role='option'][data-value='{mode}']")
         pg.wait_for_timeout(500)
         has_legend = (bool(pg.query_selector(".legend-ramp"))
                       or bool(pg.query_selector(".legend-swatches .legend-swatch")))
