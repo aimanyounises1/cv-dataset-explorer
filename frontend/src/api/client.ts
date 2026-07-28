@@ -1,5 +1,5 @@
 import type {
-  ActivityEvent,
+  ActivityEvent, AlbumAnalysis,
   AttributeGroup, CaptionStats, ChatMessage, ChatResponse, ChatStatus,
   AlbumDetail, AlbumSummary, ComposedQuery, ScenarioResponse,
   DescribeResponse, LeakageReport,
@@ -98,6 +98,16 @@ export const api = {
     send<{ ok: boolean; added: number }>(`/albums/${id}/items`, "POST", { sample_ids }),
   removeFromAlbum: (id: number, sampleId: number) =>
     send<{ ok: boolean }>(`/albums/${id}/items/${sampleId}`, "DELETE"),
+  updateAlbum: (id: number, body: Partial<Pick<AlbumDetail,
+      "name" | "summary" | "category" | "notes" | "cover_sample_id">>) =>
+    send<AlbumDetail>(`/albums/${id}`, "PATCH", body),
+  deleteAlbum: (id: number) => send<{ ok: boolean }>(`/albums/${id}`, "DELETE"),
+  /** Measured signals always; the generated half only reports availability —
+   * drafting a summary is a separate, explicit POST. */
+  albumAnalysis: (id: number) => get<AlbumAnalysis>(`/albums/${id}/analysis`),
+  generateAlbumSummary: (id: number) =>
+    send<{ summary: string; model: string; based_on: string }>(
+      `/albums/${id}/analysis/summary`, "POST", {}),
 
   tags: () => get<TagInfo[]>("/tags"),
   vlmTags: () => get<TagInfo[]>("/vlm-tags"),
