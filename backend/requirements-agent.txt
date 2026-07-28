@@ -1,6 +1,9 @@
 # Optional: the Fugu-style assistant (LangGraph orchestration over Ollama).
 # The rest of the app is fully functional without these.
-langchain>=0.3
-langchain-core>=0.3
+# langchain 1.x for `langchain.agents.create_agent`: the older
+# `langgraph.prebuilt.create_react_agent` is deprecated and goes away in
+# LangGraph 2.0.
+langchain>=1.0
+langchain-core>=1.0
 langchain-ollama>=0.3
-langgraph>=0.4
+langgraph>=1.0

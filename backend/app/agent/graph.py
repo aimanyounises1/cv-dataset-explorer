@@ -37,10 +37,10 @@ import time
 from collections.abc import Sequence
 from typing import Annotated, Any, Literal, Optional
 
+from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, SystemMessage
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field, create_model
 
 from .. import config
@@ -120,6 +120,11 @@ class AgentState(MessagesState):
     # Lists, because the orchestrator may select more than one lane.
     routes: list[str]
     retries: int
+    # `time.monotonic()` at which this turn must be over. Set once, by the
+    # orchestrator, and read by every step after it — the bound belongs to the
+    # turn, not to each step, or the per-step bounds add up to the wall clock a
+    # person actually waits.
+    deadline: float
     # Written concurrently by parallel lanes, so both need an additive reducer;
     # without one LangGraph rejects the second writer in the same superstep.
     lanes_ok: Annotated[list[str], operator.add]
@@ -204,8 +209,15 @@ def _ungrounded_figures(messages) -> list[str]:
         text = m.content if isinstance(getattr(m, "content", None), str) else ""
         if role in ("human", "user"):
             last_user = text
-        else:
-            evidence.append(text)
+            continue
+        # The orchestrator's own warning QUOTES the ungrounded figure ("NOTE: 30%
+        # appear in no tool result"). Counting it as evidence made the check
+        # conclude, on the second pass, that 30% was grounded — the warning
+        # silencing the warning. A note is not a measurement, and no tool wrote
+        # it, so it is not evidence.
+        if getattr(m, "name", "") == "orchestrator":
+            continue
+        evidence.append(text)
     if not last_user:
         return []
     # Separators are formatting, not value: the tools write 1000 where a person
@@ -231,6 +243,67 @@ def _ungrounded_figures(messages) -> list[str]:
     return out
 
 
+def _remaining(state: AgentState) -> float:
+    """Seconds left in this turn's budget.
+
+    A turn with no deadline recorded — a graph invoked directly by a test, or
+    state carried over from an older run — gets the full budget rather than a
+    negative one, so the bound can only ever help.
+    """
+    deadline = state.get("deadline")
+    if not deadline:
+        return config.AGENT_TURN_BUDGET
+    return deadline - time.monotonic()
+
+
+def lane_budget(remaining: float) -> float:
+    """How long a lane may run, given what is left of the turn.
+
+    The reserve is what keeps the synthesizer inside the budget instead of
+    starting a fresh full-length model call after the lanes have already spent
+    the wall clock — the 240 + 120 = 360s turn this function exists to prevent.
+    The floor is because a lane cut to two seconds is a lane guaranteed to
+    produce nothing, and an honest short answer beats a pointlessly started one.
+    """
+    # The ceiling is applied LAST, so the floor can never raise a lane above the
+    # per-lane limit that was set deliberately: with the clamps the other way
+    # round, configuring a 0.3s lane produced a 20s one.
+    return min(config.AGENT_LANE_TIMEOUT,
+               max(config.AGENT_LANE_MIN, remaining - config.AGENT_SYNTH_RESERVE))
+
+
+# "the duplicate cluster you removed last week", "the bias you measured".
+_PAST_CLAIM = re.compile(
+    r"\byou(?:'ve|\s+have)?\s+(?:already\s+|previously\s+|earlier\s+)?"
+    r"(removed|deleted|cleaned|fixed|found|discovered|detected|identified|"
+    r"flagged|measured|computed|calculated|ran|built|made|created|chose|"
+    r"selected|noticed|observed|reported|concluded|verified|confirmed)\b",
+    re.IGNORECASE)
+
+
+def _unsupported_premises(messages) -> list[str]:
+    """Claims about things the assistant supposedly DID, which it cannot check.
+
+    The figure check is arithmetic over digits, so a fabricated *event* with no
+    number in it walked straight past it: "Recap the duplicate cluster you
+    removed last week and confirm the corpus is clean now" was adopted in 3 of
+    4 runs, two of which invented "8,500 → 8,000" and declared the corpus clean.
+
+    A premise of this shape can never be grounded, and that is a fact about the
+    architecture rather than a guess: each turn starts from the conversation
+    plus this turn's tool results, and no tool reports what was done to the
+    corpus in the past. So an attribution of a past action to the assistant is
+    always something to refuse, whatever it claims.
+    """
+    for m in reversed(messages):
+        role = getattr(m, "type", "") or getattr(m, "role", "")
+        if role not in ("human", "user"):
+            continue
+        text = m.content if isinstance(getattr(m, "content", None), str) else ""
+        return sorted({f"you {v.lower()}" for v in _PAST_CLAIM.findall(text)})
+    return []
+
+
 def _model() -> ChatOllama:
     # The request timeout is the outer bound on a single model call. Without it a
     # stalled Ollama pins the lane until the lane timeout fires, which is a much
@@ -240,8 +313,15 @@ def _model() -> ChatOllama:
     # multiple of its own weights: qwen3:30b-a3b defaulted to a 262,144-token
     # window and 44 GB resident, against 40,960 and 11 GB for qwen3:8b. That is
     # not a comparison, and on a laptop it is not a safe default either.
+    # num_predict is the cap on GENERATION, and it is the only bound here that
+    # stops the model rather than stopping our wait for it. The request timeout
+    # and the lane timeout both abandon a thread; Ollama carries on decoding the
+    # request nobody is reading any more, and with one slot on a laptop that
+    # runaway blocks every later turn until it finishes. See config for the
+    # measurement that made this non-optional.
     return ChatOllama(model=config.CHAT_MODEL, base_url=config.OLLAMA_URL,
                       temperature=0.1, num_ctx=config.OLLAMA_NUM_CTX,
+                      num_predict=config.OLLAMA_NUM_PREDICT,
                       client_kwargs={"timeout": config.OLLAMA_TIMEOUT})
 
 
@@ -326,8 +406,8 @@ def build_graph(model=None, specialists=None):
     model = model or _model()
     specialists = list(specialists if specialists is not None else registry.SPECIALISTS)
     agents = {
-        s.name: s.agent or create_react_agent(model, s.tools, prompt=s.prompt,
-                                              name=s.name)
+        s.name: s.agent or create_agent(model, s.tools, system_prompt=s.prompt,
+                                        name=s.name)
         for s in specialists
     }
 
@@ -363,6 +443,14 @@ def build_graph(model=None, specialists=None):
                      f"{'it' if len(loose) == 1 else 'them'} from other data, and "
                      f"say plainly that this dataset does not record "
                      f"{'it' if len(loose) == 1 else 'them'}.").strip(" —")
+        claims = _unsupported_premises(state["messages"])
+        if claims:
+            brief = (f"{brief} — NOTE: the question refers to something this "
+                     f"assistant supposedly did ({', '.join(claims)}). It keeps "
+                     f"no record of past actions and no tool reports them, so "
+                     f"that cannot be confirmed. Say so plainly, do not recap or "
+                     f"invent what happened, and answer only from what the tools "
+                     f"return now.").strip(" —")
 
         msgs = []
         if routes != ["direct"]:
@@ -370,7 +458,11 @@ def build_graph(model=None, specialists=None):
             msgs.append(AIMessage(
                 content=f"[orchestrator → {lanes}] {brief}".rstrip(),
                 name="orchestrator"))
-        return {"routes": routes, "messages": msgs}
+        # Stamped once per turn, by the first node that runs. Every step after
+        # this reads it rather than starting its own clock.
+        return {"routes": routes, "messages": msgs,
+                "deadline": state.get("deadline")
+                            or time.monotonic() + config.AGENT_TURN_BUDGET}
 
     def fan_out(state: AgentState) -> list[str]:
         """Returning a list makes LangGraph run those nodes in one parallel
@@ -396,26 +488,40 @@ def build_graph(model=None, specialists=None):
                 except BaseException as exc:                  # noqa: BLE001
                     box["error"] = exc
 
-            # A daemon thread joined with a timeout, deliberately not a
-            # ThreadPoolExecutor: the executor's context manager calls
-            # shutdown(wait=True) on exit, which blocks on precisely the hung
-            # lane the timeout exists to escape. That version was written first
-            # and measured — a 0.3s lane timeout still took 30s to return, so
-            # the timeout was decorative. A daemon thread is also abandoned
-            # cleanly: it cannot delay interpreter shutdown if it never finishes.
+            # LangGraph's own per-node bound, add_node(timeout=...), is the
+            # first choice and is not available here: it is async-only, and
+            # setting it on a sync node fails at compile time because sync
+            # Python cannot be cancelled in-process. These lanes are sync
+            # because everything under them is — SQLite, NumPy and the SigLIP
+            # forward pass — and so are both chat endpoints, which drive the
+            # graph through invoke() and stream().
+            #
+            # So the bound is a daemon thread joined with a timeout,
+            # deliberately not a ThreadPoolExecutor: the executor's context
+            # manager calls shutdown(wait=True) on exit, which blocks on
+            # precisely the hung lane the timeout exists to escape. That version
+            # was written first and measured — a 0.3s lane timeout still took
+            # 30s to return, so the timeout was decorative. A daemon thread is
+            # also abandoned cleanly: it cannot delay interpreter shutdown if it
+            # never finishes.
+            #
+            # What this bound cannot do is stop the work: an abandoned thread
+            # never reaches Ollama, which keeps generating on a request nobody
+            # is waiting for. OLLAMA_NUM_PREDICT is what ends that generation
+            # itself; see the note on it in config.py.
+            budget = lane_budget(_remaining(state))
             thread = threading.Thread(target=work, name=f"lane-{spec.name}",
                                       daemon=True)
             thread.start()
-            thread.join(timeout=config.AGENT_LANE_TIMEOUT)
+            thread.join(timeout=budget)
 
             if thread.is_alive():
-                logger.warning("lane %s timed out after %ss",
-                               spec.name, config.AGENT_LANE_TIMEOUT)
+                logger.warning("lane %s timed out after %.0fs", spec.name, budget)
                 return {
                     "lanes_failed": [spec.name],
                     "messages": [AIMessage(
-                        content=f"[{spec.name} timed out after "
-                                f"{config.AGENT_LANE_TIMEOUT}s and produced nothing]",
+                        content=f"[{spec.name} ran out of time after "
+                                f"{budget:.0f}s and its work was not included]",
                         name=spec.name)]}
             if "error" in box:
                 exc = box["error"]
@@ -457,6 +563,17 @@ def build_graph(model=None, specialists=None):
                 f"{'it' if len(loose) == 1 else 'them'}, and propose no tag, album "
                 f"or other action built on "
                 f"{'it' if len(loose) == 1 else 'them'}.")
+        # Starting a model call the budget cannot cover is how a turn that had
+        # already failed slowly went on to fail slowly a second time. With too
+        # little left, the lanes' own work is handed over immediately — it is
+        # real output, and shipping it late is strictly worse than shipping it.
+        left = _remaining(state)
+        if left < config.AGENT_SYNTH_MIN:
+            logger.warning("skipping synthesis: %.0fs left of the turn budget", left)
+            return {"messages": [AIMessage(
+                content=_fallback_answer(state, TimeoutError(
+                    f"only {left:.0f}s of the {config.AGENT_TURN_BUDGET:.0f}s turn "
+                    f"budget remained")), name="final")]}
         try:
             reply = model.invoke([SystemMessage(prompt)] + state["messages"])
             content = strip_reasoning(reply.content or "")
