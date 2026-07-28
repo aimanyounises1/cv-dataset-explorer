@@ -150,6 +150,10 @@ class StatsOverview(BaseModel):
     # its documented SigLIP-derived default.
     sim_floor: Optional[float] = None
     vlm_model: Optional[str] = None
+    # Is the enrichment model pulled in Ollama right now? Distinct from
+    # vlm_enriched (past work) — a corpus can be tagged while the model is
+    # gone, or untagged while the model waits.
+    vlm_ready: bool = False
     chat_model: Optional[str] = None
 
 

@@ -114,6 +114,9 @@ export interface StatsOverview {
   embed_fallback_reason?: string | null;
   sim_floor?: number | null;
   vlm_model?: string | null;
+  /** Whether the enrichment model is pulled in Ollama right now — distinct
+   * from vlm_enriched, which is past work. */
+  vlm_ready?: boolean;
   chat_model?: string | null;
 }
 

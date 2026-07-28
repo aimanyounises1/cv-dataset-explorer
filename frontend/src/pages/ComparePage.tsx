@@ -486,7 +486,7 @@ function Pane({
               type="button"
               className={`ghost draw-toggle${drawMode ? " select-on" : ""}`}
               aria-pressed={drawMode}
-              title="Drag on the image to mark a rectangle; search it or save it"
+              title="Drag on the image to mark a rectangle — drawn by you, no segmentation model involved; search it or save it"
               onClick={() => setDrawMode((d) => !d)}
             >
               Draw region
