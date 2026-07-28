@@ -107,7 +107,11 @@ percentile ranks over the corpus, each a filter, a badge and a sort key. "The
 
 ### See the corpus shape
 
-![UMAP embedding map with cluster colors and lasso selection](docs/screenshots/5-map.png)
+![UMAP embedding map coloured by difficulty, reporting 12 k-means clusters
+computed in the original 768-D space. The working set opens empty and offers
+two measured entry points — most isolated, near-duplicate pairs — beside the
+neighbour statistics they derive from, above a panel stating what the
+projection cannot tell you](docs/screenshots/5-map.png)
 
 The embedding map projects the corpus (UMAP, ingest-time); lasso a region to
 tag or open it as a gallery slice. Isolated points are coverage-gap
