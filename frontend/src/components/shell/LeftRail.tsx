@@ -27,6 +27,28 @@ interface Item { to: string; label: string; end?: boolean; hint: string;
                  views?: View[] }
 interface Group { title: string; items: Item[] }
 
+/** The two routes that read the same selection: the gallery and the map both
+ * call useSelection and filter on the same params. Moving between them used to
+ * drop the filter on the floor — you would narrow the corpus to 1,595 images,
+ * click "Embedding map", and land on all 8,000 with nothing saying why. So the
+ * selection travels, but only between these two, and only when leaving one of
+ * them: carrying a gallery's filter onto the benchmark or the assistant would
+ * be noise, and carrying it out of a sample page would resurrect a filter the
+ * reader had already left behind.
+ *
+ * `page` is dropped because it belongs to one view's pagination, not to the
+ * set — the map has no pages, and coming back to a page that no longer exists
+ * is how a filter change lands on an empty grid. */
+const SELECTION_ROUTES = new Set(["/", "/map"]);
+
+function railTo(to: string, here: string, search: string): string {
+  if (!search || !SELECTION_ROUTES.has(to) || !SELECTION_ROUTES.has(here)) return to;
+  const params = new URLSearchParams(search);
+  params.delete("page");
+  const qs = params.toString();
+  return qs ? `${to}?${qs}` : to;
+}
+
 const GROUPS: Group[] = [
   {
     title: "Find",
@@ -169,7 +191,8 @@ export default function LeftRail() {
             <div className="eyebrow rail-group-title">{g.title}</div>
             {g.items.map((it) => (
               <Fragment key={it.to}>
-                <NavLink to={it.to} end={it.end}
+                <NavLink to={railTo(it.to, location.pathname, location.search)}
+                         end={it.end}
                          title={collapsed ? `${it.label} — ${it.hint}` : it.hint}
                          className={({ isActive }) =>
                            `rail-link${isActive ? " active" : ""}`}>
