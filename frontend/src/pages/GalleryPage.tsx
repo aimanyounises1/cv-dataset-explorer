@@ -38,6 +38,9 @@ const DENSITY_KEY = "cvde-density";
 
 /** Recent queries, most recent first. Local recency is per-browser scan state
  * (like density), not shareable selection state — the URL owns the latter. */
+/** The hand-picked set, per tab. sessionStorage, not local: a basket is a
+ * session's work, and a new window should start empty. */
+const PICKED_KEY = "cvde-picked";
 const HISTORY_KEY = "cvde-search-history";
 const HISTORY_SHOWN = 8;   // merged dropdown cap
 const HISTORY_KEPT = 20;   // stored recency list cap
@@ -148,7 +151,37 @@ export default function GalleryPage() {
    * picked set is transient — the album it feeds is the durable thing, a
    * first-class ordered collection with provenance, no longer a tag. Tags
    * remain labels; converting one into an album is an explicit act elsewhere. */
-  const [picked, setPicked] = useState<Set<number>>(new Set());
+  /* Kept in sessionStorage, on one tab-wide key rather than one per query.
+   * Hand-picking is the most expensive thing a person does here, and it used
+   * to be the least durable: `picked` was component state, the gallery is its
+   * own route, so opening a card or pressing the tray's own Compare unmounted
+   * it and took the whole set. The QA sweep had encoded that loss as a
+   * workaround — it re-picked two cards after going back, guarded by "if the
+   * tray is gone". Two picks cost two clicks to rebuild; two hundred are
+   * simply gone.
+   *
+   * Tab-wide and not keyed by query, because curating across several searches
+   * into one album is the point — a set that reset on every filter change
+   * would be a set you could not assemble. This is the same class as scroll
+   * position and the benchmark result: ephemeral working state the URL
+   * deliberately does not own, because a pasted link should reproduce the
+   * view, not somebody else's half-finished basket. Nothing is hidden by it:
+   * the tray is visible whenever the set is non-empty. */
+  const [picked, setPicked] = useState<Set<number>>(() => {
+    try {
+      const raw = sessionStorage.getItem(PICKED_KEY);
+      const ids: unknown = raw ? JSON.parse(raw) : null;
+      return Array.isArray(ids)
+        ? new Set(ids.filter((n): n is number => Number.isInteger(n)))
+        : new Set();
+    } catch { return new Set(); }
+  });
+  useEffect(() => {
+    try {
+      if (picked.size) sessionStorage.setItem(PICKED_KEY, JSON.stringify([...picked]));
+      else sessionStorage.removeItem(PICKED_KEY);
+    } catch { /* non-essential */ }
+  }, [picked]);
   const [albumName, setAlbumName] = useState("");
   const [albumBusy, setAlbumBusy] = useState(false);
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
@@ -856,7 +889,20 @@ export default function GalleryPage() {
                      albumName={albumName} onAlbumName={setAlbumName}
                      busy={albumBusy} onSave={saveAlbum}
                      onCompare={(a, b) => navigate(`/compare?a=${a}&b=${b}`)}
-                     onClear={() => setPicked(new Set())} />
+                     onClear={() => {
+                       // Clear is the one remaining way to lose a set that now
+                       // survives navigation, and it asks nothing before doing
+                       // it. The restore is a copy of client state, so unlike
+                       // the album Undo there is nothing to prove and no writer
+                       // to race — it either comes back exactly, or the toast
+                       // is never offered.
+                       const prev = picked;
+                       setPicked(new Set());
+                       if (prev.size) {
+                         showToast(`Cleared ${prev.size} picked`,
+                                   { label: "Undo", run: () => setPicked(prev) });
+                       }
+                     }} />
 
 
       {composed && (
