@@ -98,6 +98,28 @@ CREATE TABLE sample_tags (sample_id INTEGER, tag_id INTEGER, PRIMARY KEY (sample
 CREATE TABLE vlm_tags   (sample_id INTEGER, tag TEXT, PRIMARY KEY (sample_id, tag));
 CREATE TABLE saved_views(id INTEGER PRIMARY KEY, name TEXT UNIQUE,
                          query_string TEXT NOT NULL, created_at TEXT NOT NULL);
+
+-- The 2026-07-28 workspace wave, all additive (CREATE TABLE IF NOT EXISTS):
+CREATE TABLE albums (
+    id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+    summary TEXT, category TEXT, notes TEXT,
+    cover_sample_id INTEGER,              -- NULL: cover falls back to first item
+    origin TEXT NOT NULL DEFAULT 'manual',-- 'manual' | 'tag' ('agent' reserved)
+    position INTEGER NOT NULL DEFAULT 0,  -- ordering among albums
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE album_items (
+    album_id INTEGER NOT NULL, sample_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,            -- ordering within the album
+    added_at TEXT NOT NULL, PRIMARY KEY (album_id, sample_id));
+CREATE TABLE activity_events (            -- append-only workspace trail
+    id INTEGER PRIMARY KEY, kind TEXT NOT NULL,
+    payload TEXT NOT NULL,                -- opaque JSON, size-capped at the API
+    created_at TEXT NOT NULL);
+CREATE TABLE annotations (                -- regions as rows; images stay immutable
+    id INTEGER PRIMARY KEY, sample_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,                   -- 'rect' | 'polygon'
+    geometry TEXT NOT NULL,               -- JSON, normalized 0..1 coordinates
+    label TEXT, created_at TEXT NOT NULL);
 ```
 
 Four decisions worth defending:
