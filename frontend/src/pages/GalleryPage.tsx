@@ -6,7 +6,7 @@ import {
 } from "../api/types";
 import AxisLegend from "../components/AxisLegend";
 import SearchSettings from "../components/SearchSettings";
-import { albumsChanged } from "../components/AlbumShelf";
+import { ALBUMS_CHANGED, albumsChanged } from "../components/AlbumShelf";
 import AlbumHeader from "../components/AlbumHeader";
 import ImageCard from "../components/ImageCard";
 import ScoreDistribution, { COSINE_BASES } from "../components/ScoreDistribution";
@@ -445,6 +445,19 @@ export default function GalleryPage() {
     }
   };
 
+  /* An album's membership can change while its grid is on screen — the member
+   * strip removes an image, a drop adds one — and the grid is a view of that
+   * membership, so it has to re-read it. The album mutations already announce
+   * themselves on the shared event for the shelf's benefit; the gallery now
+   * listens too, and only re-fetches when an album is what it is showing. */
+  const [albumTick, setAlbumTick] = useState(0);
+  useEffect(() => {
+    if (!albumId) return;
+    const onChanged = () => setAlbumTick((n) => n + 1);
+    window.addEventListener(ALBUMS_CHANGED, onChanged);
+    return () => window.removeEventListener(ALBUMS_CHANGED, onChanged);
+  }, [albumId]);
+
   const filterKey = [query, mode, sort, searchParams.get("like") ?? "",
     searchParams.get("unlike") ?? "", JSON.stringify(selection.params)].join("|");
 
@@ -598,7 +611,7 @@ export default function GalleryPage() {
     void run();
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKey, page]);
+  }, [filterKey, page, albumTick]);
 
   // The URL remains the source of truth: touching any filter, query or page
   // dismisses the in-memory image results rather than competing with them.
