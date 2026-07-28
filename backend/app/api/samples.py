@@ -7,7 +7,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from .. import config
 from ..db import AXES
 from ..ml import providers
 from ..ml.index import get_index

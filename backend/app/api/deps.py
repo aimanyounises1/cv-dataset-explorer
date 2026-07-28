@@ -8,7 +8,7 @@ from typing import Annotated, Iterator, Optional, Union
 from fastapi import HTTPException, Path, Query
 from pydantic import Field
 
-from .. import config, db
+from .. import db
 from ..db import AXES
 from ..schemas import AxisScores, SampleCard
 
