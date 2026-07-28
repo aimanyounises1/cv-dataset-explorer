@@ -161,7 +161,9 @@ def gallery(pg, ok):
        "clutter" in (pg.eval_on_selector("select[aria-label='Sort results']",
                                          "e=>e.value") or ""))
 
-    # density control
+    # density control — now a dial inside the collapsed search-settings panel
+    # (one command bar; the query's dials open on demand), so open it first.
+    pg.click(".search-settings > summary")
     pg.click(".density-group button:last-child")
     pg.wait_for_timeout(400)
     w = pg.eval_on_selector(".grid .card", "e=>e.getBoundingClientRect().width")
