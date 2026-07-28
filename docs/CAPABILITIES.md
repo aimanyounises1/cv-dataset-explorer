@@ -18,7 +18,7 @@ capability the code does not have.
 | Find | `/` | Browse | Browse and search; every filter and the paging depth live in the URL. |
 | — | `/samples/:id` | Sample | One image: all captions with agreement scores, attributes, tags, difficulty axes, exact nearest neighbours. |
 | Find | `/map` | Embedding map | UMAP projection of all embeddings. Lasso a region to hand that exact set to the gallery. |
-| Trust | `/stats` | Dataset profile | Splits, caption lengths, vocabulary, image sizes, zero-shot attribute coverage. Bars open their slice. |
+| Trust | `/stats` | Overview | Splits, caption lengths, vocabulary, image sizes, zero-shot attribute coverage. Bars open their slice. |
 | Audit | `/quality` | Caption quality | Caption agreement distribution with a review threshold; the selection can leave as a gallery filter or an export. |
 | Trust | `/eval` | Retrieval benchmark | The tool measuring its own retrieval accuracy — R@1/5/10 for all three search modes. |
 | Ask | `/chat` | Assistant | Multi-agent assistant. Answers render as interactive charts, tables and reports, not prose about data. |
@@ -206,7 +206,7 @@ and by the assistant on request — one registry, three consumers.
 | Routes | 240s | Every route loads and paints its own content. |
 | Gallery | 150s | Browse, all three search modes, axis filter, sort, density, paging, export. |
 | Similarity map | 150s | Colour modes, that the canvas is actually painted, hover, and lasso → |
-| Statistics | 150s | Charts render, and the provenance panel states where the numbers came from. |
+| Statistics | 150s | Charts render across the profile's views, and the provenance panel states |
 | Quality | 150s | Agreement histogram, the review threshold, and brush → gallery. |
 | Benchmark | 300s | The self-benchmark runs and reports all three retrieval modes. |
 | Sample detail | 150s | A card opens its sample, which shows every caption, similar images, and |
