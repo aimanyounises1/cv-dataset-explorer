@@ -311,8 +311,15 @@ export default function GalleryPage() {
     }, { replace: true });
   };
 
-  // Keep the input in sync when the URL changes externally (back/forward).
-  useEffect(() => { setInput(query); }, [query]);
+  /* Keep the input in sync when the URL changes externally — Back/forward, a
+   * chosen recent query, a removed chip. Only then: the URL carries the
+   * TRIMMED query, so echoing it back into a box that already holds this query
+   * deletes the space someone just typed, and the next word runs into the last
+   * one ("dog on beach" typed with a pause becomes "dogon beach"). A box whose
+   * text already commits to this query is left exactly as its owner left it. */
+  useEffect(() => {
+    setInput((cur) => (cur.trim() === query ? cur : query));
+  }, [query]);
 
   // Debounce typed input into the URL; a query change restarts pagination.
   const debouncedInput = useDebounce(input, 400);
@@ -321,8 +328,16 @@ export default function GalleryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInput]);
 
+  /** Typing is not a sequence of searches. The box commits every 400 ms, so
+   * "dog on beach" arrives as "dog", "dog on", "dog on beach" — each one a real
+   * ranking, none of them a thing anyone meant to keep. A new entry therefore
+   * absorbs the prefixes it grew out of, and only the phrase the person stopped
+   * on survives in the list. */
   const rememberSearch = (q: string) => {
-    const list = [q, ...readLocalHistory().filter((s) => s !== q)].slice(0, HISTORY_KEPT);
+    const key = q.toLowerCase();
+    const kept = readLocalHistory()
+      .filter((s) => s.toLowerCase() !== key && !key.startsWith(s.toLowerCase()));
+    const list = [q, ...kept].slice(0, HISTORY_KEPT);
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); }
     catch { /* non-essential */ }
     setLocalHist(list);
@@ -417,21 +432,34 @@ export default function GalleryPage() {
    * writes to. That trail is what the History drawer shows and what carries a
    * search past this browser's localStorage — until now the drawer could only
    * ever list tag approvals, because nothing wrote the search kinds it labels.
-   * Recorded once per distinct search: paging is the same search, seen further
-   * down. The query string travels with it, so a row in the drawer is a link
-   * back into the exact view (the URL is the shareable state). */
-  const loggedSearch = useRef("");
+   * Unlike the local recency list, a written row cannot be taken back, so the
+   * write waits for the typing to stop: each answered search cancels the
+   * pending one, and only the query still on screen after the pause is kept.
+   * Deduplicated by what the row would SAY, so re-ranking the same words —
+   * another mode, another sort, the next page — never becomes a second row.
+   * The query string travels with it, making a drawer row a link back into the
+   * exact view (the URL is the shareable state). */
+  const TRAIL_SETTLE_MS = 2500;
+  const loggedLabel = useRef("");
+  const trailTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(trailTimer.current), []);
+
   const recordSearchActivity = () => {
     const q = query.trim();
     const kind = composed ? "composed_search" : q ? "search_snapshot" : null;
-    if (!kind || loggedSearch.current === filterKey) return;
-    loggedSearch.current = filterKey;
-    api.recordActivity(kind, {
-      // A plain search is its words; a composed one is its words AND its
-      // reference pictures, so it carries the fuller label instead.
-      ...(composed ? { label: rankingLabel(), like: likeIds, unlike: unlikeIds } : { q }),
-      query_string: searchParams.toString(),
-    }).catch(() => {});   // a trail that fails to record must not fail the search
+    const label = rankingLabel();
+    if (!kind || loggedLabel.current === label) return;
+    const params = searchParams.toString();
+    window.clearTimeout(trailTimer.current);
+    trailTimer.current = window.setTimeout(() => {
+      loggedLabel.current = label;
+      api.recordActivity(kind, {
+        // A plain search is its words; a composed one is its words AND its
+        // reference pictures, so it carries the fuller label instead.
+        ...(composed ? { label, like: likeIds, unlike: unlikeIds } : { q }),
+        query_string: params,
+      }).catch(() => {});  // a trail that fails to record must not fail the search
+    }, TRAIL_SETTLE_MS);
   };
 
   useEffect(() => {
@@ -566,14 +594,30 @@ export default function GalleryPage() {
    * rail's csv/jsonl/json downloads. The name is editable later in the album
    * header, like any album's. */
   const [savingAlbum, setSavingAlbum] = useState(false);
+  /** Album names are unique, so keeping the same ranking twice — a perfectly
+   * reasonable thing to do after re-running a query — would otherwise collide
+   * and surface the raw 409. The copy numbers itself instead. */
+  const createAlbumForRanking = async (base: string) => {
+    for (let n = 1; n <= 20; n++) {
+      const name = n === 1 ? base : `${base} (${n})`;
+      try {
+        return { album: await api.createAlbum(name), name };
+      } catch (e) {
+        if (!(e instanceof Error && e.message.startsWith("409"))) throw e;
+      }
+    }
+    throw new Error(`“${base}” already exists 20 times over — rename one first`);
+  };
+
   const saveResultsAsAlbum = () => {
-    const name = rankingLabel();
+    const base = rankingLabel();
     const ids = items.slice(0, 200).map((s) => s.id);
-    if (!name || ids.length === 0) return;
+    if (!base || ids.length === 0) return;
     setSavingAlbum(true);
-    api.createAlbum(name)
-      .then((a) => api.addToAlbum(a.id, ids).then((r) => ({ id: a.id, added: r.added })))
-      .then(({ id, added }) => {
+    createAlbumForRanking(base)
+      .then(({ album, name }) => api.addToAlbum(album.id, ids)
+        .then((r) => ({ id: album.id, added: r.added, name })))
+      .then(({ id, added, name }) => {
         albumsChanged();
         showToast(`Saved ${added} to “${name}”`);
         // Land inside the album, like every other path that makes one.
