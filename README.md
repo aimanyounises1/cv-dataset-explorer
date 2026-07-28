@@ -636,6 +636,7 @@ frontend/                 React 18 + TypeScript + Vite
 backend/                  FastAPI + SQLite
   app/api/                samples · search · export · stats · map · tags · views · describe
                           attributes · qa · qa_run · eval · leakage · admin · chat · albums
+                          activity · annotations
   app/datasets/           adapter interface + the Flickr8k adapter (pluggable)
   app/ml/                 SigLIP 2 embedder · exact index · hubness · PRISM · UMAP · labels
   app/agent/              registry · graph (parallel orchestration) · blocks · tools

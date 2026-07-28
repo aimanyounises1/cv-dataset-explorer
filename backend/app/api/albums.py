@@ -7,25 +7,23 @@ deleting one would turn a conversion into a move.
 """
 import sqlite3
 from datetime import datetime, timezone
-from typing import Annotated, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path
-from pydantic import Field
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from ..schemas import AlbumCreate, AlbumDetail, AlbumSummary, AlbumUpdate
 from .deps import (
     ID_PARAM_LIMIT,
-    MAX_SQLITE_INT,
+    BoundedId,
+    PathId,
     first_captions,
     get_conn,
+    record_activity,
     row_to_card,
     thumb_url,
 )
 
 router = APIRouter()
-
-PathId = Annotated[int, Path(ge=1, le=MAX_SQLITE_INT)]
-BoundedId = Annotated[int, Field(ge=1, le=MAX_SQLITE_INT)]
 
 # Same ceiling as bulk tagging: more ids than the corpus could ever hold is a
 # runaway client, not a selection.
@@ -140,6 +138,7 @@ def create_album(body: AlbumCreate, conn: sqlite3.Connection = Depends(get_conn)
         # Refused rather than overwritten — same reasoning as saved views: the
         # name is the user's own label for work they did.
         raise HTTPException(409, f"An album named '{name}' already exists") from None
+    record_activity(conn, "album_create", {"album_id": cur.lastrowid, "name": name, "n": 0})
     conn.commit()
     return _detail(conn, _album_row(conn, cur.lastrowid))
 
@@ -185,6 +184,8 @@ def album_from_tag(tag: str = Body(..., embed=True, max_length=200),
         "INSERT INTO album_items(album_id, sample_id, position, added_at) "
         "VALUES (?,?,?,?)",
         [(cur.lastrowid, sid, i, now) for i, sid in enumerate(member_ids)])
+    record_activity(conn, "album_from_tag",
+                    {"album_id": cur.lastrowid, "name": name, "n": len(member_ids)})
     conn.commit()
     return _detail(conn, _album_row(conn, cur.lastrowid))
 
@@ -225,11 +226,13 @@ def update_album(album_id: PathId, body: AlbumUpdate,
 
 @router.delete("/albums/{album_id}")
 def delete_album(album_id: PathId, conn: sqlite3.Connection = Depends(get_conn)):
-    _album_row(conn, album_id)
+    row = _album_row(conn, album_id)
     # Membership goes with the album, explicitly — the schema carries no FK
     # cascade, so this is where the invariant is enforced.
-    conn.execute("DELETE FROM album_items WHERE album_id = ?", (album_id,))
+    cur = conn.execute("DELETE FROM album_items WHERE album_id = ?", (album_id,))
     conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
+    record_activity(conn, "album_delete",
+                    {"album_id": album_id, "name": row["name"], "n": cur.rowcount})
     conn.commit()
     return {"ok": True}
 
@@ -238,7 +241,7 @@ def delete_album(album_id: PathId, conn: sqlite3.Connection = Depends(get_conn))
 def add_items(album_id: PathId,
               sample_ids: list[BoundedId] = Body(..., embed=True),
               conn: sqlite3.Connection = Depends(get_conn)):
-    _album_row(conn, album_id)
+    album = _album_row(conn, album_id)
     if not sample_ids:
         raise HTTPException(400, "No samples given")
     if len(sample_ids) > MAX_ITEM_IDS:
@@ -261,6 +264,8 @@ def add_items(album_id: PathId,
     # updated_at bump so that write cannot inflate the count.
     added = conn.total_changes - before
     conn.execute("UPDATE albums SET updated_at = ? WHERE id = ?", (now, album_id))
+    record_activity(conn, "album_items_add",
+                    {"album_id": album_id, "name": album["name"], "n": added})
     conn.commit()
     return {"ok": True, "added": added}
 
@@ -287,7 +292,7 @@ def remove_item(album_id: PathId, sample_id: PathId,
 def reorder_items(album_id: PathId,
                   sample_ids: list[BoundedId] = Body(..., embed=True),
                   conn: sqlite3.Connection = Depends(get_conn)):
-    _album_row(conn, album_id)
+    album = _album_row(conn, album_id)
     if len(sample_ids) > MAX_ITEM_IDS:
         raise HTTPException(400, f"Too many ids: {len(sample_ids):,}. "
                                  f"The limit is {MAX_ITEM_IDS:,}.")
@@ -298,5 +303,7 @@ def reorder_items(album_id: PathId,
         "UPDATE album_items SET position = ? WHERE album_id = ? AND sample_id = ?",
         [(i, album_id, sid) for i, sid in enumerate(sample_ids)])
     conn.execute("UPDATE albums SET updated_at = ? WHERE id = ?", (_now(), album_id))
+    record_activity(conn, "album_reorder",
+                    {"album_id": album_id, "name": album["name"], "n": len(sample_ids)})
     conn.commit()
     return {"ok": True}

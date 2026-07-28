@@ -43,6 +43,9 @@ def ctx():
         "INSERT INTO captions_fts(captions_fts, rowid, text) VALUES ('delete', ?, ?)", fts)
     conn.execute("DELETE FROM album_items")
     conn.execute("DELETE FROM albums")
+    # Album endpoints now write activity events; this module is not about
+    # them, so its trail goes too.
+    conn.execute("DELETE FROM activity_events")
     qmarks = ",".join("?" * len(sids))
     conn.execute(f"DELETE FROM samples WHERE id IN ({qmarks})", sids)
     conn.execute("DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM sample_tags)")

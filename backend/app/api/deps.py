@@ -2,9 +2,11 @@
 import hashlib
 import json
 import sqlite3
-from typing import Iterator, Optional, Union
+from datetime import datetime, timezone
+from typing import Annotated, Iterator, Optional, Union
 
-from fastapi import HTTPException, Query
+from fastapi import HTTPException, Path, Query
+from pydantic import Field
 
 from .. import config, db
 from ..db import AXES
@@ -18,6 +20,18 @@ SORT_KEYS = tuple(f"{a}_{d}" for a in AXES for d in ("asc", "desc"))
 # OverflowError at bind time, which would surface as a 500. Bounding turns the
 # hostile probe into a 422.
 MAX_SQLITE_INT = 2**63 - 1
+PathId = Annotated[int, Path(ge=1, le=MAX_SQLITE_INT)]
+BoundedId = Annotated[int, Field(ge=1, le=MAX_SQLITE_INT)]
+
+
+def record_activity(conn: sqlite3.Connection, kind: str, payload: dict) -> None:
+    """Append one activity event. The caller owns the transaction: an event
+    rides inside the mutation that caused it, so history can never claim
+    something happened that in fact rolled back."""
+    conn.execute(
+        "INSERT INTO activity_events(kind, payload, created_at) VALUES (?,?,?)",
+        (kind, json.dumps(payload, separators=(",", ":")),
+         datetime.now(timezone.utc).isoformat()))
 
 
 def get_conn() -> Iterator[sqlite3.Connection]:
