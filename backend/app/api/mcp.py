@@ -9,12 +9,9 @@ REST, LangGraph, an external MCP client — sees identical answers.
 
 Two hard rules, both load-bearing:
 
-* **Read-only by construction.** Six of the seven tools only read. The one
-  mutating intent, `propose_tag`, writes NOTHING to curation data: it
-  validates the ids, records a proposal event in the activity trail, and
-  returns a proposal token. The tag is applied only when a human approves it
-  inside the app (the assistant's proposal flow or manual tagging) — an MCP
-  client cannot curate the dataset by itself.
+* **Strictly read-only.** Every tool only reads. An MCP client cannot tag,
+  curate or mutate anything here — curation is a human act performed inside
+  the app, full stop.
 * **Honest degradation, same as everywhere.** Tools that need embeddings
   report the named reason instead of empty results dressed as answers.
 
@@ -22,7 +19,6 @@ See docs/MCP.md for the handshake, client configuration and examples.
 """
 import json
 import logging
-import secrets
 import sqlite3
 from typing import Any, Optional
 
@@ -30,7 +26,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 from .. import config, db
-from .deps import record_activity, thumb_url
+from .deps import thumb_url
 
 logger = logging.getLogger(__name__)
 
@@ -143,32 +139,6 @@ def _t_album(conn, args: dict) -> dict:
             "item_count": len(items), "sample_ids": items}
 
 
-def _t_propose_tag(conn, args: dict) -> dict:
-    ids = [int(i) for i in list(args["sample_ids"])[:200]]
-    tag = str(args["tag"]).strip().lower()
-    if not tag or not ids:
-        return {"error": "need a tag name and at least one sample id"}
-    qmarks = ",".join("?" * len(ids))
-    real = {r["id"] for r in conn.execute(
-        f"SELECT id FROM samples WHERE id IN ({qmarks})", ids)}
-    keep = [i for i in ids if i in real]
-    if not keep:
-        return {"error": "none of those sample ids exist — nothing proposed"}
-    token = f"mcp-{secrets.token_hex(8)}"
-    # A log entry, not a mutation: sample_tags is untouched until a human
-    # applies the tag inside the app.
-    record_activity(conn, "mcp_tag_proposal",
-                    {"token": token, "tag": tag, "sample_ids": keep,
-                     "reason": str(args.get("reason", ""))[:500],
-                     "source": "mcp"})
-    conn.commit()
-    return {"proposal_token": token, "status": "awaiting-approval",
-            "candidates": len(keep),
-            "note": "Nothing was written. The proposal is visible in the "
-                    "app's History; a human applies the tag there — this "
-                    "token only identifies the request."}
-
-
 TOOLS: dict[str, dict] = {
     "search_images": {
         "fn": _t_search, "readonly": True,
@@ -208,16 +178,6 @@ TOOLS: dict[str, dict] = {
         "description": "One album's metadata and ordered member ids.",
         "schema": {"type": "object", "required": ["album_id"], "properties": {
             "album_id": {"type": "integer"}}}},
-    "propose_tag": {
-        "fn": _t_propose_tag, "readonly": False,
-        "description": "PROPOSE tagging samples. Writes nothing: returns a "
-                       "proposal token; a human approves inside the app.",
-        "schema": {"type": "object", "required": ["sample_ids", "tag"],
-                   "properties": {
-                       "sample_ids": {"type": "array",
-                                      "items": {"type": "integer"}},
-                       "tag": {"type": "string"},
-                       "reason": {"type": "string"}}}},
 }
 
 
@@ -240,8 +200,9 @@ def _handle(payload: dict, conn: sqlite3.Connection) -> Optional[dict]:
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": {"tools": {}},
             "serverInfo": SERVER_INFO,
-            "instructions": "Read-only dataset tools plus propose_tag, which "
-                            "never writes without in-app human approval."}}
+            "instructions": "Strictly read-only dataset tools — search, "
+                            "inspection and audit; nothing here can mutate "
+                            "the dataset."}}
     if method == "ping":
         return {"jsonrpc": "2.0", "id": id_, "result": {}}
     if method == "tools/list":

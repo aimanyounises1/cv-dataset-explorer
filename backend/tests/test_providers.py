@@ -59,11 +59,12 @@ def _set_provider(monkeypatch, name):
 # -- mock encoder contract ----------------------------------------------------
 
 def test_mock_encoder_is_deterministic_normalized_float32():
-    enc = providers.MockEncoder()
+    from tests.fake_provider import MockEncoder
+    enc = MockEncoder()
     a = enc.encode_texts(["a dog", "a cat"])
     b = enc.encode_texts(["a dog", "a cat"])
     assert np.array_equal(a, b)
-    assert a.dtype == np.float32 and a.shape == (2, providers.MockEncoder.DIM)
+    assert a.dtype == np.float32 and a.shape == (2, MockEncoder.DIM)
     assert np.allclose(np.linalg.norm(a, axis=1), 1.0, atol=1e-5)
     # different inputs, different vectors
     assert not np.allclose(a[0], a[1])

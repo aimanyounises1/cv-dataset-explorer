@@ -7,7 +7,6 @@ encoder and the vector index, and the two are never mixed across providers.
 - ``siglip2`` — the original SigLIP 2 stack (`app.ml.embedder`), byte-identical
   behavior, keeping its original flat ``data/embeddings/`` layout so an
   existing install keeps working untouched.
-- ``mock`` — deterministic, torch-free vectors for tests.
 
 Resolution is lazy and visible: the preferred provider (CVDE_EMBED_PROVIDER,
 default qwen3_vl) is probed cheaply — imports, cached weights, index manifest —
@@ -60,23 +59,6 @@ def _normalize(x: np.ndarray) -> np.ndarray:
 
 
 # -- encoders -----------------------------------------------------------------
-
-class MockEncoder:
-    """Deterministic stand-in for tests: same input, same unit vector, no torch."""
-
-    DIM = 32
-
-    def _vec(self, payload: bytes) -> np.ndarray:
-        digest = hashlib.sha256(payload).digest()
-        rng = np.random.default_rng(int.from_bytes(digest[:8], "big"))
-        return rng.standard_normal(self.DIM)
-
-    def encode_texts(self, texts, kind: str = "query") -> np.ndarray:
-        return _normalize(np.stack([self._vec(t.encode()) for t in texts]))
-
-    def encode_images(self, images) -> np.ndarray:
-        return _normalize(np.stack([self._vec(im.tobytes()) for im in images]))
-
 
 class QwenEncoder:
     """Qwen3-VL-Embedding through the official sentence-transformers path."""
@@ -157,8 +139,7 @@ def manifest_problem(emb_dir: Path, model_id: str) -> Optional[str]:
 
 def provider_model_id(name: str) -> str:
     return {"qwen3_vl": config.QWEN_EMBED_MODEL,
-            "siglip2": config.EMBED_MODEL,
-            "mock": "mock"}[name]
+            "siglip2": config.EMBED_MODEL}[name]
 
 
 def _weights_cached(model_id: str) -> bool:
@@ -177,8 +158,6 @@ def _probe(name: str) -> Optional[str]:
         if not _index_files_present(emb_dir):
             return "embeddings not built — run `python -m app.ingest`"
         return None
-    if name == "mock":
-        return None if _index_files_present(emb_dir) else "mock index not built"
     if name == "qwen3_vl":
         try:
             import sentence_transformers  # noqa: F401
@@ -193,7 +172,7 @@ def _probe(name: str) -> Optional[str]:
 
 
 def _chain(preferred: str) -> list[str]:
-    return [preferred] + (["siglip2"] if preferred not in ("siglip2", "mock") else [])
+    return [preferred] + (["siglip2"] if preferred != "siglip2" else [])
 
 
 def _dim_of(name: str, emb_dir: Path) -> Optional[int]:
@@ -276,9 +255,7 @@ def load_encoder_for(name: str):
     Raises on failure — callers there want the real error, not a fallback."""
     if name in _encoders:
         return _encoders[name]
-    if name == "mock":
-        enc = MockEncoder()
-    elif name == "qwen3_vl":
+    if name == "qwen3_vl":
         enc = QwenEncoder(config.QWEN_EMBED_MODEL)
     elif name == "siglip2":
         from .embedder import Embedder
