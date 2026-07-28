@@ -41,6 +41,15 @@ const DENSITY_KEY = "cvde-density";
 /** The hand-picked set, per tab. sessionStorage, not local: a basket is a
  * session's work, and a new window should start empty. */
 const PICKED_KEY = "cvde-picked";
+/** The card a shift-extend measures from. Stored beside the set because the
+ * two are one thought: the set now survives navigation, and an anchor that did
+ * not would make the first shift-click after coming back behave as a plain
+ * toggle — the feature silently absent exactly when a large set is being
+ * rebuilt. Kept as its own key rather than folded into the set, because the
+ * failure modes differ: a stale anchor is harmless (an id absent from the
+ * current ranking already degrades to a plain toggle) while a corrupt set is
+ * not. */
+const PICK_ANCHOR_KEY = "cvde-pick-anchor";
 const HISTORY_KEY = "cvde-search-history";
 const HISTORY_SHOWN = 8;   // merged dropdown cap
 const HISTORY_KEPT = 20;   // stored recency list cap
@@ -178,8 +187,15 @@ export default function GalleryPage() {
   });
   useEffect(() => {
     try {
-      if (picked.size) sessionStorage.setItem(PICKED_KEY, JSON.stringify([...picked]));
-      else sessionStorage.removeItem(PICKED_KEY);
+      if (picked.size) {
+        sessionStorage.setItem(PICKED_KEY, JSON.stringify([...picked]));
+      } else {
+        // No set, no anchor: an extend measured from a card nobody picked is
+        // a range out of nowhere.
+        sessionStorage.removeItem(PICKED_KEY);
+        sessionStorage.removeItem(PICK_ANCHOR_KEY);
+        lastPickRef.current = null;
+      }
     } catch { /* non-essential */ }
   }, [picked]);
   const [albumName, setAlbumName] = useState("");
@@ -254,8 +270,13 @@ export default function GalleryPage() {
 
   /* Where a shift-extend measures from: the last card whose check was clicked,
    * not the last member of the set — after a range, extending again continues
-   * from where the hand last was. */
-  const lastPickRef = useRef<number | null>(null);
+   * from where the hand last was. Rehydrated, because the gallery is its own
+   * route and returning from Compare or a sample page remounts it. */
+  const lastPickRef = useRef<number | null>(
+    (() => {
+      const raw = Number(sessionStorage.getItem(PICK_ANCHOR_KEY));
+      return Number.isInteger(raw) && raw > 0 ? raw : null;
+    })());
 
   const togglePick = (id: number, extend = false) => {
     // Read the anchor BEFORE queueing the update, and move it in the same
@@ -266,6 +287,8 @@ export default function GalleryPage() {
     // click #0 then shift-click #20 gave 2 picked instead of 21.
     const from = lastPickRef.current;
     lastPickRef.current = id;
+    try { sessionStorage.setItem(PICK_ANCHOR_KEY, String(id)); }
+    catch { /* non-essential */ }
     setPicked((prev) => {
       const next = new Set(prev);
       const order = items.map((s) => s.id);
