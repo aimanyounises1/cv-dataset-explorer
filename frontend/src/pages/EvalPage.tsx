@@ -61,7 +61,7 @@ export default function EvalPage() {
 
   return (
     <div>
-      <div className="section-title" style={{ marginTop: 0 }}>Search quality benchmark</div>
+      <h1 className="section-title" style={{ marginTop: 0 }}>Search quality benchmark</h1>
       <p className="meta-line" style={{ maxWidth: 720 }}>
         Every caption in Flickr8k is ground truth: querying with a caption should
         retrieve its own image. This runs the standard text→image retrieval
@@ -158,6 +158,9 @@ export default function EvalPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+          {/* Seven columns of figures out-measure a phone; the table scrolls in
+              its own container so the page never does. */}
+          <div className="table-scroll">
           <table className="eval-table">
             <thead>
               <tr>
@@ -210,6 +213,7 @@ export default function EvalPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </>
       )}
     </div>

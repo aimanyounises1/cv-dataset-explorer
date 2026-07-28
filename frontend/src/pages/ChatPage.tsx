@@ -270,6 +270,7 @@ export default function ChatPage() {
   if (status && !status.available) {
     return (
       <div className="panel" style={{ maxWidth: 720, margin: "40px auto" }}>
+        <h1 className="sr-only">Dataset assistant</h1>
         <h3>Assistant unavailable</h3>
         <p style={{ color: "var(--text-dim)", lineHeight: 1.6 }}>{status.reason}</p>
         <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
@@ -290,6 +291,10 @@ export default function ChatPage() {
 
   return (
     <div className="chat-page">
+      {/* The page's one heading. Visually the canvas leads — the transcript
+          state has no title bar to promote — so the h1 speaks only to
+          assistive tech; the in-flow titles below stay non-headings. */}
+      <h1 className="sr-only">Dataset assistant</h1>
       <aside className="chat-sessions" aria-label="Conversations">
         <button className="ghost chat-sessions-new" onClick={startNew} disabled={busy}>
           New chat
