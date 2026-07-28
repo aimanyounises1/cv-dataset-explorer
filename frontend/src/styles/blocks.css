@@ -51,8 +51,8 @@
    was guessed. Amber because it qualifies the figure above it. */
 .vblock-note {
   margin: 9px 0 0;
-  font-size: 11.5px; line-height: 1.55; color: #f7d68a;
-  border-left: 2px solid rgba(240, 180, 41, 0.4);
+  font-size: 11.5px; line-height: 1.55; color: var(--amber);
+  border-left: 2px solid rgba(154, 101, 18, 0.40);
   padding-left: 9px;
 }
 
@@ -70,13 +70,13 @@
 /* A kind this build cannot draw. Loud on purpose: the reader can act on
    "your UI is older than your agent", but not on a blank space. */
 .vblock-unknown {
-  border: 1px dashed rgba(240, 180, 41, 0.45);
-  background: rgba(240, 180, 41, 0.06);
+  border: 1px dashed rgba(154, 101, 18, 0.45);
+  background: var(--amber-soft);
   border-radius: var(--radius-sm);
-  padding: 11px 13px; font-size: 12px; color: #f7d68a;
+  padding: 11px 13px; font-size: 12px; color: var(--amber);
 }
 .vblock-unknown p { margin: 0; line-height: 1.55; }
-.vblock-unknown strong { color: #ffe6ad; }
+.vblock-unknown strong { color: #7a4f0e; }
 .vblock-unknown summary {
   cursor: pointer; margin-top: 9px; color: var(--text-dim); font-size: 11.5px;
 }
@@ -382,7 +382,7 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
 }
 .vqa-badge.pass, .vqa-badge.done {
   color: var(--green); border-color: rgba(62, 207, 142, 0.38);
-  background: rgba(62, 207, 142, 0.08);
+  background: rgba(30, 122, 85, 0.10);
 }
 .vqa-badge.fail, .vqa-badge.failed {
   color: var(--red); border-color: rgba(255, 122, 122, 0.38);
@@ -390,8 +390,8 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
 }
 .vqa-badge.skip { color: var(--text-faint); background: var(--bg-inset); }
 .vqa-badge.running {
-  color: var(--amber); border-color: rgba(240, 180, 41, 0.38);
-  background: rgba(240, 180, 41, 0.08);
+  color: var(--amber); border-color: rgba(154, 101, 18, 0.38);
+  background: var(--amber-soft);
 }
 
 .vqa-progress { margin-bottom: 12px; }
@@ -484,9 +484,9 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
 
 .vqa-console {
   margin-top: 10px; padding: 9px 12px;
-  border: 1px solid rgba(255, 122, 122, 0.25);
+  border: 1px solid rgba(182, 84, 84, 0.30);
   border-left: 3px solid var(--red);
-  background: rgba(255, 122, 122, 0.06); border-radius: var(--radius-sm);
+  background: var(--red-soft); border-radius: var(--radius-sm);
 }
 .vqa-console > summary { cursor: pointer; color: var(--red); font-size: 11.5px; }
 .vqa-console ul {
@@ -495,21 +495,21 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
 }
 .vqa-console li {
   font-family: var(--font-mono); font-size: 10.5px; line-height: 1.6;
-  color: #ffbdbd; overflow-wrap: anywhere;
+  color: var(--red); overflow-wrap: anywhere;
 }
 
 /* Full-size screenshot. A dialog rather than a new tab: the shot is evidence for
    the row beside it, and losing the transcript makes the comparison harder. */
 .vqa-lightbox {
   position: fixed; inset: 0; z-index: 60;
-  background: rgba(4, 6, 9, 0.82); backdrop-filter: blur(3px);
+  background: rgba(23, 35, 30, 0.55); backdrop-filter: blur(3px);
   display: flex; align-items: center; justify-content: center; padding: 24px;
 }
 .vqa-lightbox-inner {
   background: var(--bg-raised); border: 1px solid var(--border-strong);
   border-radius: var(--radius); padding: 12px;
   max-width: min(1100px, 94vw); max-height: 92vh; overflow: auto;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65);
+  box-shadow: var(--shadow);
 }
 .vqa-lightbox-bar {
   display: flex; align-items: center; justify-content: space-between;

@@ -23,19 +23,19 @@
  * canvas and recharts cannot read CSS variables; index.css remains the source
  * of truth for anything the DOM styles. */
 export const SURFACE = {
-  bg: "#070a1c",
-  raised: "#111534",
-  hover: "#191f48",
-  inset: "#040613",
-  border: "#242a5c",
-  borderStrong: "#363d78",
-  text: "#edeef8",
-  textDim: "#a6a7c4",
-  textFaint: "#8286ad",
-  accent: "#7883fd",
-  green: "#3fcf9a",
-  amber: "#f0b428",
-  red: "#ff7f7a",
+  bg: "#f5f7f4",
+  raised: "#ffffff",
+  hover: "#edf3ef",
+  inset: "#eef2ee",
+  border: "#dce5df",
+  borderStrong: "#cad7cf",
+  text: "#17231e",
+  textDim: "#4b5850",
+  textFaint: "#66756c",
+  accent: "#216d50",
+  green: "#1e7a55",
+  amber: "#9a6512",
+  red: "#b65454",
 } as const;
 
 // -------------------------------------------------------------- recharts ----
@@ -90,9 +90,9 @@ export function sequential(t: number): string {
 
 /** Categorical palette for nominal values such as cluster id or split. */
 export const CATEGORICAL = [
-  "#7883fd", "#3fcf9a", "#f0b428", "#c792ea", "#4dd0e1",
-  "#ff9d9d", "#aed581", "#ffb74d", "#90a4ae", "#b39ddb",
-  "#f48fb1", "#80cbc4",
+  "#5f6bd8", "#1e7a55", "#c5822d", "#8e5bbf", "#2596a6",
+  "#b65454", "#6b8e23", "#c96f28", "#5c7080", "#7b6bb8",
+  "#c25e88", "#2e8577",
 ] as const;
 
 export function categorical(i: number): string {
@@ -115,10 +115,10 @@ export function heatBand(v: number): Heat {
 }
 
 export const HEAT_COLOR: Record<Heat, string> = {
-  cool: SURFACE.textFaint,
-  mid: SURFACE.textDim,
+  cool: "#b9c4bd",
+  mid: SURFACE.textFaint,
   warm: SURFACE.amber,
-  hot: "#ff9d9d",
+  hot: SURFACE.red,
 };
 
 // ------------------------------------------------------------- formatting ---
