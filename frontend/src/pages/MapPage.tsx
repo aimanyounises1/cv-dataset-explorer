@@ -77,6 +77,7 @@ export default function MapPage() {
 
   return (
     <div>
+      <h1 className="section-title" style={{ marginTop: 0 }}>Embedding map</h1>
       {/* Colour is the map's only free channel — position is fixed by UMAP — so
           which dimension it carries is the most consequential control here. */}
       <div className="map-toolbar">

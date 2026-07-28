@@ -144,6 +144,7 @@ export default function QualityPage() {
 
   return (
     <div>
+      <h1 className="section-title" style={{ marginTop: 0 }}>Caption quality</h1>
       <div className="stat-cards">
         <div className="stat-card">
           <div className="value">{summary.scored_captions.toLocaleString()}</div>
