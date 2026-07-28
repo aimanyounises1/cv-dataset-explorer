@@ -10,7 +10,7 @@ labels: bug
 
 - [ ] an API response (paste the request URL)
 - [ ] a view (paste the full URL — every filter lives in the query string, so the URL is the state)
-- [ ] a batch CLI (`app.ingest`, `app.analyze`, `app.train_prism`, `app.enrich`)
+- [ ] a batch CLI (`app.ingest`, `app.analyze`, `app.enrich`)
 - [ ] an optional layer: the assistant, the VLM enrichment, or the QA sweep
 
 **Which layers are installed**

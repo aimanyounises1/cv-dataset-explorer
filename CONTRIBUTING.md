@@ -38,7 +38,7 @@ does not cover.
 - **Filters belong inside the ranking.** Never filter an already-limited page:
   `build_filters` composes the `WHERE`, `filtered_id_set` becomes the candidate
   mask, and the lexical path splices the same clause in before `LIMIT`.
-- **Name the basis of every score.** `cosine`, `cosine_adj`, `rrf` and `prism_ll`
+- **Name the basis of every score.** `cosine`, `cosine_adj` and `rrf`
   live on different scales. A response that publishes a number must publish what
   produced it, and a mode that has no number must publish none.
 - **Optional layers degrade, they do not fail.** A missing artifact returns 200
