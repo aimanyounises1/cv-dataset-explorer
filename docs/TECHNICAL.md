@@ -766,7 +766,7 @@ backend fails `tsc` in the frontend until a renderer exists. See
 | Tier | What | Count |
 |---|---|---|
 | `backend/tests/` | API contracts, degraded modes, id-list limits, provider resolution/fallback, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **369 passed** locally (2026-07-28); CI's light install skips the torch/langgraph modules |
-| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **17 workflows registered**; the last full sweep passed 106/106 checks (run 20260728-215616-f391) |
+| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **17 workflows registered**; the last full sweep passed 106/106 checks (run 20260728-233210-9847) |
 | `python scripts/capabilities.py --check` | Fails when the docs drift from the running system | — |
 
 The backend figure is what GitHub Actions reports on the light install described
@@ -804,7 +804,7 @@ Measured on an M-series Mac:
 | Semantic scan, 8,000 × 768 (24.6 MB) | 0.18 ms |
 | SigLIP text encode (MPS) | 7-8 ms — ~40× the scan, and the real cost of a semantic query |
 | Map frame, 8,000 points | ~0.6 ms |
-| Full UI sweep, 17 workflows (run 20260728-155424-154f) | 79 s |
+| Full UI sweep, 17 workflows (run 20260728-233210-9847) | 85 s |
 
 **Known ceilings, in the order they will be hit:**
 
