@@ -9,56 +9,50 @@
  * No web fonts by design — the app must run with no network (see README).
  */
 :root {
-  /* Surfaces: four steps, spaced far enough apart to read as a hierarchy, and
-     carrying real chroma rather than a token amount of it. A first pass rotated
-     the hue onto the brand while holding the lightness ladder exactly, which was
-     arithmetically a Mobileye palette and perceptually nothing: the page
-     background moved dE 1.78, below the threshold of noticing, so 97% of the
-     pixels looked unchanged. Saturation is what makes a hue visible at 7%
-     lightness, so these carry 44-62% of it and the background now moves dE 8.5. */
-  --bg: #070a1c;
-  --bg-raised: #111534;
-  --bg-hover: #191f48;
-  --bg-inset: #040613;
-  --border: #242a5c;
-  --border-strong: #363d78;
+  /* Luma / "sage orbit" — the identity chosen in the design brainstorm
+     (Calm Canvas direction: warm white, soft sage, images lead, interface
+     recedes). Variable NAMES survive from the previous dark system so the
+     nine hundred usages below keep meaning; every VALUE is the mock's.
+     Two brand voices, deliberately split: sage green is the product — nav,
+     links, curation, focus; indigo (--ai) belongs to the agents alone, so
+     "a person did this" and "a model did this" never share a colour. */
+  --bg: #f5f7f4;             /* canvas */
+  --bg-raised: #ffffff;      /* paper — cards and panels */
+  --bg-hover: #edf3ef;       /* paper-soft */
+  --bg-inset: #eef2ee;
+  --border: #dce5df;
+  --border-strong: #cad7cf;
 
-  /* Ink: three tiers, so micro-labels can recede without vanishing. Warmed
-     toward neutral per the workspace redesign, and the faint tier sits at
-     5.05:1 on --bg-raised — receding must never mean failing AA, because the
-     faint tier carries real diagnostic text. */
-  --text: #edeef8;
-  --text-dim: #a6a7c4;
-  --text-faint: #8286ad;
+  /* Ink: deep green-black, two supporting tiers. The faint tier is checked
+     at the sizes it is used: 4.9:1 on paper at 10.5px. */
+  --text: #17231e;
+  --text-dim: #4b5850;
+  --text-faint: #66756c;
 
-  /* Mobileye's blues, read off Mobileye's own assets rather than approximated.
-     #1f2eb8 is the logo itself — the single fill in new_logo.svg on
-     mobileye.com — and #7883fd is the light companion their site's brand
-     gradient pairs that blue with: the right accent for a near-black surface
-     (6.05:1 on --bg, past AA), where the logo blue alone would be too dark.
-     --accent-deep keeps the logo value for solid fills that carry white text
-     (9.8:1). */
-  --accent: #7883fd;
-  --accent-deep: #1f2eb8;
-  --accent-soft: rgba(120, 131, 253, 0.20);
-  --green: #3fcf9a;
-  --amber: #f0b428;
-  --red: #ff7f7a;
-  /* State, not data: teal marks "this worked / this is on" (Ready pill, ok
-     badges); --green stays the colour of *values* (scores, chart series), so
-     a success state and a good number never read as the same thing. */
-  --success: #35c9b2;
+  --accent: #216d50;         /* sage green — the product's own hand */
+  --accent-deep: #164c39;    /* solid fills that carry white text */
+  --accent-soft: #dceee5;
+  --ai: #5f6bd8;             /* indigo — agents and only agents */
+  --ai-soft: #e9ebff;
+  --green: #1e7a55;          /* values: scores, counts that are good news */
+  --amber: #9a6512;
+  --amber-soft: #f7ead8;
+  --red: #b65454;
+  --red-soft: #f6e3e1;
+  --success: #216d50;
 
-  --radius: 8px;
-  --radius-sm: 5px;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 16px 46px rgba(24, 48, 36, 0.10);
+  --shadow-sm: 0 5px 18px rgba(24, 48, 36, 0.07);
 
-  /* Motion: one quick tick for hover/focus feedback, one move for things that
-     change place or appear. Transform/opacity only — never animate layout —
-     and the reduced-motion block at the end of this file flattens both. */
+  /* Motion: one quick tick for feedback, one move for appearance, and the
+     mock's ease. The reduced-motion contract at the end flattens all of it. */
   --t-quick: 120ms;
   --t-move: 200ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Gallery frame width, driven by the density control. */
@@ -151,12 +145,12 @@ body {
 /* The active marker is a left edge, not an underline: in a vertical list the
    edge reads as "you are here on this branch" rather than as a divider. */
 .rail-link.active {
-  /* The active state carries the brand as a solid, not a tint: this is the
-     one place the logo blue (#1f2eb8) can sit at full strength on a dark
-     page, because it is a fill under white text (9.8:1), not text on black.
-     A soft wash here would leave the brand colour nowhere but buttons. */
-  color: #ffffff; background: var(--accent-deep);
+  /* Luma's active state: a sage pill with deep-green ink — on a warm-white
+     page the tint reads clearly, and solid dark blocks would fight the
+     images, which lead here. */
+  color: var(--accent-deep); background: var(--accent-soft);
   box-shadow: inset 3px 0 0 var(--accent);
+  font-weight: 600;
 }
 
 /* Collapsed library rail: geometry, not navigation loss. Every link stays in
@@ -198,7 +192,7 @@ body {
 .rail-l.collapsed .rail-link:hover .rail-link-min { color: var(--text); border-color: var(--border-strong); }
 .rail-l.collapsed .rail-link.active { background: none; box-shadow: none; }
 .rail-l.collapsed .rail-link.active .rail-link-min {
-  background: var(--accent-deep); border-color: var(--accent); color: #ffffff;
+  background: var(--accent-soft); border-color: var(--accent); color: var(--accent-deep);
 }
 /* The strip keeps one entry point back into filters and the library — with a
    live count, so collapsing never silently disowns an active filter set. */
@@ -235,7 +229,7 @@ body {
               border-color var(--t-quick);
 }
 .album-row:hover { color: var(--text); background: var(--bg-hover); }
-.album-row.active { color: #ffffff; background: var(--accent-deep); }
+.album-row.active { color: var(--accent-deep); background: var(--accent-soft); font-weight: 600; }
 .album-row.drop { border-color: var(--accent); background: var(--accent-soft); }
 .album-stack { position: relative; width: 34px; height: 26px; flex-shrink: 0; }
 .album-stack img, .album-stack-empty {
@@ -255,7 +249,7 @@ body {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 10.5px; color: var(--text-faint);
 }
-.album-row.active .album-count { color: rgba(255, 255, 255, 0.75); }
+.album-row.active .album-count { color: var(--accent); }
 .album-empty { font-size: 12px; color: var(--text-faint); padding: 2px 8px 6px; margin: 0; }
 
 /* ---- Toasts ------------------------------------------------------------
@@ -270,7 +264,7 @@ body {
   padding: 9px 13px;
   background: var(--bg-raised); border: 1px solid var(--border-strong);
   border-left: 3px solid var(--success); border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-sm);
   font-size: 12.5px;
   animation: toast-in var(--t-move) ease-out;
 }
@@ -415,7 +409,7 @@ select:hover { border-color: var(--border-strong); }
   transition: color var(--t-quick), background var(--t-quick);
 }
 .mode-toggle button:hover { color: var(--text); }
-.mode-toggle button.active { background: var(--accent-deep); color: #ffffff; font-weight: 600; }
+.mode-toggle button.active { background: var(--accent-soft); color: var(--accent-deep); font-weight: 600; }
 
 /* Density control — scanning 8,000 frames is a different task from reading 20. */
 .density { display: flex; align-items: center; gap: 7px; }
@@ -436,11 +430,11 @@ select:hover { border-color: var(--border-strong); }
 
 .notice {
   padding: 10px 14px; border-radius: var(--radius); margin-bottom: 12px;
-  background: rgba(240, 180, 41, 0.08); border: 1px solid rgba(240, 180, 41, 0.28);
+  background: var(--amber-soft); border: 1px solid rgba(154, 101, 18, 0.35);
   border-left: 3px solid var(--amber);
-  color: #f7d68a; font-size: 13.5px; line-height: 1.55;
+  color: var(--amber); font-size: 13.5px; line-height: 1.55;
 }
-.notice strong { color: #ffe6ad; }
+.notice strong { color: #7a4f0e; }
 .notice div + div { margin-top: 6px; }
 .meta-line { color: var(--text-dim); font-size: 13.5px; margin-bottom: 12px; }
 
@@ -521,11 +515,11 @@ select:hover { border-color: var(--border-strong); }
 .axis-lead.mid { color: var(--text-dim); background: var(--bg-hover); }
 .axis-lead.warm {
   color: var(--amber); background: rgba(240, 180, 41, 0.1);
-  border-color: rgba(240, 180, 41, 0.25);
+  border-color: rgba(154, 101, 18, 0.30);
 }
 .axis-lead.hot {
-  color: #ff9d9d; background: rgba(255, 122, 122, 0.12);
-  border-color: rgba(255, 122, 122, 0.3);
+  color: var(--red); background: var(--red-soft);
+  border-color: rgba(182, 84, 84, 0.35);
 }
 
 /* Map colour-by control and its legend. */
@@ -658,7 +652,7 @@ select:hover { border-color: var(--border-strong); }
 }
 .card:hover {
   border-color: var(--border-strong); transform: translateY(-2px);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-sm);
 }
 .card:hover .frame-no { color: var(--accent); border-color: var(--accent); }
 .card-media { position: relative; display: block; }
@@ -695,9 +689,9 @@ select:hover { border-color: var(--border-strong); }
   font-size: 10.5px; padding: 2px 8px; border-radius: 999px;
   background: var(--bg-hover); color: var(--text-dim); border: 1px solid var(--border);
 }
-.pill.score { color: var(--green); border-color: rgba(62, 207, 142, 0.35); }
+.pill.score { color: var(--green); border-color: rgba(30, 122, 85, 0.35); }
 .pill.accent { color: var(--accent); border-color: rgba(91, 157, 255, 0.38); }
-.pill.warn-pill { color: var(--amber); border-color: rgba(240, 180, 41, 0.38); }
+.pill.warn-pill { color: var(--amber); border-color: rgba(154, 101, 18, 0.38); }
 
 .load-more { display: flex; justify-content: center; margin: 26px 0; }
 /* A set hand-off is a link, not a button — it navigates, and should be
@@ -751,7 +745,7 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
   padding: 3px 10px; border-radius: 999px; font-family: var(--font-mono);
 }
 .tag button { background: none; border: none; color: inherit; cursor: pointer; padding: 0; font-size: 13.5px; }
-.tag.vlm { background: rgba(62, 207, 142, 0.1); color: var(--green); }
+.tag.vlm { background: rgba(30, 122, 85, 0.10); color: var(--green); }
 .tag-input { display: flex; gap: 8px; margin-top: 10px; }
 .tag-input input {
   flex: 1; padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
@@ -799,17 +793,29 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 .selection-tray {
   /* Centred on the content pane, not the viewport: 50% alone included the
      rail and sat the tray ~120px left of the grid it acts on. The var tracks
-     the rail's collapsed width for free. */
+     the rail's collapsed width for free. Dark ink over the light canvas —
+     the mock's one intentionally heavy element, so a live selection is
+     unmissable over any photo grid. */
   position: fixed; bottom: 18px; left: calc(50% + var(--rail-l) / 2);
   transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   max-width: calc(100vw - 24px); z-index: 40;
   padding: 10px 14px;
-  background: var(--bg-raised); border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--accent); border-radius: var(--radius);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
-  animation: tray-in var(--t-move) ease-out;
+  background: var(--text); color: #f2f5f3;
+  border: 1px solid var(--text); border-radius: 999px;
+  box-shadow: var(--shadow);
+  animation: tray-in var(--t-move) var(--ease);
 }
+.selection-tray .select-count { color: #cdd6d1; }
+.selection-tray input {
+  background: rgba(255, 255, 255, 0.12); color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 999px;
+}
+.selection-tray input::placeholder { color: #aab5af; }
+.selection-tray .ghost {
+  color: #e6ece9; border-color: rgba(255, 255, 255, 0.28); background: none;
+}
+.selection-tray .primary { background: var(--accent); border-radius: 999px; }
 @keyframes tray-in {
   from { opacity: 0; transform: translate(-50%, 10px); }
   to   { opacity: 1; transform: translate(-50%, 0); }
@@ -838,7 +844,7 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 .map-tooltip {
   position: absolute; pointer-events: none; background: var(--bg-raised);
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 5px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6); z-index: 10;
+  box-shadow: var(--shadow); z-index: 10;
 }
 .map-tooltip img { width: 140px; height: 105px; object-fit: cover; border-radius: 4px; display: block; }
 .map-hint { color: var(--text-faint); font-size: 11.5px; margin-top: 9px; line-height: 1.6; }
@@ -850,13 +856,13 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 }
 .error {
   color: var(--red); padding: 12px 15px; font-size: 13.5px;
-  background: rgba(255, 122, 122, 0.07); border: 1px solid rgba(255, 122, 122, 0.25);
+  background: var(--red-soft); border: 1px solid rgba(182, 84, 84, 0.30);
   border-left: 3px solid var(--red); border-radius: var(--radius); margin-bottom: 12px;
 }
 
 /* Match highlighting */
 mark {
-  background: rgba(240, 180, 41, 0.28); color: #f7d68a;
+  background: rgba(154, 101, 18, 0.35); color: var(--amber);
   border-radius: 3px; padding: 0 2px;
 }
 
