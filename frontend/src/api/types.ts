@@ -101,6 +101,32 @@ export interface StatsOverview {
   image_size_buckets: Record<string, number>;
   embeddings_available: boolean;
   vlm_enriched: number;
+  /** Model provenance. All optional: a running backend may predate these
+   * fields, and the status card must degrade to the older flags above rather
+   * than crash — on a status surface, a broken card is worse than a quiet one.
+   * `embed_provider` is the ACTIVE provider and may differ from
+   * `embed_preferred` (fallback); null means retrieval is keyword-only. */
+  embed_preferred?: string | null;
+  embed_provider?: string | null;
+  embed_model?: string | null;
+  embed_dim?: number | null;
+  embed_index_ready?: boolean;
+  embed_fallback_reason?: string | null;
+  sim_floor?: number | null;
+  vlm_model?: string | null;
+  chat_model?: string | null;
+}
+
+/** One append-only workspace event from /api/activity. The endpoint returns a
+ * bare array (not an envelope), newest first by id — ids are monotonic where
+ * same-tick timestamps can collide. Payload is opaque JSON with two writers
+ * (server album_* mutations, client search snapshots), so read its fields
+ * defensively; nothing in it is guaranteed. */
+export interface ActivityEvent {
+  id: number;
+  kind: string;
+  payload: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface CaptionStats {

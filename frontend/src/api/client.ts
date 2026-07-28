@@ -1,4 +1,5 @@
 import type {
+  ActivityEvent,
   AttributeGroup, CaptionStats, ChatMessage, ChatResponse, ChatStatus,
   AlbumDetail, AlbumSummary, ComposedQuery, ScenarioResponse,
   DescribeResponse, LeakageReport,
@@ -77,6 +78,12 @@ export const api = {
   },
 
   overview: () => get<StatsOverview>("/stats/overview"),
+  /** The workspace trail, newest first. A bare array by contract — see
+   * ActivityEvent for what the payload does and does not promise. */
+  listActivity: (limit = 100) => get<ActivityEvent[]>("/activity", { limit }),
+  /** Client-witnessed events only — the server allowlists the kinds. */
+  recordActivity: (kind: string, payload: Record<string, unknown>) =>
+    send<ActivityEvent>("/activity", "POST", { kind, payload }),
   captionStats: () => get<CaptionStats>("/stats/captions"),
   duplicates: () => get<DuplicatePair[]>("/stats/duplicates"),
   map: () => get<MapPoint[]>("/map"),
