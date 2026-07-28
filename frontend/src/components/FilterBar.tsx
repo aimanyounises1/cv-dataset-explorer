@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { AttributeGroup, TagInfo } from "../api/types";
+import { Listbox, Segmented } from "./controls";
 
 export interface Filters {
   split: string;
@@ -24,7 +25,7 @@ export default function FilterBar({ filters, onChange }: Props) {
 
   useEffect(() => {
     // Facets that fail to load must be distinguishable from facets that
-    // simply have no data (the dropdowns hide themselves when empty).
+    // simply have no data (the pickers hide themselves when empty).
     const fail = () => setFailed(true);
     api.tags().then(setTags).catch(fail);
     api.vlmTags().then(setVlmTags).catch(fail);
@@ -33,74 +34,71 @@ export default function FilterBar({ filters, onChange }: Props) {
 
   return (
     <>
-      <select
+      {/* Four values fit the rail whole, so the split filter shows all of them
+          — the current split is read at a glance instead of behind a click. */}
+      <Segmented
+        label="Filter by split"
         value={filters.split}
-        onChange={(e) => onChange({ ...filters, split: e.target.value })}
-        aria-label="Filter by split"
-      >
-        <option value="">All splits</option>
-        <option value="train">train</option>
-        <option value="validation">validation</option>
-        <option value="test">test</option>
-      </select>
+        options={[
+          { value: "", label: "All" },
+          { value: "train", label: "train" },
+          { value: "validation", label: "validation" },
+          { value: "test", label: "test" },
+        ]}
+        onChange={(split) => onChange({ ...filters, split })}
+      />
       {coverage.length > 0 && (
-        // An *add* control, not a current-value control: it resets to the
+        // An *add* control, not a current-value control: it stays on the
         // placeholder after each pick and the selection rail's chips are where
         // the applied facets live, each removable on its own. A single-value
-        // <select> cannot show "night AND indoor", and pretending otherwise is
+        // picker cannot show "night AND indoor", and pretending otherwise is
         // what let the address bar and the result count disagree.
-        <select
-          value=""
-          onChange={(e) => {
-            if (e.target.value) {
-              onChange({ ...filters, attrs: [...filters.attrs, e.target.value] });
-            }
-          }}
-          aria-label="Add an attribute filter"
-        >
-          <option value="">
-            {filters.attrs.length === 0
-              ? "All attributes"
-              : `${filters.attrs.length} attribute${filters.attrs.length > 1 ? "s" : ""} — add another`}
-          </option>
-          {coverage.map((g) => (
-            <optgroup key={g.grp} label={g.grp.replace(/_/g, " ")}>
-              {g.labels.map((l) => {
-                const value = `${g.grp}:${l.label}`;
-                return (
-                  <option key={l.label} value={value}
-                          disabled={filters.attrs.includes(value)}>
-                    {l.label} ({l.count}){filters.attrs.includes(value) ? " ✓" : ""}
-                  </option>
-                );
-              })}
-            </optgroup>
-          ))}
-        </select>
+        <Listbox
+          label="Add an attribute filter"
+          trigger={filters.attrs.length === 0
+            ? "All attributes"
+            : `${filters.attrs.length} attribute${filters.attrs.length > 1 ? "s" : ""} — add another`}
+          options={coverage.flatMap((g) =>
+            g.labels.map((l) => {
+              const value = `${g.grp}:${l.label}`;
+              return {
+                value,
+                label: l.label,
+                figure: l.count.toLocaleString(),
+                group: g.grp.replace(/_/g, " "),
+                disabled: filters.attrs.includes(value),
+              };
+            }))}
+          onPick={(v) => onChange({ ...filters, attrs: [...filters.attrs, v] })}
+        />
       )}
       {tags.length > 0 && (
-        <select
-          value={filters.tag}
-          onChange={(e) => onChange({ ...filters, tag: e.target.value })}
-          aria-label="Filter by my tags"
-        >
-          <option value="">All my tags</option>
-          {tags.map((t) => (
-            <option key={t.name} value={t.name}>{t.name} ({t.count})</option>
-          ))}
-        </select>
+        <Listbox
+          label="Filter by my tags"
+          trigger={filters.tag || "All my tags"}
+          selected={filters.tag}
+          options={[
+            { value: "", label: "All my tags" },
+            ...tags.map((t) => ({
+              value: t.name, label: t.name, figure: t.count.toLocaleString(),
+            })),
+          ]}
+          onPick={(tag) => onChange({ ...filters, tag })}
+        />
       )}
       {vlmTags.length > 0 && (
-        <select
-          value={filters.vlm_tag}
-          onChange={(e) => onChange({ ...filters, vlm_tag: e.target.value })}
-          aria-label="Filter by VLM tags"
-        >
-          <option value="">All VLM tags</option>
-          {vlmTags.map((t) => (
-            <option key={t.name} value={t.name}>{t.name} ({t.count})</option>
-          ))}
-        </select>
+        <Listbox
+          label="Filter by VLM tags"
+          trigger={filters.vlm_tag || "All VLM tags"}
+          selected={filters.vlm_tag}
+          options={[
+            { value: "", label: "All VLM tags" },
+            ...vlmTags.map((t) => ({
+              value: t.name, label: t.name, figure: t.count.toLocaleString(),
+            })),
+          ]}
+          onPick={(vlm_tag) => onChange({ ...filters, vlm_tag })}
+        />
       )}
       {failed && (
         <span className="pill warn-pill"
