@@ -110,14 +110,39 @@ full masked scan costs 0.18 ms, and the SigLIP text encode it waits behind costs
 ANN index would spend a dependency, a build step and some recall to speed up the
 fastest stage of the pipeline.
 
-The crossover is measured by extrapolating the scan against that encode, not
-guessed: 0.16 ms at 8k, 1.7 ms at 100k, 4.1 ms at 250k, 18 ms at 1M vectors, so
-the scan reaches the cost of the encode at roughly **400k vectors**. That is the
-number to act on, and the substitution is local:
-`EmbeddingIndex.search` already takes an `allowed_ids` candidate mask, so FAISS
-`IndexIVFFlat`, `hnswlib` or `sqlite-vec` can be dropped in behind it without
-the API changing. Hosted vector databases are excluded by design -- everything
-here runs on one machine.
+The scan itself is measured at several sizes -- 0.16 ms at 8k, 1.7 ms at 100k,
+4.1 ms at 250k, 18 ms at 1M vectors -- and **extrapolating** that line against
+the encode puts the point where scanning costs as much as encoding at roughly
+**400k vectors**. Treat 400k as an *estimated* crossover, not a threshold to act
+on: it is arithmetic on a trend, measured on this machine's memory bandwidth,
+and it says nothing at all about recall.
+
+So the rule is: around **100k** the scan stops being a rounding error and the
+question becomes worth *measuring*; before adopting any ANN index, run a real
+benchmark of FAISS (`IndexIVFFlat` or HNSW) against the exact scan **on the
+actual corpus**, reporting recall@k next to latency at the intended parameters.
+Adoption is justified by that benchmark, never by this extrapolation and never
+by the word "vector" -- an approximate index trades recall for speed, and the
+trade has to be shown to be worth it on the data it will serve.
+
+The substitution is local either way: `EmbeddingIndex.search` already takes an
+`allowed_ids` candidate mask, so an ANN index drops in behind the same signature
+without the API changing.
+
+Two things this repo deliberately does NOT do, so the reasoning is on the record
+rather than rediscovered:
+
+* **No external vector database at this size.** At 8,000 images an exact NumPy
+  cosine over a 24.6 MB matrix is both simpler and faster than a service, and
+  the assignment constrains the whole system to one local machine. Adding Qdrant
+  (or any hosted index) would buy nothing measurable here and cost a service, a
+  schema and a second source of truth.
+* **pgvector is the answer to a different question.** It becomes the right shape
+  when the deployment turns *multi-user and server-side* -- several researchers
+  sharing one corpus, needing concurrent writes, auth and backups -- because
+  then the vectors want to live next to the relational data under one
+  transactional store. That is a deployment change, not a speed optimisation,
+  and it is not this submission.
 
 ## Degradation boundaries
 

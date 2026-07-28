@@ -5,10 +5,11 @@ a model ships with numbers or not at all: ~330 ms per image warm (p50 over a
 30-image sample; 267 ms fastest, 448 ms p95), ~1 GB resident, correct boxes
 ("a person", "a dog") on a real corpus image; cold load ~6 s once the weights
 are cached, plus a one-time ~700 MB download. `scripts/bench_detector.py`
-re-measures every number in this paragraph. SAM 2.1 hiera tiny
-also measured viable (70 ms/mask) and is documented as future work — boxes
-feed rectangular region search today; masks would not change what retrieval
-can consume.
+re-measures every number in this paragraph. SAM 2.1 hiera tiny was measured
+too (69 ms/mask warm, accurate masks, no instability) and is deliberately NOT
+shipped: erasing the background moves 63% of the top-10 while a caption-word
+proxy moves the on-target share +0.01, so a mask buys a different ranking
+rather than a better one. scripts/bench_sam2.py holds that measurement.
 
 Same optional-layer contract as every ML capability: lazy singleton, its own
 inference lock (Metal cannot run one module concurrently), a cheap readiness
