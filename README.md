@@ -9,7 +9,10 @@ Working with a dataset means answering questions a file browser cannot: where ar
 the night scenes, which captions their own image does not support, which 300
 samples are hardest, whether the held-out split is contaminated by
 near-duplicates of training images. This answers those against a local corpus and
-lets the answer leave as a slice you can regenerate. Everything runs on one
+lets the answer leave as a slice you can regenerate. The through-line is
+**long-tail discovery**: rare scenes, coverage gaps, and the annotations that
+don't hold up are what the rarity axis, the coverage dashboard, the similarity
+floor and the caption audit all exist to surface. Everything runs on one
 machine — SQLite for storage, SigLIP 2 for embeddings, no cloud services and no
 paid APIs.
 
@@ -576,7 +579,18 @@ Playwright and `python-pptx` stay out of `requirements.txt` deliberately: neithe
 is needed to serve the app. Without them the endpoint returns setup instructions,
 and without `python-pptx` alone the Markdown report is still produced.
 
-### 7. (Optional) VLM enrichment
+### 7. (Optional) Train the PRISM booster
+
+```bash
+cd backend && .venv/bin/python -m app.train_prism
+```
+
+Boosted mode needs these artifacts — they are generated locally, never
+shipped, so on a fresh clone the mode falls back to semantic and says so (the
+benchmark page names this command when its boosted rows are absent). Training
+runs offline on the train split only; see [docs/PRISM.md](docs/PRISM.md).
+
+### 8. (Optional) VLM enrichment
 
 ```bash
 ollama pull qwen2.5vl:7b

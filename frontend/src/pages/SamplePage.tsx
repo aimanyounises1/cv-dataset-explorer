@@ -139,6 +139,9 @@ export default function SamplePage() {
 
   return (
     <div>
+      {/* Screen-reader heading: the visual layout leads with the image, and a
+          visible title would duplicate the stepper's context line. */}
+      <h1 className="sr-only">Sample {detail.id} — {detail.filename}</h1>
       <ProvenanceBanner />
       <div className="detail-nav">
         <button className="ghost back-btn" onClick={back}>← Back</button>

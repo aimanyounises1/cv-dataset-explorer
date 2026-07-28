@@ -617,7 +617,9 @@ export default function GalleryPage() {
             <h1>Find the moments that matter.</h1>
             <p className="hero-sub">
               Search, understand and curate this corpus with local models and
-              agents that show their work.
+              agents that show their work — built for hunting the long tail:
+              rare scenes, coverage gaps, and the captions that don&rsquo;t
+              hold up.
             </p>
           </div>
           <div className="hero-flows">
