@@ -103,3 +103,23 @@ def test_geometry_is_validated(ctx):
                     headers={"Content-Type": "application/json"})
     assert r.status_code == 422
     assert _req(client, sample_id=999_999_999).status_code == 404
+
+
+def test_detect_status_names_the_enabling_command(ctx, monkeypatch):
+    """The detector is an optional layer like every other: absent weights are
+    a named reason with the fetch command, never a 500 or a silent download."""
+    client, sids = ctx
+    from app.ml import detect as detect_ml
+    monkeypatch.setattr(detect_ml, "_weights_cached", lambda: False)
+    st = client.get("/api/detect/status").json()
+    assert st["ready"] is False and "snapshot_download" in st["reason"]
+    r = client.post("/api/detect", json={"sample_id": sids[0]})
+    assert r.status_code == 503
+    assert "snapshot_download" in r.json()["detail"]
+
+
+def test_detect_validates_input(ctx):
+    client, sids = ctx
+    assert client.post("/api/detect", json={"sample_id": 0}).status_code == 422
+    assert client.post("/api/detect",
+                       json={"sample_id": sids[0], "queries": ""}).status_code == 422

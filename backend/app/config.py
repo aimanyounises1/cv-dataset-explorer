@@ -33,6 +33,12 @@ QWEN_EMBED_MODEL = os.environ.get("CVDE_QWEN_EMBED_MODEL", "Qwen/Qwen3-VL-Embedd
 QWEN_EMBED_BATCH = int(os.environ.get("CVDE_QWEN_EMBED_BATCH", "8"))
 
 
+# Optional zero-shot detector (region suggestions). Measured before shipping:
+# Grounding DINO tiny, 256 ms/image on this machine's MPS, ~2.3 GB. Weights
+# are fetched explicitly, never on the request path.
+DETECT_MODEL = os.environ.get("CVDE_DETECT_MODEL", "IDEA-Research/grounding-dino-tiny")
+
+
 def emb_dir_for(provider: str) -> Path:
     """siglip2 keeps the original flat embeddings layout (an existing install
     keeps working, untouched); every other provider gets its own subdirectory
