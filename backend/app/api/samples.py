@@ -13,6 +13,7 @@ from ..ml.index import get_index
 from ..schemas import CaptionOut, SampleCard, SampleDetail, SampleList
 from .deps import (
     MAX_SQLITE_INT,
+    PathId,
     axis_bounds,
     axis_scores,
     build_filters,
@@ -49,7 +50,10 @@ def list_samples(
     max_agreement: Optional[float] = Query(
         None, ge=0.0, le=1.0, allow_inf_nan=False,
         description="Samples with any caption at or below this agreement"),
-    cluster: Optional[int] = Query(None, description="k-means group id"),
+    # Bounded to what SQLite can bind, and no narrower: every id a real cluster
+    # column can hold still answers, only the unbindable probe becomes a 422.
+    cluster: Optional[int] = Query(None, ge=-MAX_SQLITE_INT - 1, le=MAX_SQLITE_INT,
+                                   description="k-means group id"),
     album: Optional[int] = Query(None, ge=1, le=MAX_SQLITE_INT,
                                  description="Restrict to members of this album"),
     axes: dict = Depends(axis_bounds),
@@ -77,7 +81,7 @@ def list_samples(
 
 
 @router.get("/samples/{sample_id}", response_model=SampleDetail)
-def get_sample(sample_id: int, conn: sqlite3.Connection = Depends(get_conn)):
+def get_sample(sample_id: PathId, conn: sqlite3.Connection = Depends(get_conn)):
     row = conn.execute("SELECT * FROM samples WHERE id = ?", (sample_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "Sample not found")
@@ -106,7 +110,7 @@ def get_sample(sample_id: int, conn: sqlite3.Connection = Depends(get_conn)):
 
 @router.get("/samples/{sample_id}/similar", response_model=list[SampleCard])
 def similar_samples(
-    sample_id: int,
+    sample_id: PathId,
     top_k: int = Query(12, ge=1, le=60),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
@@ -143,7 +147,8 @@ def export_subset(
     max_agreement: Optional[float] = Query(
         None, ge=0.0, le=1.0, allow_inf_nan=False,
         description="Samples with any caption at or below this agreement"),
-    cluster: Optional[int] = Query(None, description="k-means group id"),
+    cluster: Optional[int] = Query(None, ge=-MAX_SQLITE_INT - 1, le=MAX_SQLITE_INT,
+                                   description="k-means group id"),
     album: Optional[int] = Query(None, ge=1, le=MAX_SQLITE_INT,
                                  description="Restrict to members of this album"),
     scores: bool = Query(
