@@ -26,13 +26,54 @@ interface SessionMeta {
 /** Deliberately spread across the four specialists, so the first thing a new
  * user clicks demonstrates a different lane each time — including the one that
  * reports on the application itself, which is otherwise undiscoverable. */
+interface LiveStep { node: string; label: string; t?: number }
+
+/** Consume POST /api/chat/stream: NDJSON step lines (LangGraph's own node
+ * transitions), then a final line carrying the exact blocking-endpoint
+ * payload. Throws "404: ..." when the endpoint is absent so the caller can
+ * fall back to the blocking call. */
+async function streamChat(
+  history: ChatMessage[], onStep: (s: LiveStep) => void,
+): Promise<import("../api/types").ChatResponse> {
+  const r = await fetch("/api/chat/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: history }),
+  });
+  if (!r.ok || !r.body) {
+    let detail = "";
+    try { detail = JSON.stringify((await r.json()).detail ?? ""); } catch { /* raw */ }
+    throw new Error(`${r.status}: ${detail || r.statusText}`);
+  }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      const ev = JSON.parse(line);
+      if (ev.type === "step") onStep(ev as LiveStep & { type: string });
+      else if (ev.type === "final") return ev.response;
+      else if (ev.type === "error") throw new Error(ev.detail);
+    }
+  }
+  throw new Error("The stream ended without a final response.");
+}
+
+/** Task prompts, not tour prompts: each one exercises a real research
+ * workflow the tools can actually complete. */
 const SUGGESTIONS = [
-  "Plot how the dataset splits into train, validation and test",
-  "Which time of day is hardest? Compare the slices",
+  "Find rare night-time scenes and propose tagging the best candidates",
+  "Which captions look wrong? Show the least-supported ones",
+  "Inspect my latest album — what do its members share, and which are outliers?",
   "Show me dogs jumping into water",
-  "Generate a dataset report",
-  "How does this platform work architecturally?",
-  "Show me the status of the application",
+  "Which time of day is hardest? Compare the slices",
 ];
 
 const REGISTRY_KEY = "cvde-chat-sessions";
@@ -142,6 +183,8 @@ export default function ChatPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  // Streamed graph steps for the in-flight turn; null when idle.
+  const [liveSteps, setLiveSteps] = useState<LiveStep[] | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -243,8 +286,18 @@ export default function ChatPage() {
     setTurns((t) => [...t, { role: "user", content }]);
     setInput("");
     setBusy(true);
+    setLiveSteps([]);
     try {
-      const res = await api.chat(history);
+      // The live trace is LangGraph's own update stream; a backend without
+      // the stream endpoint (404) falls back to the blocking call.
+      const res = await streamChat(history, (s) =>
+        setLiveSteps((prev) => [...(prev ?? []), s]))
+        .catch(async (e: unknown) => {
+          if (e instanceof Error && e.message.startsWith("404")) {
+            return api.chat(history);
+          }
+          throw e;
+        });
       setTurns((t) => [...t, {
         role: "assistant", content: res.reply, samples: res.samples, trace: res.trace,
         blocks: res.blocks, lanes: res.lanes, lanesFailed: res.lanes_failed,
@@ -259,6 +312,7 @@ export default function ChatPage() {
       const stamp = new Date().toISOString();
       setSessions((s) => s.map((m) => (m.id === id ? { ...m, updatedAt: stamp } : m)));
       setBusy(false);
+      setLiveSteps(null);
     }
   };
 
@@ -463,9 +517,24 @@ export default function ChatPage() {
           ))}
           {busy && (
             <div className="chat-turn assistant">
-              <div className="chat-bubble"><div className="chat-text loading-dots">
-                Orchestrating agents…
-              </div></div>
+              <div className="chat-bubble">
+                {/* The graph's own node transitions, streamed as they happen —
+                    the last row is the step running right now. */}
+                {liveSteps && liveSteps.length > 0 ? (
+                  <ol className="live-trace" aria-live="polite">
+                    {liveSteps.map((s, i) => (
+                      <li key={i}
+                          className={i === liveSteps.length - 1 ? "current" : "done"}>
+                        <span className="lt-node">{s.node}</span>
+                        <span className="lt-label">{s.label}</span>
+                        {s.t != null && <span className="lt-t">{s.t}s</span>}
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="chat-text loading-dots">Starting the graph…</div>
+                )}
+              </div>
             </div>
           )}
           <div ref={bottomRef} />

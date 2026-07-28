@@ -81,7 +81,7 @@ body {
 }
 
 /* Small capitals used for section and field labels. */
-.eyebrow, .panel h3, .export-label, .density-label, .chip-label, .eval-table th {
+.eyebrow, .panel h3, .export-label, .chip-label, .eval-table th {
   font-family: var(--font-sans);
   font-size: 10.5px;
   text-transform: uppercase;
@@ -414,7 +414,38 @@ body {
 }
 .setting-row { display: flex; align-items: center; gap: 12px; }
 .setting-row > .eyebrow { width: 62px; flex-shrink: 0; }
-.setting-row select { flex: 1; }
+
+/* The order dial: a listbox the design system owns end to end. The trigger
+   reads as a field; the options are paper on paper, sage where the eye is. */
+.sort-listbox { position: relative; flex: 1; }
+.sort-trigger {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 8px 12px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised); color: var(--text);
+  font-size: 13px; font-family: var(--font-sans); text-align: left;
+  transition: border-color var(--t-quick);
+}
+.sort-trigger:hover { border-color: var(--border-strong); }
+.sort-trigger::after {
+  content: "\203a"; color: var(--text-faint); font-size: 13.5px; line-height: 1;
+  transform: rotate(90deg); transition: transform var(--t-quick);
+}
+.sort-trigger[aria-expanded="true"] { border-color: var(--accent); }
+.sort-trigger[aria-expanded="true"]::after { transform: rotate(-90deg); color: var(--accent); }
+.sort-options {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
+  max-height: 264px; overflow-y: auto;
+  margin: 0; padding: 4px; list-style: none;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); outline: none;
+}
+.sort-options li {
+  padding: 7px 10px; border-radius: var(--radius-sm);
+  font-size: 12.5px; color: var(--text-dim); cursor: pointer;
+}
+.sort-options li.active { background: var(--accent-soft); color: var(--accent-deep); }
+.sort-options li[aria-selected="true"] { font-weight: 600; color: var(--accent-deep); }
 
 .rail-foot {
   padding: 12px 16px 0; margin-top: 10px;
@@ -455,7 +486,11 @@ body {
    would leave ragged half-width gaps here. */
 .rail-filters { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
 .rail-filters select { width: 100%; }
-.rail-filters .axis-panel,
+/* The axis panel drops its card chrome in the rail — the rail is already a
+   panel, and a card inside it is a frame within a frame. (It was previously a
+   stray selector on the summary-chevron rule below, which laid the whole
+   panel out as one flex row: title squeezed sideways, rows beside it.) */
+.rail-filters .axis-panel { background: transparent; border: none; padding: 0; margin: 14px 0 0; }
 /* The one disclosure that stays a disclosure (an id list is occasional
    ingress, not the headline feature) gets a marker the flex summary was
    silently suppressing — same chevron the axis folds already use. */
@@ -471,10 +506,15 @@ body {
 .rail-filters .idlist-panel {
   background: transparent; border: none; padding: 0; margin: 14px 0 0;
 }
-/* In a 240px column the 4-column axis grid cannot hold; stack label over
-   slider and drop the min slider's separate row. */
-.rail-filters .axis-row { grid-template-columns: 1fr; gap: 4px; }
-.rail-filters .axis-name { flex-direction: row; justify-content: space-between; gap: 8px; }
+/* In a 240px column the 4-column axis grid cannot hold; the label line spans
+   the row, with the slider, readout and clear beneath it — the same shape the
+   narrow-viewport rule below gives the gallery. */
+.rail-filters .axis-row { grid-template-columns: 1fr 44px 14px; gap: 2px 6px; }
+.rail-filters .axis-name {
+  grid-column: 1 / -1; flex-direction: row;
+  justify-content: space-between; gap: 8px;
+}
+.rail-filters .axis-rows { gap: 9px; }
 .rail-filters .axis-note { display: none; }   /* the note is on the gallery caveat */
 
 /* Below this width three columns stop being honest: the centre pane cannot
@@ -531,8 +571,42 @@ body {
 }
 .search-box input::placeholder { color: var(--text-faint); }
 .search-box input:focus { border-color: var(--accent); }
-.search-box input { border-radius: 999px; }
-.by-image { border-radius: 999px; }
+/* Round, with room on the right for the by-image affordance. */
+.search-box input { border-radius: 999px; padding-right: 40px; }
+
+/* Search-by-image, as an affordance inside the field: drop and paste are the
+   primary paths, and this small control is the reminder plus the file picker. */
+.by-image-hint {
+  position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; cursor: pointer;
+  border: none; border-radius: 50%; background: transparent;
+  color: var(--text-faint);
+  transition: color var(--t-quick), background var(--t-quick);
+}
+.by-image-hint:hover { color: var(--accent-deep); background: var(--accent-soft); }
+.by-image-hint:disabled { cursor: default; }
+.by-image-hint .busy-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--border-strong); border-top-color: var(--accent);
+  animation: busy-spin 0.8s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+
+/* Recent searches, under the field on paper. Quiet: no icons, no headings —
+   the entries are their own explanation. */
+.search-history {
+  position: absolute; top: calc(100% + 6px); left: 14px; right: 14px; z-index: 60;
+  margin: 0; padding: 5px; list-style: none;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.search-history li {
+  padding: 7px 11px; border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text-dim); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.search-history li.active { background: var(--accent-soft); color: var(--accent-deep); }
 
 /* Keyboard focus stays visible even where the mouse focus ring is suppressed. */
 input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible {
@@ -545,32 +619,132 @@ select {
   font-size: 13.5px; font-family: var(--font-sans);
 }
 select:hover { border-color: var(--border-strong); }
-.mode-toggle {
-  display: flex; border: 1px solid var(--border); border-radius: var(--radius);
-  overflow: hidden; background: var(--bg-raised);
+
+/* ---- Rail control set --------------------------------------------------
+   Segmented pills, listbox, dual-range (components/controls.tsx): the rail's
+   filters in the product's own hand instead of the browser's. Same keyboard
+   grammar as the native elements they replace; only the pixels are ours. */
+.segmented {
+  display: flex; width: 100%; margin-bottom: 8px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-raised); overflow: hidden;
 }
-.mode-toggle button {
-  padding: 9px 15px; border: none; background: transparent;
-  color: var(--text-dim); cursor: pointer; font-size: 13.5px; font-family: var(--font-sans);
+.segmented-opt {
+  flex: 1 1 auto; min-width: 0; padding: 6px 5px; border: none;
+  background: transparent; cursor: pointer;
+  font-family: var(--font-sans); font-size: 11.5px; color: var(--text-dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: color var(--t-quick), background var(--t-quick);
 }
-.mode-toggle button:hover { color: var(--text); }
-.mode-toggle button.active { background: var(--accent-soft); color: var(--accent-deep); font-weight: 600; }
-
-/* Density control — scanning 8,000 frames is a different task from reading 20. */
-.density { display: flex; align-items: center; gap: 7px; }
-.density-group { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.density-group button {
-  border: none; background: var(--bg-raised); color: var(--text-dim);
-  font-family: var(--font-mono); font-size: 11.5px; padding: 9px 11px; cursor: pointer;
+.segmented-opt:hover { color: var(--text); }
+.segmented-opt.on {
+  background: var(--accent-soft); color: var(--accent-deep); font-weight: 600;
 }
-.density-group button:hover { color: var(--text); }
-.density-group button.active { background: var(--accent-soft); color: var(--accent); }
+/* The pill group clips its children; inset the ring like .mode-toggle does. */
+.segmented-opt:focus-visible { outline-offset: -3px; }
 
-/* Both segmented controls clip their children (overflow:hidden gives the inner
-   buttons the group's rounded corners), which also cropped the global 2px
-   outset focus ring — keyboard focus on search-mode and density was invisible.
-   Inset the ring rather than dropping the clipping. */
+.listbox { position: relative; width: 100%; margin-bottom: 8px; }
+.listbox-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 11px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-raised);
+  color: var(--text); cursor: pointer; text-align: left;
+  font-family: var(--font-sans); font-size: 12.5px;
+  transition: border-color var(--t-quick);
+}
+.listbox-btn:hover { border-color: var(--border-strong); }
+.listbox-btn[aria-expanded="true"] { border-color: var(--accent); }
+.listbox-value {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.listbox-caret { color: var(--text-faint); font-size: 10px; flex-shrink: 0; }
+.listbox-pop {
+  position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 50;
+  margin: 0; padding: 5px; list-style: none;
+  max-height: 260px; overflow-y: auto;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
+}
+.listbox-pop li { margin: 0; }
+.listbox-group {
+  padding: 7px 8px 3px; font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: 0.07em; font-weight: 600; color: var(--text-faint);
+}
+.listbox-opt {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px; border-radius: 6px;
+  font-size: 12.5px; color: var(--text-dim); cursor: pointer;
+}
+.listbox-opt.active { background: var(--bg-hover); color: var(--text); }
+.listbox-opt.selected { color: var(--accent-deep); font-weight: 600; }
+.listbox-opt.disabled { color: var(--text-faint); cursor: default; }
+.listbox-opt-label {
+  flex: 1; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.listbox-figure {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 10.5px; color: var(--text-faint); flex-shrink: 0;
+}
+.listbox-check { color: var(--accent); font-size: 11px; flex-shrink: 0; }
+
+/* Two native range inputs on one painted track; thumbs alone take the
+   pointer. Focus ring moves to the thumb — the input itself is invisible. */
+.dual-range { position: relative; height: 18px; }
+.dual-track {
+  position: absolute; left: 0; right: 0; top: 50%; height: 4px;
+  transform: translateY(-50%); border-radius: 999px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+}
+.dual-fill {
+  position: absolute; top: -1px; bottom: -1px; border-radius: 999px;
+  background: var(--accent); opacity: 0.45;
+}
+.dual-range input[type="range"] {
+  position: absolute; inset: 0; width: 100%; height: 18px; margin: 0;
+  -webkit-appearance: none; appearance: none; background: none;
+  pointer-events: none;
+}
+.dual-range input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; pointer-events: auto;
+  width: 13px; height: 13px; border-radius: 999px;
+  background: var(--bg-raised); border: 2px solid var(--accent);
+  box-shadow: var(--shadow-sm); cursor: grab;
+}
+.dual-range input[type="range"]::-moz-range-thumb {
+  pointer-events: auto; width: 10px; height: 10px; border-radius: 999px;
+  background: var(--bg-raised); border: 2px solid var(--accent); cursor: grab;
+}
+.dual-range input[type="range"]:focus-visible { outline: none; }
+.dual-range input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.dual-range input[type="range"]:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* Segmented pills — mode and density share the form: an inset track, and the
+   chosen segment raised on paper. The active choice is the one that looks
+   liftable off the page. */
+.mode-toggle, .density-group {
+  display: flex; gap: 3px; padding: 3px;
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: 999px;
+}
+.mode-toggle button, .density-group button {
+  border: none; background: transparent; color: var(--text-dim); cursor: pointer;
+  padding: 6px 14px; border-radius: 999px;
+  transition: color var(--t-quick), background var(--t-quick), box-shadow var(--t-quick);
+}
+.mode-toggle button { font-size: 13px; font-family: var(--font-sans); }
+/* Density stays mono: S/M/L are sizes, i.e. figures. */
+.density-group button { font-family: var(--font-mono); font-size: 11.5px; padding: 6px 12px; }
+.mode-toggle button:hover, .density-group button:hover { color: var(--text); }
+.mode-toggle button.active, .density-group button.active {
+  background: var(--bg-raised); color: var(--accent-deep);
+  font-weight: 600; box-shadow: var(--shadow-sm);
+}
+/* The gapped track no longer clips its children, but the outset ring would
+   collide with the track border; keep it inside the segment. */
 .mode-toggle button:focus-visible,
 .density-group button:focus-visible { outline-offset: -3px; }
 
@@ -689,6 +863,21 @@ select:hover { border-color: var(--border-strong); }
   font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
 }
 .legend-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+
+/* One line per mark, above the canvas: what a dot is, what a lasso does, what
+   isolation suggests. The full honesty panel lives below the canvas — this is
+   the part a reader needs before their first click. */
+.map-key {
+  display: flex; flex-wrap: wrap; gap: 5px 18px; align-items: center;
+  margin-bottom: 10px; font-size: 11.5px; color: var(--text-faint);
+}
+.map-key-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.map-key-kbd {
+  font-family: var(--font-mono); font-size: 10px; padding: 1px 5px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-raised); color: var(--text-dim); white-space: nowrap;
+}
+.map-actions-hint { font-size: 12.5px; color: var(--text-faint); }
 
 /* Quality: brushable agreement distribution. */
 .dist-panel {
@@ -977,14 +1166,30 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 12px; color: var(--text-dim); white-space: nowrap;
 }
+/* An engaged toggle (Compare's draw mode) wears the accent to say so. */
 .ghost.select-on { color: var(--accent); border-color: var(--accent); }
 .grid .card.picked { outline: 2px solid var(--accent); outline-offset: 1px; }
-.pick-mark {
-  position: absolute; top: 6px; right: 6px; width: 22px; height: 22px;
+/* The per-card check: present on every card, painted only on hover, focus or
+   membership — same rule as the diagnostics overlay. Opacity, not display,
+   so a probe or a fast hand can click it before the fade finishes. */
+.card-check {
+  position: absolute; top: 6px; right: 6px; width: 24px; height: 24px;
   display: flex; align-items: center; justify-content: center;
-  background: var(--accent-deep); color: #ffffff;
-  border-radius: 50%; font-size: 13px;
+  padding: 0; cursor: pointer; font-size: 13px; line-height: 1;
+  background: rgba(255, 255, 255, 0.92); color: transparent;
+  border: 1.5px solid var(--border-strong); border-radius: 50%;
+  opacity: 0;
+  transition: opacity var(--t-quick), color var(--t-quick),
+              background var(--t-quick), border-color var(--t-quick);
 }
+.card:hover .card-check, .card:focus-visible .card-check,
+.card-check:focus-visible, .card-check.picked { opacity: 1; }
+.card-check:hover { border-color: var(--accent); color: var(--accent); }
+.card-check.picked {
+  background: var(--accent-deep); border-color: var(--accent-deep); color: #ffffff;
+}
+/* No hover on touch: the control must simply be there. */
+@media (hover: none) { .card-check { opacity: 1; } }
 
 /* Map */
 .map-wrap { position: relative; }
@@ -1027,19 +1232,64 @@ mark {
 }
 .chip:hover { color: var(--accent); border-color: var(--accent); }
 
-/* Quality page */
-/* min(420px, 100%): the 420px floor must collapse to the container at phone
-   widths — a track wider than the pane scrolls the whole page sideways. */
-.suspect-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 11px; }
+/* Quality page — the suspect lists. One suspect per line: the reviewer's task
+   is triage by the hundred, so the row is the unit of reading — thumb, caption
+   (ellipsized; full text on the title), then figures in aligned mono columns.
+   The card grid this replaces spent ~120px of height per suspect and put the
+   consistency section thousands of pixels downpage. */
+.suspect-list {
+  display: flex; flex-direction: column; gap: 3px;
+  max-width: 860px;   /* a caption line, not a wall — prose measure rules */
+}
+.suspect-row, .suspect-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 3px 8px 3px 3px;
+}
 .suspect-row {
-  display: flex; gap: 12px; background: var(--bg-raised); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 10px; text-decoration: none; color: inherit;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); text-decoration: none; color: inherit;
   transition: border-color var(--t-quick);
 }
-.suspect-row:hover { border-color: var(--border-strong); }
-.suspect-row img { width: 108px; height: 82px; object-fit: cover; border-radius: var(--radius-sm); flex-shrink: 0; }
-.suspect-caption { font-size: 13.5px; line-height: 1.45; margin-bottom: 8px; }
-.suspect-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.suspect-row:hover { border-color: var(--accent); }
+.suspect-row img {
+  width: 56px; height: 40px; object-fit: cover;
+  border-radius: 6px; flex-shrink: 0;
+}
+.suspect-caption {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 12.5px;
+}
+.suspect-score, .suspect-sib {
+  flex-shrink: 0; width: 52px; text-align: right;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+}
+.suspect-score { color: var(--amber); }
+.suspect-sib { color: var(--text-faint); }
+.suspect-split {
+  flex-shrink: 0; width: 72px; text-align: right;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+}
+/* Column labels once, in the eyebrow register; the header has no thumb, so it
+   indents past the image column to sit over the captions. */
+.suspect-head {
+  padding-left: 69px; /* 3px row pad + 56px thumb + 10px gap */
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.07em;
+  font-weight: 600; color: var(--text-faint);
+}
+.suspect-head .suspect-caption, .suspect-head .suspect-score,
+.suspect-head .suspect-sib { font-family: var(--font-sans); font-size: 9.5px; }
+.suspect-head .suspect-score { color: var(--text-faint); }
+/* "agreement"/"consistency" outgrow the 52px figure column; wider header
+   cells only eat header caption space — every column is right-anchored, so
+   the right edges still line up with the rows below. */
+.suspect-head .suspect-score, .suspect-head .suspect-sib { width: 78px; }
+.suspect-head .suspect-split { font-family: var(--font-sans); font-size: 9.5px; }
+.suspect-more { margin-top: 10px; }
+@media (max-width: 700px) {
+  .suspect-sib, .suspect-head .suspect-sib { display: none; }
+  .suspect-split, .suspect-head .suspect-split { width: 46px; }
+}
 .agree-badge {
   font-size: 10.5px; padding: 1px 7px; border-radius: 999px; margin-left: 6px;
   border: 1px solid var(--border);
@@ -1559,3 +1809,16 @@ a.tag:hover { filter: brightness(1.15); }
 .share-foot { margin: 4px 2px 2px; padding: 6px 7px 2px;
   border-top: 1px solid var(--border);
   font-size: 11px; color: var(--text-faint); }
+
+/* ---- Live agent trace: the graph's own steps, streamed ------------------- */
+.live-trace { margin: 0; padding: 2px 0; list-style: none; display: grid; gap: 6px; }
+.live-trace li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.live-trace .lt-node { font-family: var(--font-mono, ui-monospace); font-size: 11px;
+  padding: 1px 7px; border-radius: 999px; background: var(--ai-soft);
+  color: var(--ai); }
+.live-trace li.done .lt-node { background: var(--bg-inset); color: var(--text-faint); }
+.live-trace .lt-label { color: var(--text-dim); }
+.live-trace li.current .lt-label { color: var(--text); }
+.live-trace li.current::after { content: "…"; color: var(--ai); }
+.live-trace .lt-t { margin-left: auto; color: var(--text-faint); font-size: 11px;
+  font-variant-numeric: tabular-nums; }
