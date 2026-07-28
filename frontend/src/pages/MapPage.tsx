@@ -413,8 +413,7 @@ export default function MapPage() {
                   bar. Each swatch is the control for its own group, and the
                   one in force says so and turns itself off. */}
               {(ramp.categories ?? []).slice(0, 12).map((c) => {
-                const facet = activeMode === "cluster" ? "cluster"
-                  : activeMode === "split" ? "split" : null;
+                const facet = COLOR_MODES.find((m) => m.value === activeMode)?.facet;
                 if (!facet) {
                   return (
                     <span className="legend-swatch" key={c.label}>
