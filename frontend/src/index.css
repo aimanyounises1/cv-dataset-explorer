@@ -185,6 +185,67 @@ body {
 .rail-l.collapsed .rail-groups { padding: 0 8px; }
 .rail-l.collapsed .rail-link { padding: 7px 0; }
 
+/* ---- Album shelf -------------------------------------------------------
+   Ordered collections as destinations, living with navigation. Rows are drop
+   targets; the stack backs give a row the physicality of a pile of prints
+   without decorative motion — one degree of rotation on hover, flattened by
+   the reduced-motion contract like everything else. */
+.album-shelf { margin-bottom: 4px; }
+.album-row {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 5px 8px; margin-bottom: 2px;
+  background: none; border: 1px dashed transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim); cursor: pointer; text-align: left;
+  font-family: var(--font-sans); font-size: 12.5px;
+  transition: color var(--t-quick), background var(--t-quick),
+              border-color var(--t-quick);
+}
+.album-row:hover { color: var(--text); background: var(--bg-hover); }
+.album-row.active { color: #ffffff; background: var(--accent-deep); }
+.album-row.drop { border-color: var(--accent); background: var(--accent-soft); }
+.album-stack { position: relative; width: 34px; height: 26px; flex-shrink: 0; }
+.album-stack img, .album-stack-empty {
+  position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1;
+  object-fit: cover; border-radius: 3px;
+  border: 1px solid var(--border-strong); background: var(--bg-inset);
+}
+.album-stack::before {
+  content: ""; position: absolute; inset: 0; border-radius: 3px;
+  border: 1px solid var(--border); background: var(--bg-raised);
+  transform: translate(2px, -2px) rotate(1.5deg);
+  transition: transform var(--t-quick);
+}
+.album-row:hover .album-stack::before { transform: translate(3px, -3px) rotate(3deg); }
+.album-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.album-count {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 10.5px; color: var(--text-faint);
+}
+.album-row.active .album-count { color: rgba(255, 255, 255, 0.75); }
+.album-empty { font-size: 12px; color: var(--text-faint); padding: 2px 8px 6px; margin: 0; }
+
+/* ---- Toasts ------------------------------------------------------------
+   One optional action, no severity theatre — see Toast.tsx. Bottom-right so
+   they never cover the selection tray at bottom-centre. */
+.toasts {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.toast {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 13px;
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--success); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 12.5px;
+  animation: toast-in var(--t-move) ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 .rail-foot {
   padding: 12px 16px 0; margin-top: 10px;
   border-top: 1px solid var(--border);

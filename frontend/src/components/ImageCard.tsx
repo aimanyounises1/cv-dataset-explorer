@@ -52,6 +52,10 @@ interface Props {
   selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
+  /** What a drag from this card carries. Defaults to just this sample; the
+   * gallery passes the whole picked set when this card is part of it, so a
+   * selection drags as one bundle. */
+  getDragIds?: (id: number) => number[];
   mode?: string;
   rank?: number;
 }
@@ -62,7 +66,8 @@ interface Props {
 const TERM_SEP = "|";
 
 export default function ImageCard({ sample, scoreBasis, query, mode, rank,
-                                    selectMode, selected, onToggleSelect }: Props) {
+                                    selectMode, selected, onToggleSelect,
+                                    getDragIds }: Props) {
   const caption = sample.match_caption ?? sample.caption ?? sample.filename;
   const basis = scoreBasis ?? undefined;
 
@@ -131,7 +136,16 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
           aria-pressed={selectMode ? Boolean(selected) : undefined}
           onClick={selectMode
             ? (e) => { e.preventDefault(); onToggleSelect?.(sample.id); }
-            : undefined}>
+            : undefined}
+          /* An anchor drags its URL by default; overriding the payload with
+             sample ids is what lets the album shelf receive a drop. The
+             custom MIME type keeps a stray drop into a text field from
+             pasting an id list. */
+          onDragStart={(e) => {
+            const ids = getDragIds ? getDragIds(sample.id) : [sample.id];
+            e.dataTransfer.setData("application/x-cvde-ids", JSON.stringify(ids));
+            e.dataTransfer.effectAllowed = "copy";
+          }}>
       <div className="card-media">
         <img src={sample.thumb_url} alt={caption} loading="lazy" />
         {/* Frame number, as on a contact sheet — cite or find a sample without

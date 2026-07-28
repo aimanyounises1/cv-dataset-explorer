@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { AXES, SampleCard, SearchMode, TermStat } from "../api/types";
+import { AXES, AlbumSummary, SampleCard, SearchMode, TermStat } from "../api/types";
 import { AXIS_META } from "../components/AxisFilters";
 import AxisLegend from "../components/AxisLegend";
+import { albumsChanged } from "../components/AlbumShelf";
 import ImageCard from "../components/ImageCard";
+import { showToast } from "../components/Toast";
 import { useDebounce } from "../hooks/useDebounce";
 import { useSelection } from "../hooks/useSelection";
 import { saveResultOrder } from "../hooks/useResultOrder";
@@ -64,22 +66,28 @@ export default function GalleryPage() {
     useState<{ name: string; items: SampleCard[] } | null>(null);
   const [imageBusy, setImageBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  /* An album is a tag made by hand-picking rather than by a query — same
-   * storage, same filters, same export, so "album" adds no schema. Select
-   * mode only changes what a click means; the picked set is transient and
-   * the tag it writes is the durable thing. */
+  /* Select mode only changes what a click means: the picked set is
+   * transient, and the album it feeds is the durable thing — a first-class
+   * ordered collection with provenance, no longer a tag. Tags remain labels;
+   * converting one into an album is an explicit act elsewhere. */
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [albumName, setAlbumName] = useState("");
   const [albumBusy, setAlbumBusy] = useState(false);
-  const [knownTags, setKnownTags] = useState<string[]>([]);
+  const [albums, setAlbums] = useState<AlbumSummary[]>([]);
 
   useEffect(() => {
     if (!selecting) return;
-    // Existing tags feed the datalist so "add to an existing album" is one
+    // Existing albums feed the datalist so "add to an existing album" is one
     // keystroke, not a memory test.
-    api.tags().then((ts) => setKnownTags(ts.map((t) => t.name))).catch(() => {});
+    api.listAlbums().then(setAlbums).catch(() => {});
   }, [selecting]);
+
+  /** A drag from a picked card carries the whole picked set — a selection is
+   * one object, and dragging it should feel like moving that object. An
+   * unpicked card drags alone even in select mode. */
+  const getDragIds = (id: number) =>
+    picked.has(id) && picked.size > 0 ? [...picked] : [id];
 
   const togglePick = (id: number) =>
     setPicked((prev) => {
@@ -94,15 +102,28 @@ export default function GalleryPage() {
     if (!name || picked.size === 0) return;
     setAlbumBusy(true);
     setError(null);
-    api.bulkTag([...picked], name)
-      .then(() => {
-        // Land inside the album: the tag-filtered gallery, where the set is
-        // revisitable, shareable and exportable like any other slice.
+    const ids = [...picked];
+    // A name that matches an existing album adds to it; a new name creates
+    // it first. Albums are first-class now — the tray stopped writing tags
+    // when albums stopped being tags.
+    const existing = albums.find((a) => a.name === name);
+    const ensure = existing
+      ? Promise.resolve(existing.id)
+      : api.createAlbum(name).then((a) => a.id);
+    ensure
+      .then((id) => api.addToAlbum(id, ids).then((r) => ({ id, added: r.added })))
+      .then(({ id, added }) => {
+        albumsChanged();
+        showToast(added === ids.length
+          ? `Added ${added} to “${name}”`
+          : `Added ${added} to “${name}” — ${ids.length - added} already there`);
+        // Land inside the album, where the set is revisitable, shareable and
+        // exportable like any other slice.
         setSelecting(false);
         setPicked(new Set());
         setAlbumName("");
         setInput("");
-        setParams({ tag: name, q: "", page: "" });
+        setParams({ album: String(id), tag: "", q: "", page: "" });
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setAlbumBusy(false));
@@ -370,10 +391,10 @@ export default function GalleryPage() {
           </span>
           <input list="album-names" value={albumName}
                  onChange={(e) => setAlbumName(e.target.value)}
-                 placeholder="Album name (stored as a tag)…"
+                 placeholder="Album name…"
                  aria-label="Album name" />
           <datalist id="album-names">
-            {knownTags.map((t) => <option key={t} value={t} />)}
+            {albums.map((a) => <option key={a.id} value={a.name} />)}
           </datalist>
           <button className="primary" disabled={!picked.size || !albumName.trim() || albumBusy}
                   onClick={saveAlbum}>
@@ -455,7 +476,7 @@ export default function GalleryPage() {
             {imageQuery.items.map((s) => (
               <ImageCard key={s.id} sample={s} scoreBasis="cosine"
                          selectMode={selecting} selected={picked.has(s.id)}
-                         onToggleSelect={togglePick} />
+                         onToggleSelect={togglePick} getDragIds={getDragIds} />
             ))}
           </div>
         </>
@@ -486,7 +507,7 @@ export default function GalleryPage() {
           <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
                      query={query} mode={mode} rank={i + 1}
                      selectMode={selecting} selected={picked.has(s.id)}
-                     onToggleSelect={togglePick} />
+                     onToggleSelect={togglePick} getDragIds={getDragIds} />
         ))}
       </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import FilterPanel from "./FilterPanel";
+import AlbumShelf from "../AlbumShelf";
 import SavedViews from "../SavedViews";
 
 /**
@@ -128,6 +129,10 @@ export default function LeftRail() {
             search params are a filter set); restoring navigates there. */}
         <div className="rail-group rail-library">
           <div className="eyebrow rail-group-title">Library</div>
+          {/* Albums before saved views: an album is a destination you return
+              to daily; a saved view is a filter recipe. Both are the library —
+              where you come back to — so both live with navigation. */}
+          <AlbumShelf />
           <SavedViews
             current={location.pathname === "/" ? location.search : ""}
             onRestore={(qs) => navigate(qs ? `/?${qs}` : "/")}
