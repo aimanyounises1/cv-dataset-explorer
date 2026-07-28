@@ -44,11 +44,18 @@ export const readGroupsAnswer = (r: ScenarioResponse): GroupsAnswer => {
  * no structure", which is the one thing this panel must never say by accident.
  */
 export default function ScenarioGroups({
-  resultCount, hasMore, answer, busy, thumbs, onBack, onSaveGroup,
+  resultCount, hasMore, mode, answer, busy, thumbs, onBack, onSaveGroup,
 }: {
-  /** How many results are on screen — what the proposals are over. */
+  /** How many results are on screen. */
   resultCount: number;
   hasMore: boolean;
+  /** The search mode the ranking on screen was produced by. Grouping is
+   * k-means over SigLIP vectors and always clusters the SEMANTIC ranking of
+   * this query, so in keyword and hybrid mode the proposals are over a
+   * different ordering than the cards behind them — measured on `q=street` in
+   * keyword mode, only 19 of the 60 cards on screen fell in any group. The
+   * panel says which it grouped rather than implying they are the same. */
+  mode?: string;
   /** null until the grouping request has answered. */
   answer: GroupsAnswer | null;
   busy: boolean;
@@ -66,8 +73,12 @@ export default function ScenarioGroups({
             claiming "the results on screen" while showing a group of 118 over
             60 rendered cards was the panel contradicting itself. */}
         <span className="groups-note">
-          Proposals over this ranking, deeper than the {resultCount}
-          {hasMore ? "+" : ""} shown
+          {mode && mode !== "semantic"
+            ? <>Proposals over the <strong>semantic</strong> ranking of this
+                query — not over the {resultCount}{hasMore ? "+" : ""} {mode}
+                {" "}results on screen, which are ordered differently</>
+            : <>Proposals over this ranking, deeper than the {resultCount}
+                {hasMore ? "+" : ""} shown</>}
           {answer?.basis ? ` · ${answer.basis}` : ""} · nothing is
           kept until you save a group as an album
         </span>
