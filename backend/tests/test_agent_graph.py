@@ -541,3 +541,63 @@ def test_system_diagram_names_the_active_provider(monkeypatch):
             for n in b.get("nodes", []) if n.get("group") == "engine")
         assert wrong not in engine_labels, (
             f"engine nodes must not credit {wrong} while {active} is active")
+
+
+def test_graph_streams_real_node_updates():
+    """The live trace is LangGraph's own update stream — node names arrive in
+    execution order, and the final values snapshot carries the full state the
+    blocking endpoint would have returned."""
+    a = RecordingLane("insights", delay=0.05)
+    graph = build_graph(model=StubModel(["insights"]),
+                        specialists=[make_specialist(a)])
+    seen_nodes, final_state = [], None
+    for mode, chunk in graph.stream(
+            {"messages": [HumanMessage("stream probe")], "routes": [],
+             "retries": 0, "lanes_ok": [], "lanes_failed": []},
+            config={"recursion_limit": 40},
+            stream_mode=["updates", "values"]):
+        if mode == "values":
+            final_state = chunk
+        else:
+            seen_nodes += list(chunk)
+    assert seen_nodes[0] == "orchestrate"
+    assert "insights" in seen_nodes
+    assert "synthesize" in seen_nodes
+    assert final_state is not None and final_state["lanes_ok"] == ["insights"]
+
+
+def test_inspect_album_reports_measured_analysis():
+    """The assistant's album tool resolves by name or id and returns the same
+    measured analysis the UI shows — counted signals, never invented."""
+    import json as _json
+
+    from app import db as _db
+    from app.agent.tools import inspect_album
+
+    conn = _db.connect()
+    _db.init_db(conn)
+    cur = conn.execute(
+        "INSERT INTO samples(dataset, filename, split, width, height, filesize) "
+        "VALUES ('flickr8k', 'agent_alb.jpg', 'train', 10, 10, 1)")
+    sid = cur.lastrowid
+    a = conn.execute("INSERT INTO albums(name, origin, position, created_at, "
+                     "updated_at) VALUES ('agent-probe-album', 'manual', 0, "
+                     "'2026-07-28', '2026-07-28')")
+    aid = a.lastrowid
+    conn.execute("INSERT INTO album_items(album_id, sample_id, position, "
+                 "added_at) VALUES (?, ?, 0, '2026-07-28')", (aid, sid))
+    conn.commit()
+    try:
+        out = _json.loads(inspect_album.func(album="agent-probe-album"))
+        assert out["album_id"] == aid and out["count"] == 1
+        assert "measured" in out and out["sample_ids"] == [sid]
+        by_id = _json.loads(inspect_album.func(album=str(aid)))
+        assert by_id["name"] == "agent-probe-album"
+        miss = _json.loads(inspect_album.func(album="no-such-album"))
+        assert "existing_albums" in miss
+    finally:
+        conn.execute("DELETE FROM album_items WHERE album_id = ?", (aid,))
+        conn.execute("DELETE FROM albums WHERE id = ?", (aid,))
+        conn.execute("DELETE FROM samples WHERE id = ?", (sid,))
+        conn.commit()
+        conn.close()

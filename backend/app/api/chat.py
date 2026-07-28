@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 _graph = None
 _lock = threading.Lock()
 
-IMAGE_TOOLS = {"search_images", "find_similar", "suspect_captions",
+IMAGE_TOOLS = {"search_images", "find_similar", "suspect_captions", "inspect_album",
                "rare_slice_examples", "get_sample_details", "show_images"}
 SETUP_HELP = (
     "The assistant needs the optional agent stack: "
@@ -197,6 +197,84 @@ def chat(
         logger.exception("Agent run failed")
         raise HTTPException(500, f"Assistant run failed: {exc}") from exc
     elapsed = time.monotonic() - started
+    return _build_response(conn, lc_messages, result, elapsed)
+
+
+# Human phrasing per graph node for the live trace. A node missing here still
+# streams — as its own name — so a new specialist can never silence the trace.
+_STEP_LABELS = {
+    "orchestrate": "Reading the request and choosing specialist lanes",
+    "retrieval": "Searching and inspecting the corpus",
+    "insights": "Analyzing dataset signals",
+    "visualization": "Building a visual answer",
+    "qa": "Driving the application in Chrome",
+    "synthesize": "Quality-gating the answer",
+}
+
+
+@router.post("/chat/stream")
+def chat_stream(
+    messages: list[ChatMessage] = Body(..., embed=True),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The same orchestration as POST /chat, with the steps streamed as they
+    happen: NDJSON lines `{"type":"step",...}` from LangGraph's own update
+    stream — real node transitions, never a staged animation — then one
+    `{"type":"final","response":{...}}` carrying the exact POST /chat payload.
+    """
+    if not messages or messages[-1].role != "user":
+        raise HTTPException(400, "Last message must be from the user.")
+    _check_ollama()
+    graph = _get_graph()
+
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    lc_messages = [
+        HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
+        for m in messages[-10:]
+    ]
+    state = {"messages": lc_messages, "routes": [], "retries": 0,
+             "lanes_ok": [], "lanes_failed": []}
+
+    def gen():
+        emit = lambda d: json.dumps(d, separators=(",", ":")) + "\n"  # noqa: E731
+        started = time.monotonic()
+        final_state = None
+        try:
+            for mode, chunk in graph.stream(
+                    state, config={"recursion_limit": 40},
+                    stream_mode=["updates", "values"]):
+                if mode == "values":
+                    final_state = chunk
+                    continue
+                for node in chunk:
+                    yield emit({"type": "step", "node": node,
+                                "label": _STEP_LABELS.get(node, node),
+                                "t": round(time.monotonic() - started, 2)})
+        except Exception as exc:                          # noqa: BLE001
+            logger.exception("Streaming agent run failed")
+            yield emit({"type": "error",
+                        "detail": f"Assistant run failed: {exc}"})
+            return
+        if final_state is None:
+            yield emit({"type": "error",
+                        "detail": "The graph produced no final state."})
+            return
+        resp = _build_response(conn, lc_messages, final_state,
+                               time.monotonic() - started)
+        yield emit({"type": "final", "response": resp.model_dump(mode="json")})
+
+    from fastapi.responses import StreamingResponse
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
+def _build_response(conn, lc_messages, result, elapsed) -> ChatResponse:
+    """Everything between a finished graph state and the wire response:
+    trace walk, block validation, report persistence, sample cards, reply
+    extraction. One implementation, shared by the blocking endpoint and the
+    streaming one — two copies would drift on the first change."""
+    from langchain_core.messages import AIMessage, ToolMessage
 
     new_messages = result["messages"][len(lc_messages):]
 

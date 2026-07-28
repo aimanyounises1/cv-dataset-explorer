@@ -22,6 +22,7 @@ from .tools import (
     dataset_overview,
     find_similar,
     get_sample_details,
+    inspect_album,
     rare_slice_examples,
     search_images,
     suspect_captions,
@@ -67,7 +68,8 @@ Use your tools to find, inspect, compare, or tag dataset samples. Prefer hybrid
 search. When the user wants to *see* images, call show_images with the ids you
 found so they render inline. Keep answers concise; mention sample ids — the UI
 renders the images, so never fabricate image markdown or URLs.""",
-    tools=[search_images, find_similar, get_sample_details, tag_samples],
+    tools=[search_images, find_similar, get_sample_details, tag_samples,
+           inspect_album],
 )
 
 INSIGHTS = Specialist(
@@ -84,7 +86,8 @@ Keep answers concise and analytical.""",
     # options is past where it picks reliably — and the orchestrator can fan out
     # to the visualization lane in parallel when a request needs both.
     tools=[dataset_overview, attribute_coverage, rare_slice_examples,
-           suspect_captions, get_sample_details, plot_distribution],
+           suspect_captions, get_sample_details, inspect_album,
+           plot_distribution],
 )
 
 VISUALIZATION = Specialist(
