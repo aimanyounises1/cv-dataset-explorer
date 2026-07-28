@@ -80,9 +80,12 @@ class _Detector:
                 text_threshold=threshold, target_sizes=[image.size[::-1]])[0]
         W, H = image.size
         boxes = []
-        labels = res.get("text_labels", res.get("labels", []))
+        # transformers renamed this key; falling back to unlabelled boxes keeps
+        # the count aligned, so a rename can never silently drop detections.
+        labels = (res.get("text_labels") or res.get("labels")
+                  or [""] * len(res["boxes"]))
         for (x0, y0, x1, y1), label, score in zip(
-                res["boxes"].tolist(), labels, res["scores"].tolist()):
+                res["boxes"].tolist(), labels, res["scores"].tolist(), strict=True):
             boxes.append({
                 "x": round(max(x0, 0) / W, 4), "y": round(max(y0, 0) / H, 4),
                 "w": round(min(x1 - x0, W) / W, 4),
