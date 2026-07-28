@@ -1,0 +1,11 @@
+# Optional preferred retrieval provider: Qwen/Qwen3-VL-Embedding-2B, running
+# in-process through sentence-transformers on MPS/CUDA/CPU.
+#
+# Ollama is uninvolved here — its embedding API serves language models only and
+# cannot host a multimodal embedding model. The app runs fully without this
+# file installed: retrieval falls back to SigLIP 2 and the UI names the reason.
+#
+#   uv pip install --python .venv/bin/python -r requirements-qwen.txt
+#   python -m app.ingest --provider qwen3_vl   # first run downloads ~4 GB
+sentence-transformers>=5.4
+torchvision>=0.28  # Qwen3-VL's processor imports its video pipeline through torchvision
