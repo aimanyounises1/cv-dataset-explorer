@@ -1,9 +1,11 @@
 """Optional zero-shot object detection: Grounding DINO tiny.
 
 Measured on this machine (M4 Max, MPS) before integration, per the rule that
-a model ships with numbers or not at all: 256 ms per image warm, ~2.3 GB
-driver memory, correct boxes ("a person", "a dog") on a real corpus image;
-cold load ~50 s including the one-time ~700 MB download. SAM 2.1 hiera tiny
+a model ships with numbers or not at all: ~330 ms per image warm (p50 over a
+30-image sample; 267 ms fastest, 448 ms p95), ~1 GB resident, correct boxes
+("a person", "a dog") on a real corpus image; cold load ~6 s once the weights
+are cached, plus a one-time ~700 MB download. `scripts/bench_detector.py`
+re-measures every number in this paragraph. SAM 2.1 hiera tiny
 also measured viable (70 ms/mask) and is documented as future work — boxes
 feed rectangular region search today; masks would not change what retrieval
 can consume.

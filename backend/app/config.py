@@ -34,7 +34,8 @@ QWEN_EMBED_BATCH = int(os.environ.get("CVDE_QWEN_EMBED_BATCH", "8"))
 
 
 # Optional zero-shot detector (region suggestions). Measured before shipping:
-# Grounding DINO tiny, 256 ms/image on this machine's MPS, ~2.3 GB. Weights
+# Grounding DINO tiny, ~330 ms/image warm on this machine's MPS (p50 of 30;
+# scripts/bench_detector.py re-measures it), ~1 GB resident. Weights
 # are fetched explicitly, never on the request path.
 DETECT_MODEL = os.environ.get("CVDE_DETECT_MODEL", "IDEA-Research/grounding-dino-tiny")
 
