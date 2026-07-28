@@ -1,7 +1,8 @@
 """API response models."""
-from typing import Optional, Union
+import math
+from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class AxisScores(BaseModel):
@@ -83,7 +84,9 @@ class SearchResponse(BaseModel):
     mode_used: str                      # actual mode after any fallback
     degraded: bool = False              # true if the requested ranking fell back
     message: Optional[str] = None
-    # What `score` means: cosine | cosine_adj | rrf | prism_ll | None
+    # What `score` means: cosine | cosine_adj | rrf | prism_ll | composed | None.
+    # `composed` is a cosine minus a chosen negative-example penalty — only
+    # comparable within its own response, never against any other basis.
     score_basis: Optional[str] = None
     rrf_k: Optional[int] = None         # fusion constant, when fusion ran
     term_stats: list[TermStat] = []     # per-term document frequency (lexical modes)
@@ -391,6 +394,119 @@ class AlbumUpdate(BaseModel):
     # Bounded to SQLite's signed 64-bit range: a larger int overflows at bind
     # time and would surface as a 500 instead of a 422.
     cover_sample_id: Optional[int] = Field(None, ge=1, le=2**63 - 1)
+
+
+# Example ids are few by design: an example is something the user hand-picked,
+# not a pasted set — the id-list filter is the tool for sets.
+ExampleId = Annotated[int, Field(ge=1, le=2**63 - 1)]
+
+
+class ComposedSearchRequest(BaseModel):
+    """POST body for composed search: text and image examples fused into one
+    query, with negative examples pushing results away. At least one of `text`
+    / `positive_ids` is required — an all-negative query has no direction."""
+    text: Optional[str] = Field(None, max_length=500)
+    positive_ids: list[ExampleId] = Field(default_factory=list, max_length=16)
+    negative_ids: list[ExampleId] = Field(default_factory=list, max_length=16)
+    top_k: int = Field(60, ge=1, le=200)
+    offset: int = Field(0, ge=0, le=5000)
+    split: Optional[str] = None
+    tag: Optional[str] = None
+    vlm_tag: Optional[str] = None
+    # One facet or several, intersected — same contract as SearchRequest.
+    attr: Optional[Union[str, list[str]]] = None
+    album: Optional[int] = Field(None, ge=1, le=2**63 - 1)
+    max_agreement: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
+    axes: dict[str, dict[str, Optional[int]]] = {}
+
+    @model_validator(mode="after")
+    def _needs_a_direction(self):
+        if not (self.text and self.text.strip()) and not self.positive_ids:
+            raise ValueError("Provide text or at least one positive example id")
+        return self
+
+
+class ScenarioGroup(BaseModel):
+    label: str                # templated, e.g. "night · street · people — 43 images"
+    evidence: str             # the measured counts behind the label, e.g. "38/43 time_of_day:night"
+    count: int                # always equals len(sample_ids)
+    # ALL member ids, in ranking order — a group is saved whole (as an album),
+    # so this is the full membership, never a preview.
+    sample_ids: list[int] = []
+
+
+class ScenarioResponse(BaseModel):
+    groups: list[ScenarioGroup] = []   # never more than 3
+    # How the groups were made, stated so nobody mistakes them for a model's
+    # judgment: clustering is arithmetic and the labels are counted, not written.
+    basis: str
+    degraded: bool = False
+    message: Optional[str] = None
+
+
+class ActivityEvent(BaseModel):
+    id: int
+    kind: str
+    payload: dict = {}
+    created_at: str                      # ISO-8601, UTC
+
+
+class ActivityCreate(BaseModel):
+    """Client-written snapshot events. `album_*` kinds are deliberately not
+    accepted here: those are written by the endpoints that performed the
+    action, and a client claiming one would forge server history."""
+    kind: Literal["search_snapshot", "image_search", "composed_search"]
+    payload: dict = {}
+
+
+def _finite01(v) -> bool:
+    """A JSON number in [0, 1]. bool is excluded (it is an int in Python);
+    NaN/inf are excluded because Python's json parser accepts them even though
+    JSON forbids them, and a NaN coordinate would poison every comparison."""
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v) and 0.0 <= v <= 1.0)
+
+
+class AnnotationCreate(BaseModel):
+    """A region drawn over a sample, in NORMALIZED 0..1 coordinates so the
+    geometry survives any rendered size. Rows, never pixels — the source
+    image is immutable."""
+    kind: Literal["rect", "polygon"]
+    geometry: dict
+    label: Optional[str] = Field(None, max_length=200)
+
+    @model_validator(mode="after")
+    def _valid_geometry(self):
+        g = self.geometry
+        if self.kind == "rect":
+            if set(g.keys()) != {"x", "y", "w", "h"}:
+                raise ValueError("rect geometry must be exactly {x, y, w, h}")
+            if not all(_finite01(g[k]) for k in ("x", "y", "w", "h")):
+                raise ValueError("rect coordinates must be numbers in [0, 1]")
+            if g["w"] <= 0 or g["h"] <= 0:
+                raise ValueError("rect width and height must be > 0")
+            self.geometry = {k: float(g[k]) for k in ("x", "y", "w", "h")}
+        else:
+            points = g.get("points")
+            if set(g.keys()) != {"points"} or not isinstance(points, list):
+                raise ValueError("polygon geometry must be exactly {points: [[x,y], ...]}")
+            if not 3 <= len(points) <= 100:
+                raise ValueError("polygon needs 3 to 100 points")
+            for p in points:
+                if not (isinstance(p, list) and len(p) == 2
+                        and _finite01(p[0]) and _finite01(p[1])):
+                    raise ValueError("each polygon point must be [x, y] in [0, 1]")
+            self.geometry = {"points": [[float(x), float(y)] for x, y in points]}
+        return self
+
+
+class AnnotationOut(BaseModel):
+    id: int
+    sample_id: int
+    kind: str
+    geometry: dict
+    label: Optional[str] = None
+    created_at: str
 
 
 class ChatMessage(BaseModel):

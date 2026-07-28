@@ -110,6 +110,31 @@ CREATE TABLE IF NOT EXISTS album_items (
     PRIMARY KEY (album_id, sample_id)
 );
 CREATE INDEX IF NOT EXISTS idx_album_items_album ON album_items(album_id, position);
+
+-- Activity: an append-only trail of what happened in the workspace. Server
+-- endpoints write their own events (album_*) inside the mutation that caused
+-- them; clients may append snapshot kinds through the API. Payload is opaque
+-- JSON so the trail survives the UI growing event shapes the server has no
+-- column for — the saved_views argument, applied to history.
+CREATE TABLE IF NOT EXISTS activity_events (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,                -- JSON object
+    created_at TEXT NOT NULL              -- ISO-8601 UTC
+);
+
+-- Annotations: regions drawn over a sample. Rows, never pixels — the source
+-- images stay immutable. Geometry is normalized 0..1 coordinates so an
+-- annotation survives any resize of the rendered image.
+CREATE TABLE IF NOT EXISTS annotations (
+    id INTEGER PRIMARY KEY,
+    sample_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,                   -- 'rect' | 'polygon'
+    geometry TEXT NOT NULL,               -- JSON: rect {x,y,w,h} | polygon {points}
+    label TEXT,
+    created_at TEXT NOT NULL              -- ISO-8601 UTC
+);
+CREATE INDEX IF NOT EXISTS idx_annotations_sample ON annotations(sample_id);
 """
 
 

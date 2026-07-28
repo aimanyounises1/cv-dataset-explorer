@@ -30,7 +30,16 @@ from ..ml import hubness
 from ..ml.embedder import get_embedder
 from ..ml.index import get_caption_index, get_index
 from ..ml.prism import get_prism_index
-from ..schemas import MatchPath, SampleCard, SearchRequest, SearchResponse, TermStat
+from ..schemas import (
+    ComposedSearchRequest,
+    MatchPath,
+    SampleCard,
+    ScenarioGroup,
+    ScenarioResponse,
+    SearchRequest,
+    SearchResponse,
+    TermStat,
+)
 from .deps import (
     MAX_ID_LIST,
     MAX_SQLITE_INT,
@@ -505,3 +514,250 @@ async def search_by_image(
     captions = first_captions(conn, ids)
     return [row_to_card(rows[sid], caption=captions.get(sid), score=score)
             for sid, score in results if sid in rows]
+
+
+# -- composed search ----------------------------------------------------------
+
+
+def _unit(v: np.ndarray) -> np.ndarray:
+    n = float(np.linalg.norm(v))
+    return v / n if n else v
+
+
+def _composed_ranking(conn, body: ComposedSearchRequest):
+    """The full composed ranking as (ranked, qvec, None), or (None, None,
+    message) when the embedding stack is down.
+
+    Query vector: the normalized mean of (a) the unit text vector, encoded
+    through the same `normalize_query_text` seam every text query uses, and
+    (b) the unit mean of the positive example image vectors — equal weights,
+    either part optional. Negative examples subtract
+    0.5 * max(0, max_i cos(img, neg_i)) from each candidate's positive-side
+    cosine. The 0.5 is CHOSEN, NOT TUNED: half-weight repulsion, picked for
+    being simple to state, with no benchmark run to prefer it over its
+    neighbours. The resulting scores carry basis `composed` and are only
+    comparable within one response.
+
+    Filters restrict candidates inside the ranking (the allowed-id mask),
+    never after a window — and there is no keyword lane here to thread them
+    into a second time.
+    """
+    index = get_index()
+    embedder = get_embedder() if index is not None else None
+    if index is None or embedder is None:
+        return None, None, ("Composed ranking unavailable (embeddings not "
+                            "computed) — run `python -m app.ingest`.")
+
+    def vec_of(sid: int, side: str) -> np.ndarray:
+        v = index.vector_of(sid)
+        if v is None:
+            raise HTTPException(
+                404, f"{side} example {sid} is not in the embedding index")
+        return v
+
+    pos = [vec_of(s, "Positive") for s in body.positive_ids]
+    neg = [vec_of(s, "Negative") for s in body.negative_ids]
+    parts = []
+    if body.text and body.text.strip():
+        parts.append(_unit(embedder.encode_texts([normalize_query_text(body.text)])[0]))
+    if pos:
+        parts.append(_unit(np.mean(np.stack(pos), axis=0)))
+    qvec = _unit(np.mean(np.stack(parts), axis=0))
+
+    axes = {a: (b.get("min"), b.get("max")) for a, b in (body.axes or {}).items()}
+    allowed = filtered_id_set(conn, body.split, body.tag, body.vlm_tag, body.attr,
+                              axes, None, False, body.max_agreement, None,
+                              body.album)
+    scores = index.embeddings @ qvec
+    if neg:
+        sims = index.embeddings @ np.stack(neg).T
+        scores = scores - 0.5 * np.maximum(0.0, sims.max(axis=1))
+    if allowed is not None:
+        allowed_arr = np.fromiter(allowed, dtype=index.ids.dtype,
+                                  count=len(allowed))
+        scores = np.where(np.isin(index.ids, allowed_arr), scores, -np.inf)
+    order = np.argsort(-scores, kind="stable")
+    ranked = [(int(index.ids[i]), float(scores[i])) for i in order
+              if np.isfinite(scores[i])]
+    return ranked, qvec, None
+
+
+def run_composed(conn: sqlite3.Connection, body: ComposedSearchRequest) -> SearchResponse:
+    ranked, qvec, down = _composed_ranking(conn, body)
+    if ranked is None:
+        if body.text and body.text.strip():
+            # The honest fallback run_search's own degradation uses: rank what
+            # can still be ranked and say exactly what was lost.
+            axes = {a: (b.get("min"), b.get("max"))
+                    for a, b in (body.axes or {}).items()}
+            out = run_search(conn, body.text, mode="keyword", top_k=body.top_k,
+                             split=body.split, tag=body.tag, vlm_tag=body.vlm_tag,
+                             attr=body.attr, offset=body.offset, axes=axes,
+                             max_agreement=body.max_agreement, album=body.album)
+            out.degraded = True
+            out.message = (down + " Ranked the text by keyword instead; "
+                           "example images were ignored.")
+            return out
+        return SearchResponse(items=[], mode_used="composed", degraded=True,
+                              message=down, offset=body.offset)
+
+    # No fused horizon: this is one exact pass over the whole filtered corpus,
+    # so the depth is the candidate count and paging never re-ranks.
+    depth = len(ranked)
+    end = min(body.offset + body.top_k, depth)
+    window = [sid for sid, _ in ranked[body.offset:end]]
+    scores = dict(ranked)
+    has_more = end < depth
+    if not window:
+        return SearchResponse(items=[], mode_used="composed", degraded=False,
+                              score_basis="composed", offset=body.offset,
+                              has_more=False, depth_limit=depth,
+                              depth_reached=body.offset >= depth)
+    match_captions = _best_captions_for(conn, window, qvec)
+    qmarks = ",".join("?" * len(window))
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT * FROM samples WHERE id IN ({qmarks})", window)}
+    captions = first_captions(conn, window)
+    items = []
+    for rank0, sid in enumerate(window):
+        if sid not in rows:
+            continue
+        card = row_to_card(rows[sid], caption=captions.get(sid),
+                           score=round(scores[sid], 4))
+        card.match_caption = match_captions.get(sid)
+        card.match_paths = [MatchPath(path="composed", rank=body.offset + rank0 + 1)]
+        items.append(card)
+    return SearchResponse(items=items, mode_used="composed", score_basis="composed",
+                          offset=body.offset, has_more=has_more,
+                          depth_limit=depth, depth_reached=end >= depth)
+
+
+@router.post("/search/composed", response_model=SearchResponse)
+def search_composed(body: ComposedSearchRequest,
+                    conn: sqlite3.Connection = Depends(get_conn)):
+    """Text and example images fused into one ranking, with negative examples
+    pushing results away. See `_composed_ranking` for the arithmetic and for
+    why the negative weight is described as chosen, not tuned."""
+    return run_composed(conn, body)
+
+
+# -- scenario groups ----------------------------------------------------------
+
+SCENARIO_DEPTH = 200
+SCENARIO_MIN_RESULTS = 8
+SCENARIO_BASIS = ("k-means over the top-200 composed ranking; labels are "
+                  "templated from measured attributes, not generated")
+
+
+def _kmeans_assign(X: np.ndarray, k: int, seed: int = 0, iters: int = 20) -> np.ndarray:
+    """Plain k-means over unit vectors: fixed seed, bounded iterations, empty
+    clusters keep their center — deterministic by construction, so the same
+    query always yields the same groups."""
+    rng = np.random.default_rng(seed)
+    centers = X[rng.choice(len(X), size=k, replace=False)].copy()
+    assign = np.full(len(X), -1)
+    for _ in range(iters):
+        d = ((X[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+        new = d.argmin(axis=1)
+        if np.array_equal(new, assign):
+            break
+        assign = new
+        for c in range(k):
+            members = X[assign == c]
+            if len(members):
+                centers[c] = members.mean(axis=0)
+    return assign
+
+
+def _majority_parts(conn, member_ids: list[int]) -> tuple[list[str], str]:
+    """(label parts, evidence) for one group — counted, never generated.
+
+    A candidate part is an attribute label, a VLM tag, or a caption content
+    word, and it qualifies only when a majority of the group carries it.
+    Candidates rank by (count desc, source: attributes before VLM tags before
+    caption words, name asc), so the same members always template the same
+    label."""
+    count = len(member_ids)
+    qmarks = ",".join("?" * count)
+    cands: list[tuple[int, int, str, str]] = []   # (n, source_rank, name, value)
+    dominant: dict[str, tuple[int, str]] = {}
+    for r in conn.execute(
+            f"SELECT grp, label, COUNT(*) AS n FROM attributes "
+            f"WHERE sample_id IN ({qmarks}) GROUP BY grp, label", member_ids):
+        best = dominant.get(r["grp"])
+        if (best is None or r["n"] > best[0]
+                or (r["n"] == best[0] and r["label"] < best[1])):
+            dominant[r["grp"]] = (r["n"], r["label"])
+    for grp, (n, label) in dominant.items():
+        cands.append((n, 0, f"{grp}:{label}", label))
+    for r in conn.execute(
+            f"SELECT tag, COUNT(*) AS n FROM vlm_tags "
+            f"WHERE sample_id IN ({qmarks}) GROUP BY tag", member_ids):
+        cands.append((r["n"], 1, f"vlm:{r['tag']}", r["tag"]))
+    term_samples: dict[str, set[int]] = {}
+    for r in conn.execute(
+            f"SELECT sample_id, text FROM captions WHERE sample_id IN ({qmarks})",
+            member_ids):
+        for tok in set(r["text"].split()):
+            bare = "".join(ch for ch in tok.lower() if ch.isalnum())
+            if len(bare) >= 3 and bare not in db.STOPWORDS:
+                term_samples.setdefault(bare, set()).add(r["sample_id"])
+    for term, sids in term_samples.items():
+        cands.append((len(sids), 2, f"caption:{term}", term))
+
+    majority = sorted((c for c in cands if 2 * c[0] >= count),
+                      key=lambda c: (-c[0], c[1], c[2]))
+    parts, evidence, seen = [], [], set()
+    for n, _src, name, value in majority:
+        if value in seen:
+            continue
+        seen.add(value)
+        parts.append(value)
+        evidence.append(f"{n}/{count} {name}")
+        if len(parts) == 3:
+            break
+    if not parts:
+        return [], "no attribute, tag or caption term shared by a majority"
+    return parts, "; ".join(evidence)
+
+
+@router.post("/search/scenarios", response_model=ScenarioResponse)
+def search_scenarios(body: ComposedSearchRequest,
+                     conn: sqlite3.Connection = Depends(get_conn)):
+    """The composed ranking, grouped into at most three scenario clusters.
+
+    Ranks to min(200, corpus) — `top_k`/`offset` are ignored here, grouping is
+    over the head of the ranking — then k-means with k = min(3, n // 8): a
+    grouping is only offered when groups would average eight members, and
+    fewer than eight results yields no groups at all. The fixed seed makes the
+    whole pipeline deterministic: same query, same groups, byte for byte.
+    """
+    ranked, _qvec, down = _composed_ranking(conn, body)
+    if ranked is None:
+        return ScenarioResponse(groups=[], basis=SCENARIO_BASIS,
+                                degraded=True, message=down)
+    index = get_index()
+    top = ranked[:min(SCENARIO_DEPTH, len(ranked))]
+    n = len(top)
+    if n < SCENARIO_MIN_RESULTS:
+        return ScenarioResponse(
+            groups=[], basis=SCENARIO_BASIS,
+            message=f"Only {n} results — fewer than {SCENARIO_MIN_RESULTS} "
+                    "needed to group.")
+    k = min(3, n // SCENARIO_MIN_RESULTS)
+    X = np.stack([index.vector_of(sid) for sid, _ in top])
+    assign = _kmeans_assign(X, k)
+    groups = []
+    for c in range(k):
+        members = [top[i] for i in range(n) if assign[i] == c]  # score order
+        if not members:
+            continue
+        ids = [sid for sid, _ in members]
+        parts, evidence = _majority_parts(conn, ids)
+        label = (" · ".join(parts) if parts else "mixed") + f" — {len(ids)} images"
+        # The FULL membership, in ranking order: "save this group as an album"
+        # files every member, so a preview here would silently truncate it.
+        groups.append(ScenarioGroup(label=label, evidence=evidence,
+                                    count=len(ids), sample_ids=ids))
+    groups.sort(key=lambda g: (-g.count, g.sample_ids[0] if g.sample_ids else 0))
+    return ScenarioResponse(groups=groups[:3], basis=SCENARIO_BASIS)
