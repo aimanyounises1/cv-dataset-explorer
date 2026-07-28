@@ -31,7 +31,7 @@ const STORAGE_KEY = "cvde-chat-turns";
 
 function loadTurns(): Turn[] {
   try {
-    return JSON.parse(sessionStorage.getItem(STORAGE_KEY) ?? "[]") as Turn[];
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]") as Turn[];
   } catch {
     return [];
   }
@@ -39,8 +39,9 @@ function loadTurns(): Turn[] {
 
 /** Assistant view: a Fugu-style multi-agent orchestration (LangGraph + Ollama)
  * behind a single chat box. The trace chips show which specialist and tools
- * each answer came from. The conversation is kept in sessionStorage so
- * clicking through to a sample and coming back doesn't lose it. */
+ * each answer came from. The conversation persists in localStorage — an
+ * investigation's questions are work product, and closing the browser must
+ * not erase them. "New chat" remains the explicit way to start over. */
 export default function ChatPage() {
   const [status, setStatus] = useState<ChatStatus | null>(null);
   const [turns, setTurns] = useState<Turn[]>(loadTurns);
@@ -55,9 +56,9 @@ export default function ChatPage() {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(turns));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(turns));
     } catch {
-      // Best effort: a full sessionStorage only loses persistence, not the chat.
+      // Best effort: full storage only loses persistence, not the chat.
     }
   }, [turns]);
 
