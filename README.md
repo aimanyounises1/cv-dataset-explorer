@@ -13,9 +13,10 @@ lets the answer leave as a slice you can regenerate. Everything runs on one
 machine — SQLite for storage, SigLIP 2 for embeddings, no cloud services and no
 paid APIs.
 
-![The gallery: a hybrid search for "a crowded street at night", with the
-difficulty sparkline, the retrieval-path evidence strip, and the selection rail
-on the right](docs/screenshots/1-gallery.png)
+![The gallery: a hybrid search for "a crowded street at night" — images lead,
+with matched terms highlighted in each caption and the selection rail on the
+right; each card's difficulty sparkline and retrieval-path evidence appear on
+hover](docs/screenshots/1-gallery.png)
 
 Jump to: [what it looks like](#what-it-looks-like) ·
 [architecture](docs/ARCHITECTURE.md) ·
