@@ -23,6 +23,7 @@ from .api import (
     chat,
     describe,
     leakage,
+    mcp,
     qa,
     qa_run,
     samples,
@@ -85,6 +86,10 @@ for router in (samples.router, search.router, stats.router, map_api.router,
                views.router, albums.router, activity.router,
                annotations.router):
     app.include_router(router, prefix="/api")
+
+# The MCP endpoint lives at /mcp, unprefixed: MCP clients configure a root-ish
+# URL, and the protocol is a peer of the REST surface, not part of it.
+app.include_router(mcp.router)
 
 # Local image/thumbnail serving.
 config.ensure_dirs()
