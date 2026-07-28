@@ -38,6 +38,19 @@ const SUGGESTIONS = [
 /** All search/filter state — including pagination depth — lives in the URL:
  * shareable links, working back-button, and "Load more" depth survives
  * navigating to a sample and back. */
+/* A rejected composed request arrives as "422: {json}" from the client. The
+ * page shows the validator's own sentence, never the wire payload. */
+const composedProblem = (msg: string): string => {
+  try {
+    const body = JSON.parse(msg.slice(msg.indexOf(":") + 1).trim());
+    const detail = Array.isArray(body.detail) ? body.detail[0]?.msg : body.detail;
+    if (typeof detail === "string" && detail) {
+      return detail.replace(/^Value error, /, "");
+    }
+  } catch { /* fall through to the generic sentence */ }
+  return "The composed query was rejected";
+};
+
 export default function GalleryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") ?? "";
@@ -54,6 +67,11 @@ export default function GalleryPage() {
   const unlikeIds = useMemo(() => (searchParams.get("unlike") ?? "")
     .split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0), [searchParams]);
   const composed = likeIds.length > 0 || unlikeIds.length > 0;
+  /* The server's validity rule, mirrored: a composed query needs text or at
+   * least one positive reference. An exclusion alone has nothing to steer, so
+   * the UI never sends that request — it shows the plain ranking with the
+   * chip kept and says inline what would make the exclusion take effect. */
+  const composedValid = likeIds.length > 0 || query.trim() !== "";
   const [refThumbs, setRefThumbs] = useState<Record<number, string>>({});
   /* Scenario groups are proposals, not state: at most three, on demand,
    * temporary until "Save as album" makes one durable. */
@@ -275,7 +293,11 @@ export default function GalleryPage() {
       // serves the request must carry this message instead of clearing it.
       let fallbackMsg: string | null = null;
       const fetchPage = async (p: number) => {
-        if (composed) {
+        if (composed && !composedValid) {
+          fallbackMsg = "An exclusion alone can\u2019t steer a search \u2014 type a phrase, "
+                      + "or add \u201cMore like this\u201d on a result. The excluded image "
+                      + "is kept as a chip.";
+        } else if (composed) {
           try {
             const res = await api.composedSearch({
               text: query || undefined,
@@ -293,6 +315,11 @@ export default function GalleryPage() {
               // text ranking rather than a blank page, and say so.
               fallbackMsg = "Composed search is not available on this backend yet — "
                           + "showing the unsteered ranking; reference chips are kept.";
+            } else if (e instanceof Error && /^4\d\d:/.test(e.message)) {
+              // A rejected request is explained in a sentence, never rendered
+              // as the wire payload, and the page still shows a ranking.
+              fallbackMsg = composedProblem(e.message)
+                          + " — showing the unsteered ranking; reference chips are kept.";
             } else { throw e; }
           }
         }
