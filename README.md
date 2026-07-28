@@ -272,10 +272,12 @@ the link check and the capabilities contract.
   code says so.
 - The keyword benchmark row is *understated*, not flattered: the query caption's
   own row is excluded from the FTS scan (otherwise it would measure nothing but
-  self-retrieval), and the strict AND conjunction then leaves 90.6% of candidate
-  lists empty, so keyword R@10 reads 3.6%. OR-ing the terms takes it to 53.0%
-  but lowers fused MRR on short queries, which is why the conjunction stays —
-  measured in `api/eval.py` and stated on the page where the number appears.
+  self-retrieval), and the strict AND conjunction then returns an empty
+  candidate list for 85.3% of queries, so keyword R@10 reads 5.8% over a mean of
+  2.1 candidates. Widening the conjunction raises that recall but lowers fused
+  MRR on short queries, which is why it stays — the figures come from the
+  benchmark's own cached run, and the page states the caveat where the number
+  appears.
 - The assistant needs Ollama and a ~5 GB model; step transitions stream live,
   but the reply text itself arrives whole at the end of the run.
 - Detection is boxes only. SAM 2.1 tiny runs here at 72 ms/mask warm (box-prompt
