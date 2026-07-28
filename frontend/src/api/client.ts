@@ -1,5 +1,6 @@
 import type {
   AttributeGroup, CaptionStats, ChatMessage, ChatResponse, ChatStatus,
+  AlbumDetail, AlbumSummary,
   DescribeResponse, LeakageReport,
   DuplicatePair, EvalResponse, MapPoint, QASelection, QASummary, SampleCard,
   SampleDetail, SampleList, SearchMode, SearchResponse, StatsOverview,
@@ -57,6 +58,17 @@ export const api = {
   captionStats: () => get<CaptionStats>("/stats/captions"),
   duplicates: () => get<DuplicatePair[]>("/stats/duplicates"),
   map: () => get<MapPoint[]>("/map"),
+
+  /** Albums are ordered, first-class collections — not tags. The shelf and
+   * the tray both mutate through these and then announce it on the
+   * cvde-albums-changed window event, so every album surface refetches. */
+  listAlbums: () => get<AlbumSummary[]>("/albums"),
+  createAlbum: (name: string) => send<AlbumDetail>("/albums", "POST", { name }),
+  albumDetail: (id: number) => get<AlbumDetail>(`/albums/${id}`),
+  addToAlbum: (id: number, sample_ids: number[]) =>
+    send<{ ok: boolean; added: number }>(`/albums/${id}/items`, "POST", { sample_ids }),
+  removeFromAlbum: (id: number, sampleId: number) =>
+    send<{ ok: boolean }>(`/albums/${id}/items/${sampleId}`, "DELETE"),
 
   tags: () => get<TagInfo[]>("/tags"),
   vlmTags: () => get<TagInfo[]>("/vlm-tags"),

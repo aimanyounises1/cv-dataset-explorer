@@ -296,3 +296,26 @@ export interface ChatStatus {
 }
 
 export type SearchMode = "hybrid" | "semantic" | "keyword" | "boosted";
+
+// ---- Albums ----------------------------------------------------------------
+
+/** One album on the shelf. `origin` is provenance — "manual" | "tag" |
+ * "agent" — so an agent-proposed album stays distinguishable from the user's
+ * own curation when the review flow arrives. */
+export interface AlbumSummary {
+  id: number;
+  name: string;
+  summary?: string | null;
+  category?: string | null;
+  origin: string;
+  item_count: number;
+  cover: string | null;                // thumb of cover else first item; null when empty
+  created_at: string;
+}
+
+export interface AlbumDetail extends AlbumSummary {
+  notes?: string | null;
+  cover_sample_id?: number | null;
+  updated_at: string;
+  items: SampleCard[];                 // in album order
+}

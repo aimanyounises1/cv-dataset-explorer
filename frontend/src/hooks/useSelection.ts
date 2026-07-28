@@ -35,7 +35,7 @@ import type { ActiveFilterChip } from "../components/ActiveFilters";
  * one vocabulary — a hand-copied key list over there is how `cluster` once
  * went missing from "Download current view" and 8,000 rows shipped as 552. */
 export const SCALARS = ["split", "tag", "vlm_tag", "ids", "max_agreement",
-                        "cluster"] as const;
+                        "cluster", "album"] as const;
 
 /** Parameters that may appear more than once, intersected server-side.
  *
@@ -137,6 +137,10 @@ export function useSelection(): Selection {
            `≤ ${Number(get("max_agreement")).toFixed(3)}`);
     }
     if (get("cluster")) push("cluster", "Cluster", get("cluster"));
+    // The chip shows the id; the shelf alongside shows which album that is,
+    // by name and highlight — a sync name lookup here would mean a fetch
+    // inside a memo.
+    if (get("album")) push("album", "Album", `#${get("album")}`);
     return out;
   }, [get, axisRanges, searchParams]);
 
@@ -144,6 +148,7 @@ export function useSelection(): Selection {
    * inferred from the parameters rather than tracked, because tracking it would
    * mean writing state the URL cannot carry, and a shared link would lose it. */
   const origin = useMemo(() => {
+    if (get("album")) return "Album";
     if (get("max_agreement")) return "Caption quality";
     if (get("ids")) return "Id list or map lasso";
     if (get("cluster")) return "Embedding map";

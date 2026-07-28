@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import { Link, Route, Routes } from "react-router-dom";
 import CommandPalette from "./components/CommandPalette";
+import Toasts from "./components/Toast";
 import LeftRail from "./components/shell/LeftRail";
 import SelectionRail from "./components/shell/SelectionRail";
 import GalleryPage from "./pages/GalleryPage";
@@ -55,6 +56,9 @@ export default function App() {
       {/* Outside the panes and outside Suspense: available on every route,
           including while a lazy route is still loading. */}
       <CommandPalette />
+      {/* Also outside the panes: a drop's confirmation and its Undo must
+          survive whatever navigation the drop caused. */}
+      <Toasts />
     </div>
   );
 }
