@@ -1,0 +1,97 @@
+/* Embedding map: the canvas and the linked working set beneath it.
+ *
+ * Loaded only with the map route (MapPage imports it), like the other
+ * page-scoped sheets. index.css still owns the shared map furniture — the
+ * toolbar, the legend, the key strip, the canvas itself — because the sweep and
+ * the screenshots select those classes; everything here is the panel that turns
+ * a lasso into images you can look at.
+ */
+
+/* The linked view only works if both halves are on one screen: a grid you have
+   to scroll to, past a full-height canvas, is a separate page wearing a panel's
+   clothes. The canvas gives back the height the grid needs, and keeps a floor
+   so a short window still gets a usable projection. */
+.map-page .map-canvas { height: 52vh; min-height: 300px; }
+
+.map-workbench {
+  margin-top: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px 14px;
+}
+
+.mw-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.mw-title { font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; }
+/* What produced this set, in the set's own words. Never decorative: it is the
+   difference between "212 images" and "212 images whose 10-NN cosine is below
+   0.71", and only the second is a finding. */
+.mw-source { color: var(--text-faint); font-size: 11.5px; min-width: 0; }
+
+.mw-tools {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.mw-measure {
+  flex: 1 1 320px; min-width: 0;
+  color: var(--text-faint); font-size: 11.5px; line-height: 1.55;
+}
+.mw-measure b { font-family: var(--font-mono); color: var(--text-dim); font-weight: 500; }
+.mw-measure code {
+  font-family: var(--font-mono); font-size: 10.5px;
+  background: var(--bg-inset); border-radius: 3px; padding: 1px 4px;
+}
+
+/* Images lead: thumbnails at a size you can actually judge, the id and the
+   drop control behind hover. The panel scrolls inside itself so the map above
+   it never leaves the screen. */
+.mw-grid {
+  list-style: none; margin: 10px 0 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px; max-height: 26vh; overflow-y: auto;
+}
+.mw-card { position: relative; min-width: 0; }
+.mw-thumb {
+  display: block; width: 100%; padding: 0; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-inset);
+  cursor: pointer; transition: border-color var(--t-quick) var(--ease),
+                               box-shadow var(--t-quick) var(--ease);
+}
+.mw-thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.mw-thumb:hover, .mw-thumb:focus-visible { border-color: var(--accent); }
+/* The map side of the link is a ring on the canvas; this is the same mark on
+   the grid side, so a reader can see both ends of it at once. */
+.mw-card.marked .mw-thumb {
+  border-color: var(--text); box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* Dropped: still visible, because a set you cannot un-edit is a set you cannot
+   trust. Faded and desaturated rather than removed. */
+.mw-card.dropped .mw-thumb img { opacity: 0.28; filter: grayscale(1); }
+.mw-card.dropped .mw-thumb { border-style: dashed; }
+
+.mw-open {
+  position: absolute; right: 4px; bottom: 4px;
+  font-family: var(--font-mono); font-size: 9.5px; text-decoration: none;
+  color: var(--text-dim); background: var(--bg-raised);
+  border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
+  opacity: 0; transition: opacity var(--t-quick) var(--ease);
+}
+.mw-card:hover .mw-open, .mw-open:focus-visible { opacity: 1; }
+.mw-open:hover { color: var(--accent); border-color: var(--accent); }
+/* No hover on touch: the way out of the grid must simply be there. */
+@media (hover: none) { .mw-open { opacity: 1; } }
+
+@media (max-width: 700px) {
+  /* Smaller frames, and a shorter canvas, so the phone still shows the lasso
+     and what it caught without a scroll between them. */
+  .map-page .map-canvas { height: 44vh; }
+  .mw-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+  .mw-tools { gap: 6px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mw-thumb, .mw-open { transition: none; }
+}

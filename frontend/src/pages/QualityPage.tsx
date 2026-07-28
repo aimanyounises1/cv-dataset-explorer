@@ -174,28 +174,13 @@ export default function QualityPage() {
 
   return (
     <div>
+      {/* The page opens on the review line and the captions under it. The three
+          summary cards that used to sit here — captions scored, mean agreement,
+          and the count below the line — said exactly what the panel immediately
+          below says in its own header and readout, and cost ~105px at 1440 and
+          ~240px at 390 to say it twice. Restating a number is not the same as
+          leading with it. */}
       <h1 className="section-title" style={{ marginTop: 0 }}>Caption quality</h1>
-      <div className="stat-cards">
-        <div className="stat-card">
-          <div className="value">{summary.scored_captions.toLocaleString()}</div>
-          <div className="label">Captions scored (SigLIP agreement)</div>
-        </div>
-        <div className="stat-card">
-          <div className="value">{summary.mean_agreement?.toFixed(3) ?? "—"}</div>
-          <div className="label">Mean image-caption agreement</div>
-        </div>
-        {/* The page's working number, stated where the page starts: how much is
-            under the review line right now. It moves with the slider below. */}
-        {threshold != null && (
-          <div className="stat-card">
-            <div className="value">{belowCount.toLocaleString()}</div>
-            <div className="label">
-              Captions ≤ {threshold.toFixed(3)} (review line ·{" "}
-              {((belowCount / Math.max(1, totalScored)) * 100).toFixed(1)}%)
-            </div>
-          </div>
-        )}
-      </div>
 
       {sectionErrors.length > 0 && (
         <div className="error">Could not load: {sectionErrors.join(", ")}.</div>
@@ -295,15 +280,22 @@ export default function QualityPage() {
         </div>
       )}
 
-      <div className="section-title">Most suspect captions</div>
-      <p className="meta-line">
-        Lowest image-caption agreement first. Low score + high sibling mean ⇒ the
-        caption is likely wrong; all-low ⇒ the image itself is unusual.
-        Record your call as a tag on the sample page —{" "}
-        <span className="mono">verdict:caption-error · scorer-error · ambiguous ·
-        duplicate · ok</span> — and the review session becomes a filterable,
-        exportable slice.
-      </p>
+      <div className="section-title tight">Most suspect captions</div>
+      {/* How to read a row and how to record a call: three lines at 1440 and
+          six at 390, between the reviewer and the rows they came for. Folded,
+          not cut — the verdict:* convention is the review workflow and has to
+          stay one click from the list it governs. */}
+      <details className="caveat review-guide">
+        <summary>How to read a row, and how to record your call</summary>
+        <p>
+          Lowest image-caption agreement first. Low score + high sibling mean ⇒
+          the caption is likely wrong; all-low ⇒ the image itself is unusual.
+          Record your call as a tag on the sample page —{" "}
+          <span className="mono">verdict:caption-error · scorer-error · ambiguous ·
+          duplicate · ok</span> — and the review session becomes a filterable,
+          exportable slice.
+        </p>
+      </details>
       {suspects.length === 0 ? (
         <div className="empty">No scored captions to show.</div>
       ) : (

@@ -151,9 +151,28 @@ from one click. What remains, in order:
    (`POST /api/chat/stream`, rendered live), but the reply text and the render
    blocks arrive whole at the end of the run. Emitting each block as its lane
    finishes is the version worth building.
-4. **Scale path**: swap the exact index for FAISS/sqlite-vec behind
-   `EmbeddingIndex`, move ingestion/analysis to a job queue, virtualized grid
-   rendering, multi-worker index sharing.
+4. **A review gate over the annotations that already persist.** Annotations are
+   stored today — `annotations(sample_id, kind, geometry, label, created_at)`
+   with list/create/delete at `/api/samples/{id}/annotations`, drawn and deleted
+   on the compare canvas. What is missing is everything that turns a drawing
+   into a *reviewed* record:
+   * **provenance** — the row cannot say whether a person drew the box, the
+     detector proposed it, or an agent did; a reviewed annotation layer is worth
+     little if you cannot tell who claimed what;
+   * **status and a review action** — there is no proposed/approved/rejected
+     state, so approve/reject has nothing to write to;
+   * **an update endpoint** — the API can create and delete but not amend, so
+     "nudge that box and keep it" means delete and redraw, and *edit* is the
+     verb a reviewer uses most;
+   * **proposals across a set** — the detector runs per image on request; the
+     useful shape is proposing over a whole album and reviewing the batch.
+   None of that is in this pass because a proposal that writes itself is worse
+   than no proposal: the review surface, not the storage, is the work.
+5. **Scale path**: benchmark FAISS behind `EmbeddingIndex` once the corpus is
+   near 100k vectors and adopt it around the measured ~400k crossover, move
+   ingestion/analysis to a job queue, virtualized grid rendering, multi-worker
+   index sharing. pgvector only if the deployment becomes multi-user and
+   server-side, which is a different product.
 
 ## Scale path
 

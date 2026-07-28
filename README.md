@@ -213,9 +213,18 @@ disk; a React 18 + TypeScript frontend whose search and filter state lives in
 the URL (an investigation is a link). Heavy work happens in idempotent batch
 CLIs (`ingest`, `analyze`, `enrich`); a request does SQLite lookups plus at
 most one text-encoder forward pass. Retrieval is an exact NumPy cosine scan —
-measured at ~0.2 ms against the 7–8 ms encode it waits behind, with the ANN
-crossover (~400k vectors) and the seam it would slot into documented rather
-than built. Optional capabilities degrade with a named reason, never a 500.
+measured at ~0.2 ms against the 7–8 ms encode it waits behind, so at this size
+an approximate index would trade recall to speed up the fastest stage of the
+query. The seam is there rather than the machinery: `EmbeddingIndex.search`
+takes a candidate mask, so an ANN index drops in behind the same signature when
+the corpus earns one — worth *benchmarking* around 100k vectors, with an
+*estimated* crossover near 400k that is extrapolation, not permission: adoption
+waits on a real FAISS recall-and-latency benchmark against the exact scan. A
+hosted vector database is not
+the answer to either (pgvector answers a different question — a multi-user
+server deployment — and is discussed in
+[ARCHITECTURE](docs/ARCHITECTURE.md)). Optional capabilities degrade with a
+named reason, never a 500.
 
 The deeper documents: [ARCHITECTURE](docs/ARCHITECTURE.md) (topology, seams,
 scale path) · [TECHNICAL](docs/TECHNICAL.md) (schema, query plans,
@@ -265,9 +274,12 @@ the link check and the capabilities contract.
   indexed); the benchmark page states this where the number appears.
 - The assistant needs Ollama and a ~5 GB model; step transitions stream live,
   but the reply text itself arrives whole at the end of the run.
-- Detection is boxes only: SAM 2.1 tiny measured viable here (70 ms/mask) and
-  is documented future work — retrieval consumes rectangular crops, so masks
-  would add cost without changing what search can use.
+- Detection is boxes only. SAM 2.1 tiny runs here at 69 ms/mask warm (p50 on an
+  otherwise idle machine, box or point prompt, 0.63 GB, 120 interleaved calls
+  with no crash or leak) and its masks are accurate, but it stays future work:
+  a background-erased cut-out changes 63% of the top-10 while a caption-word
+  proxy moves the on-target share by +0.01 — a different ranking, not a better
+  one. `scripts/bench_sam2.py` re-measures all of it.
 - MCP is stateless JSON (no SSE streaming, no sessions); it binds to the same
   local server and adds no authentication — a local, single-user tool by the
   assignment's constraint.
