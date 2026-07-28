@@ -6,7 +6,7 @@ behind it. `docs/CAPABILITIES.md` lists *what* it does; this explains *how* and
 the agent layer.
 
 Every number here was measured on the running system (8,000 images, 40,000
-captions, 12.5 MB database) and the query plans are real `EXPLAIN QUERY PLAN`
+captions, 12.9 MB database) and the query plans are real `EXPLAIN QUERY PLAN`
 output, not illustrations.
 
 ---
@@ -192,7 +192,7 @@ CREATE VIRTUAL TABLE captions_fts USING fts5(
 
 `content='captions'` means the index stores no copy of the text — it points at
 the base table by rowid. On 40,000 captions that is the difference between a
-12.5 MB database and a noticeably larger one, and it removes any chance of the
+12.9 MB database and a noticeably larger one, and it removes any chance of the
 two copies disagreeing.
 
 The catch, and it is a sharp one: **there are no sync triggers.** Inserts are

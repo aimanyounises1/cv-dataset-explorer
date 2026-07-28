@@ -71,8 +71,10 @@ so; a provider switch changes retrieval, never rewrites stored analysis.
 
 ### Search, three ways — and steer it
 
-![Hybrid search for "a crowded street at night": ranked grid, per-card scores
-with their basis, term statistics](docs/screenshots/1-gallery.png)
+![Hybrid search for "a crowded street at night": ranked grid, the fusion basis
+named in the result header, matched query terms highlighted in each caption, and
+the ranked/grouped toggle beside the difficulty-axis legend. Per-card scores are
+hover-gated, so they are not in this still](docs/screenshots/1-gallery.png)
 
 Semantic, keyword (FTS5 BM25) and hybrid (reciprocal-rank fusion) — one
 ranking implementation serves the gallery, the export buttons and the agents,
@@ -275,7 +277,7 @@ the link check and the capabilities contract.
   self-retrieval), and the strict AND conjunction then returns an empty
   candidate list for 85.3% of queries, so keyword R@10 reads 5.8% over a mean of
   2.1 candidates. Widening the conjunction raises that recall but lowers fused
-  MRR on short queries, which is why it stays — the figures come from the
+  MRR overall (hybrid MRR 0.6313 → 0.5850), which is why it stays — the figures come from the
   benchmark's own cached run, and the page states the caveat where the number
   appears.
 - The assistant needs Ollama and a ~5 GB model; step transitions stream live,

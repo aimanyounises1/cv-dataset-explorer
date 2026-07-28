@@ -108,8 +108,8 @@ stack.
 The container `HEALTHCHECK` and compose's `service_healthy` gate both use
 `/api/tags`, deliberately: it is a single indexed SQLite read, where
 `/api/health` calls `get_index()` and pulls the embedding matrix into memory.
-A health probe running every 30 s should not be the thing that decides when a
-600 MB array is resident. Use `/api/health` when you want the richer answer:
+A health probe running every 30 s should not be the thing that decides when the
+index is first read off disk. Use `/api/health` when you want the richer answer:
 
 ```bash
 curl -s http://localhost:8000/api/health
@@ -149,7 +149,7 @@ measurements are `linux/arm64` on Apple Silicon.
 | --- | --- | --- |
 | Backend, booted, no model loaded | 77 MB | Measured, container idle |
 | Backend, SigLIP 2 loaded on CPU | ~1.0 GB | Measured, container peak during an encode |
-| Backend serving the full corpus | ~2 GB | Sum of two measurements, not one: the ~1.0 GB above plus the 612 MB embedding matrix. The host process doing the same job measures 1.05 GB RSS, but on MPS, where the weights sit in shared GPU memory |
+| Backend serving the full corpus | ~1.05 GB | Sum of two measurements, not one: the ~1.0 GB above plus the 24.6 MB image matrix — `get_index()` loads `image_embeddings.npy` alone, not the 612 MB the embeddings *directory* occupies on disk. The host process doing the same job measures 1.05 GB RSS, but on MPS, where the weights sit in shared GPU memory |
 | Backend, optional `qwen3_vl` provider | +~4-5 GB | Estimate from the ~4 GB weight download plus activations; not measured |
 | Frontend (nginx + static files) | 20 MB | Measured, serving 868 kB of built assets |
 | Ollama container, `qwen3:8b` loaded | ~6 GB | Estimate from the model's published size; not measured |
@@ -164,7 +164,7 @@ Desktop's memory allocation, or keep Ollama on the host.
 | --- | --- |
 | Corpus in `backend/data` | 1.4 GB measured: images 593 MB, embeddings 612 MB, thumbs 182 MB, `explorer.db` 13 MB |
 | Hugging Face cache (SigLIP 2) | 1.4 GB measured on the host cache |
-| QA sweep artifacts (only if you run sweeps) | 658 MB on this install; disposable, which is why `backend/data` totals 2.0 GB here rather than 1.4 GB |
+| QA sweep artifacts (only if you run sweeps) | 1.1 GB on this install; disposable, which is why `backend/data` totals 2.5 GB here rather than 1.4 GB |
 | Optional Qwen3-VL weights | ~4 GB; estimate, not installed here |
 
 **Latency: containers are CPU-only.** There is no MPS inside a Linux container
