@@ -42,7 +42,6 @@ def ctx():
     for sid in sids:
         conn.execute("DELETE FROM captions WHERE sample_id = ?", (sid,))
         conn.execute("DELETE FROM samples WHERE id = ?", (sid,))
-    conn.execute("DELETE FROM activity_events WHERE kind = 'mcp_tag_proposal'")
     conn.commit()
     conn.close()
 
@@ -116,6 +115,30 @@ def test_protocol_errors(ctx):
     assert bad.json()["error"]["code"] == -32700
     unknown = rpc(client, "tools/call", {"name": "rm_rf", "arguments": {}})
     assert unknown.json()["error"]["code"] == -32602
+
+
+def test_every_tool_failure_stays_a_json_rpc_error(ctx):
+    """Framing is the contract: a client parses JSON-RPC, not HTTP bodies.
+
+    An id past 2^63-1 survives `int()` and blows up only when sqlite3 binds it.
+    That used to escape the `(KeyError, TypeError, ValueError)` catch and reach
+    Starlette, so the client got a plain-text 500 — unparseable, and the
+    JSON-RPC exchange it belonged to was simply lost.
+    """
+    client, _ = ctx
+    for tool, arg in (("get_sample", "sample_id"), ("find_similar", "sample_id"),
+                      ("get_album", "album_id")):
+        r = rpc(client, "tools/call",
+                {"name": tool, "arguments": {arg: 2**63}})
+        assert r.status_code == 200, tool
+        body = r.json()
+        assert body["jsonrpc"] == "2.0" and body["id"] == 1, tool
+        # Either a named error object or an honest in-band {"error": ...}
+        # result — what must never happen is an HTTP error body.
+        if "error" in body:
+            assert body["error"]["code"] in (-32602, -32603), tool
+        else:
+            assert body["result"]["isError"] is True, tool
 
 
 def test_get_mcp_is_a_signpost(ctx):

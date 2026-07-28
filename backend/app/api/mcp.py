@@ -218,8 +218,17 @@ def _handle(payload: dict, conn: sqlite3.Connection) -> Optional[dict]:
             return _rpc_error(id_, -32602, f"unknown tool {name!r}")
         try:
             result = tool["fn"](conn, params.get("arguments") or {})
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            # OverflowError belongs here: an id past 2^63-1 survives int() and
+            # only fails when sqlite3 binds it, so it is a bad argument.
             return _rpc_error(id_, -32602, f"bad arguments for {name}: {exc}")
+        except Exception as exc:                              # noqa: BLE001
+            # The framing is the contract. An exception escaping to Starlette
+            # hands the client a plain-text 500 body that no JSON-RPC parser
+            # can read, so EVERY tool failure leaves as an error object.
+            logger.exception("MCP tool %s failed", name)
+            return _rpc_error(id_, -32603,
+                              f"{name} failed: {type(exc).__name__}: {exc}")
         return {"jsonrpc": "2.0", "id": id_, "result": {
             "content": [{"type": "text", "text": json.dumps(result)}],
             "isError": "error" in result}}
@@ -230,9 +239,11 @@ def _handle(payload: dict, conn: sqlite3.Connection) -> Optional[dict]:
 async def mcp_endpoint(request: Request):
     """Model Context Protocol endpoint (Streamable HTTP, stateless JSON mode).
 
-    Speaks JSON-RPC 2.0: initialize, ping, tools/list, tools/call. Read-only
-    tools over the same service layer as the REST API; the one mutating
-    intent returns a proposal token and writes nothing. See docs/MCP.md.
+    Speaks JSON-RPC 2.0: initialize, ping, tools/list, tools/call. Every tool
+    reads and none writes — there is no mutating intent on this surface at
+    all — and each goes through the same service layer as the REST API.
+    Failures come back as JSON-RPC error objects, never as an HTTP error body.
+    See docs/MCP.md.
     """
     body = await request.body()
     if len(body) > MAX_BODY:
