@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Backbone swap: SigLIP2-base-patch16-256  ->  SigLIP2-so400m-patch14-384
 #
-# Re-embeds the corpus with the stronger backbone, re-runs analysis, retrains
-# the PRISM head, and prints the before/after ladder. Everything is env-var
+# Re-embeds the corpus with the stronger backbone and re-runs analysis.
+# Everything is env-var
 # driven — no code changes. Runs on the Mac (MPS); expect ~1–2 hours total,
 # dominated by embedding 8,000 images through a 1.1B-param vision tower.
 #
@@ -12,8 +12,8 @@
 #
 # IMPORTANT: CVDE_EMBED_MODEL must be set BOTH here and in the shell that
 # serves the API afterwards. The server encodes queries live; serving a
-# so400m index with base-encoded queries cannot work (the new prism dimension
-# guard and the eval caches self-protect, but semantic search would 500).
+# so400m index with base-encoded queries cannot work (the eval caches
+# self-protect, but semantic search would 500).
 set -euo pipefail
 
 MODEL="google/siglip2-so400m-patch14-384"
@@ -32,16 +32,13 @@ export CVDE_EMBED_MODEL="${MODEL}"
 # 16GB Macs out of MPS OOM. Raise it if you have headroom.
 export CVDE_EMBED_BATCH="${CVDE_EMBED_BATCH:-16}"
 
-echo "==> [1/4] Re-embedding images with ${MODEL} (the long step)"
+echo "==> [1/3] Re-embedding images with ${MODEL} (the long step)"
 python -m app.ingest
 
-echo "==> [2/4] Re-embedding captions + agreement/attributes/axes/UMAP"
+echo "==> [2/3] Re-embedding captions + agreement/attributes/axes/UMAP"
 python -m app.analyze
 
-echo "==> [3/4] Retraining the PRISM head in the new embedding space"
-python -m app.train_prism --no-sigma --seed 0
-
-echo "==> [4/4] Done. Now serve with the SAME env var:"
+echo "==> [3/3] Done. Now serve with the SAME env var:"
 echo
 echo "    export CVDE_EMBED_MODEL=${MODEL}"
 echo "    uvicorn app.main:app --port 8000"

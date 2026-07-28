@@ -323,11 +323,7 @@ def benchmark(pg, ok):
     try:
         pg.wait_for_selector("table.eval-table tbody tr", timeout=180000)
         rows = pg.query_selector_all("table.eval-table tbody tr")
-        # Three core modes always; two more paired rows when trained PRISM
-        # artifacts are present, which is a supported configuration rather than
-        # an anomaly. Asserting exactly 3 made a shipped feature look like a
-        # regression: the sweep reported "benchmark returns 3 modes: 5 rows".
-        ok("benchmark returns every mode", len(rows) in (3, 5), f"{len(rows)} rows")
+        ok("benchmark returns every mode", len(rows) == 3, f"{len(rows)} rows")
         # Compare against the DOM text, not inner_text: CSS uppercases the
         # headers, so inner_text yields "CANDIDATES".
         hdrs = pg.eval_on_selector_all("table.eval-table th", "e=>e.map(x=>x.textContent.trim())")

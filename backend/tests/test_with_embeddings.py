@@ -141,27 +141,6 @@ def test_hybrid_fuses_both_rankings(client):
     assert "dog" in body["items"][0]["caption"]
 
 
-def test_boosted_degrades_to_semantic_without_trained_artifacts(client):
-    """The fourth search mode's promise, asserted at the API boundary.
-
-    `boosted` is selectable on any install, but the PRISM artifacts only exist
-    after `python -m app.train_prism`. So the contract is: the request
-    succeeds, says it degraded, names the mode that actually ranked, names the
-    command that would enable the real one -- and does NOT publish `prism_ll`
-    as the basis of a score that is a cosine. A silently mislabelled score is
-    the failure worth catching here, because the UI prints it.
-    """
-    body = client.get("/api/search",
-                      params={"q": "dog", "mode": "boosted"}).json()
-    assert body["degraded"] is True
-    assert body["mode_used"] == "semantic"
-    assert "train_prism" in (body["message"] or "")
-    assert body["score_basis"] in ("cosine", "cosine_adj")
-    assert body["items"], "the fallback still has to return a ranking"
-    assert all(p["path"] == "semantic"
-               for item in body["items"] for p in item["match_paths"])
-
-
 def test_similar_images(client):
     dog_id = client.get("/api/search", params={"q": "dog", "mode": "semantic"}
                         ).json()["items"][0]["id"]

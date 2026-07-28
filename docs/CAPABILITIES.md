@@ -231,7 +231,6 @@ and by the assistant on request — one registry, three consumers.
 - `README.md` — setup, feature tour, the two limits worth knowing
 - `docs/TECHNICAL.md` — layer-by-layer build: schema, the real SQL and query plans, retrieval maths, frontend, measured performance
 - `docs/DESIGN.md` — retrieval design, trade-offs, and the production scale path
-- `docs/PRISM.md` — the retrieval-accuracy research programme and the method this project proposes
 - `docs/AGENTS.md` — orchestration, the render-block contract, self-QA
 - `docs/DEMO.md` — an eight-minute walkthrough
 - `docs/screenshots/` — one image per view

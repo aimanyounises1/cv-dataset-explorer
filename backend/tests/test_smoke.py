@@ -94,16 +94,13 @@ def test_search_by_image_names_its_missing_dependency(client):
     assert "ingest" in r.json()["detail"]
 
 
-def test_boosted_falls_all_the_way_back_to_keyword(client):
-    """Two degradations in one request, on the install a reviewer starts from.
-
-    With no embeddings there is no PRISM model and no semantic path either, so
-    the response has to describe where the ranking ended up rather than where
-    it was asked to go -- and publish no score basis, because BM25 exposes no
-    number. The message is the only thing telling the user what to run.
-    """
+def test_semantic_falls_back_to_keyword_and_says_so(client):
+    """On the install a reviewer starts from (no embeddings), the response has
+    to describe where the ranking ended up rather than where it was asked to
+    go -- and publish no score basis, because BM25 exposes no number. The
+    message is the only thing telling the user what to run."""
     body = client.get("/api/search",
-                      params={"q": "dog", "mode": "boosted"}).json()
+                      params={"q": "dog", "mode": "semantic"}).json()
     assert body["degraded"] is True
     assert body["mode_used"] == "keyword"
     assert "keyword search" in (body["message"] or "")

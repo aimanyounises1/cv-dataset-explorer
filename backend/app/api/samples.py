@@ -131,7 +131,7 @@ def export_subset(
     # Kept in step with /api/search deliberately: export exists to hand over
     # *the set on screen*, so a mode the gallery can produce and the export
     # cannot is a 422 on a button the user can see.
-    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid|boosted)$"),
+    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid)$"),
     top_k: int = Query(500, ge=1, le=5000),
     split: Optional[str] = None,
     tag: Optional[str] = None,

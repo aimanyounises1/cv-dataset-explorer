@@ -28,7 +28,6 @@ from fastapi import APIRouter, Depends, Query
 from .. import config, db
 from ..ml import hubness
 from ..ml.index import get_caption_index, get_index
-from ..ml.prism import MU_FILE, get_prism_index
 from ..schemas import EvalModeResult, EvalResponse
 from . import search as search_api
 from .deps import get_conn
@@ -56,7 +55,11 @@ ENCODE_BATCH = 128
 #      the semantic rows are now measured with the correction actually applied.
 #      Every version-6 row was recorded under whichever state the artifact
 #      happened to be in, so none of them are comparable to these.
-PROTOCOL_VERSION = 7
+#   8: boosted mode and its paired test-split rows are removed with PRISM —
+#      out of the assignment's focus. The three text modes are unchanged, but
+#      the row set differs, so version-7 caches must not be read as this
+#      protocol's results.
+PROTOCOL_VERSION = 8
 
 
 def _cache_path(sample_size: int):
@@ -73,24 +76,15 @@ def _cache_path(sample_size: int):
 
     # Provider-scoped: two providers over the same corpus are two different
     # retrieval environments, so the active provider's artifacts drive the
-    # stamp and its name joins the key below. (PRISM artifacts live in the
-    # legacy dir regardless — their presence flag keeps its own key slot.)
+    # stamp and its name joins the key below.
     emb_dir = providers.active_emb_dir()
     stamp = 0.0
     for embs in ("image_embeddings.npy", "caption_embeddings.npy"):
         p = emb_dir / embs
         if p.exists():
             stamp = max(stamp, p.stat().st_mtime)
-    mu = config.EMB_DIR / MU_FILE
-    if mu.exists():
-        stamp = max(stamp, mu.stat().st_mtime)
     if config.DB_PATH.exists():
         stamp = max(stamp, config.DB_PATH.stat().st_mtime)
-    # Presence is keyed explicitly, not only through the mtime: an artifact
-    # trained before the embeddings were (re)built would leave the stamp
-    # unchanged, and a cached result without the PRISM rows would keep serving
-    # as if the trained model did not exist.
-    prism = int((config.EMB_DIR / MU_FILE).exists())
     return (config.CACHE_DIR /
             f"eval_v{PROTOCOL_VERSION}_{providers.active_provider()}"
             f"_{sample_size}_k{config.RRF_K}"
@@ -98,7 +92,7 @@ def _cache_path(sample_size: int):
             # The hubness constants re-rank the semantic path, so they belong in
             # the key for exactly the reason RRF_K does.
             f"_h{config.HUBNESS_BETA}-{config.HUBNESS_TEMPERATURE}"
-            f"-{config.HUBNESS_BANK_SIZE}_p{prism}_{int(stamp)}.json")
+            f"-{config.HUBNESS_BANK_SIZE}_{int(stamp)}.json")
 
 
 def lexical_candidates(conn, text: str, own_caption_id: int, limit: int = TOP):
@@ -319,54 +313,6 @@ def retrieval_benchmark(
         # Fusion sees the semantic list plus whatever lexical contributed.
         result("hybrid", hy_ranks, False, full_pool + lexical_mean, 0.0),
     ]
-
-    # Boosted mode, measured only where measuring it is honest. The PRISM model
-    # trained on the train split and was epoch-selected on validation, so the
-    # test split holds the only captions it has never seen; grading it on the
-    # main sample (~75% train captions) would score it on its own training
-    # text — the same class of leak the self-retrieval exclusion above guards.
-    # Its rows therefore use a dedicated test-split sample, with a paired
-    # semantic row on the *same queries* so the comparison is like-for-like.
-    prism = get_prism_index(img)
-    if prism is not None:
-        t_rows = conn.execute(
-            "SELECT c.id, c.sample_id, c.text FROM captions c "
-            "JOIN samples s ON s.id = c.sample_id "
-            "WHERE s.split = 'test' ORDER BY c.id").fetchall()
-        t_rows = [r for r in t_rows if cap.row_of(r["id"]) is not None
-                  and img.row_of(r["sample_id"]) is not None
-                  and r["id"] not in bank]
-        t_picked = [t_rows[i] for i in rng.choice(
-            len(t_rows), min(sample_size, len(t_rows)), replace=False)]
-        # Live encoding only: boosted mode does not exist without the model
-        # stack, so under the stored-vector fallback there is nothing to measure.
-        t_vecs = _encode_queries([r["text"] for r in t_picked]) if t_picked else None
-        if t_vecs is not None:
-            t_targets = np.array([r["sample_id"] for r in t_picked])
-            t_cols = np.array([img.row_of(r["sample_id"]) for r in t_picked])
-            t_scores = t_vecs @ img.embeddings.T
-            if penalty is not None:
-                t_scores = t_scores - penalty
-            t_own = t_scores[np.arange(len(t_picked)), t_cols]
-            sem_t_ranks = (t_scores > t_own[:, None]).sum(axis=1)
-            # No hubness penalty on the boosted path — stacking the prior on the
-            # trained mu measured worse than the mu alone (see api/search.py).
-            boost_ranks = prism.rank_of(t_vecs, t_targets)
-            n_t = len(t_picked)
-            results += [
-                result("semantic (test)", sem_t_ranks, True, full_pool, 0.0,
-                       queries=n_t,
-                       note="The shipped semantic ranking, restricted to "
-                            "test-split queries — the paired baseline for the "
-                            "boosted row."),
-                result("boosted (test)", boost_ranks, True, full_pool, 0.0,
-                       queries=n_t,
-                       note="Trained PRISM re-ranking (`python -m "
-                            "app.train_prism`). Test-split queries only: the "
-                            "model trained on the train split and was selected "
-                            "on validation, so any other query set would grade "
-                            "it on its own training text."),
-            ]
 
     resp = EvalResponse(
         available=True, message=message, sample_size=len(picked),

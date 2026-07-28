@@ -1,6 +1,6 @@
-"""Search: semantic (SigLIP text->image), keyword (FTS5 BM25 over captions +
-VLM tags), hybrid (reciprocal-rank fusion of both), or boosted (semantic
-ranking replaced by the trained PRISM speaker models, when artifacts exist).
+"""Search: semantic (text->image through the active embedding provider),
+keyword (FTS5 BM25 over captions + VLM tags), or hybrid (reciprocal-rank
+fusion of both).
 
 Correctness notes:
 - Filters are applied INSIDE each ranking (SQL WHERE for keyword, candidate
@@ -32,7 +32,6 @@ from ..ml import hubness
 # name, so the whole query path switches provider in one place.
 from ..ml.providers import get_encoder as get_embedder
 from ..ml.index import get_caption_index, get_index
-from ..ml.prism import get_prism_index
 from ..schemas import (
     ComposedSearchRequest,
     MatchPath,
@@ -216,32 +215,6 @@ def _semantic_ranking(conn, q: str, allowed: Optional[set[int]], top_k: int):
     return ranked, qvec, ("cosine" if penalty is None else "cosine_adj")
 
 
-def _boosted_ranking(conn, q: str, allowed: Optional[set[int]], top_k: int):
-    """Ranked (sample_id, score) under the trained PRISM speaker models, or
-    (None, None, None) when the artifacts (or the embedding stack) are absent.
-
-    Deliberately NO hubness penalty on this path. Stacking the Bayes prior on
-    top of the trained mu measured *worse* than the trained mu alone — R@1
-    51.6% -> 50.3%, paired delta -1.3 pts, CI95 [-2.0, -0.5] — because training
-    already absorbs the hub structure the penalty models. One correction ranks;
-    they do not stack. (`data/cache/prism_eval.json`, rows A1 vs A3.)
-
-    The score is a log-likelihood (constant dropped), not a cosine: comparable
-    within one result list, meaningless against any other basis — the response
-    says `prism_ll` so the UI never prints it as a similarity.
-    """
-    index = get_index()
-    embedder = get_embedder() if index is not None else None
-    if index is None or embedder is None:
-        return None, None, None
-    prism = get_prism_index(index)   # id-validated against the live corpus
-    if prism is None:
-        return None, None, None
-    qvec = embedder.encode_texts([normalize_query_text(q)])[0]
-    ranked = prism.search(qvec, top_k=top_k, allowed_ids=allowed)
-    return ranked, qvec, "prism_ll"
-
-
 def _best_captions_for(conn, sample_ids: list[int], qvec) -> dict[int, str]:
     """For semantic results: the caption of each sample most similar to the
     query (uses precomputed caption embeddings; cheap dot products)."""
@@ -311,22 +284,11 @@ def run_search(
     rrf_k: Optional[int] = None
 
     semantic, qvec, semantic_basis = (None, None, None)
-    boosted, boosted_basis = None, None
-    if mode == "boosted":
-        boosted, qvec, boosted_basis = _boosted_ranking(conn, q, allowed, depth)
-        if boosted is None:
-            degraded, mode = True, "semantic"
-            # Only name the missing artifacts when they are the cause; if the
-            # whole embedding stack is down, the semantic fallback below says so.
-            if get_index() is not None and get_embedder() is not None:
-                message = ("Boosted ranking unavailable (no trained PRISM model "
-                           "for this corpus — run `python -m app.train_prism "
-                           "--no-sigma`) — using semantic search.")
     if mode in ("semantic", "hybrid"):
         semantic, qvec, semantic_basis = _semantic_ranking(conn, q, allowed, depth)
         if semantic is None:
             degraded, mode = True, "keyword"
-            # Appended, not assigned: a boosted request that degraded twice
+            # Appended, not assigned: a request that degraded more than once
             # should say the whole story, not just the last step.
             message = ((message + " ") if message else "") + (
                 "Semantic search unavailable (embeddings not computed) — "
@@ -343,11 +305,6 @@ def run_search(
         scores = dict(semantic)
         score_basis = semantic_basis
         record("semantic", ranked)
-    elif mode == "boosted":
-        ranked = [sid for sid, _ in boosted]
-        scores = dict(boosted)
-        score_basis = boosted_basis
-        record("boosted", ranked)
     elif mode == "keyword":
         ranked, match_captions = _keyword_ranking(
             conn, q, depth, split, tag, vlm_tag, attr, axes, ids, ids_staged,
@@ -388,7 +345,7 @@ def run_search(
     depth_reached = not has_more and len(ranked) >= depth
 
     # Caption lookups are per-page, not per-ranking: only the window is shown.
-    if mode in ("semantic", "hybrid", "boosted"):
+    if mode in ("semantic", "hybrid"):
         match_captions = {**_best_captions_for(conn, window, qvec), **match_captions}
 
     if not window:
@@ -422,7 +379,7 @@ def run_search(
 @router.get("/search", response_model=SearchResponse)
 def search(
     q: str = Query(..., min_length=1),
-    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid|boosted)$"),
+    mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid)$"),
     top_k: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0, le=5000),
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),

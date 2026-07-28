@@ -5,7 +5,6 @@ import sqlite3
 from fastapi import APIRouter, Depends
 
 from ..ml.index import get_caption_index, get_index, invalidate_index
-from ..ml.prism import get_prism_index, invalidate_prism
 from .deps import get_conn
 
 router = APIRouter()
@@ -77,7 +76,6 @@ def reload_indexes(conn: sqlite3.Connection = Depends(get_conn)):
     # be re-probed before the caches refill.
     providers.invalidate_providers()
     invalidate_index()
-    invalidate_prism()
     stats.clear_caches()
     leakage.clear_cache()
     checks = index_consistency(conn)
@@ -85,9 +83,6 @@ def reload_indexes(conn: sqlite3.Connection = Depends(get_conn)):
         "ok": True,
         "image_index": get_index() is not None,
         "caption_index": get_caption_index() is not None,
-        # Freshly trained artifacts are exactly what this endpoint exists to pick
-        # up; the probe also re-validates them against the (possibly new) index.
-        "prism_boost": get_prism_index(get_index()) is not None,
         # Surfaced on the operation that exists to pick up new index files, which
         # is exactly when a mismatch is most likely and most cheaply fixed.
         "integrity": checks,

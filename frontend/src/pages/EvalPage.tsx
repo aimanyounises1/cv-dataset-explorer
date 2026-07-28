@@ -10,11 +10,6 @@ const MODE_COLORS: Record<string, string> = {
   semantic: SERIES.blue,
   keyword: SERIES.amber,
   hybrid: SERIES.green,
-  // The paired test-split rows, present only when trained PRISM artifacts
-  // exist. The semantic pair reuses blue at lower opacity via a literal tint:
-  // it is the same ranking, on a smaller query set.
-  "semantic (test)": "#3d6ea8",
-  "boosted (test)": SERIES.purple,
 };
 
 /** Self-benchmark: each of the dataset's own captions should retrieve its own
@@ -124,24 +119,6 @@ export default function EvalPage() {
             rather than silently re-derived, because changing the number would also
             change what every cached run means.
           </div>
-          {!result.results.some((r) => r.mode === "boosted (test)") && (
-            <div className="meta-line">
-              No boosted rows: there is no trained PRISM model for the active
-              embedding space. <code>python -m app.train_prism</code> trains one
-              offline (train split only) and adds the paired test-split
-              comparison here — the artifacts are generated, never shipped.
-            </div>
-          )}
-          {result.results.some((r) => r.mode === "boosted (test)") && (
-            <div className="meta-line">
-              The two <strong>“(test)”</strong> rows are measured on their own
-              sample of test-split queries: boosted mode's PRISM model trained on
-              the train split and was selected on validation, so test captions are
-              the only queries it has never seen. Its paired semantic row ranks
-              the <em>same</em> queries — the gap between those two rows is the
-              trained model's like-for-like gain.
-            </div>
-          )}
           </div>
           <div className="panel" style={{ maxWidth: 720 }}>
             <ResponsiveContainer width="100%" height={300}>
@@ -155,8 +132,7 @@ export default function EvalPage() {
                   formatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
                 />
                 <Legend />
-                {/* Bars only for rows the benchmark actually returned — the
-                    PRISM pair exists only where trained artifacts do, and a
+                {/* Bars only for rows the benchmark actually returned — a
                     legend entry for an absent series would read as a zero. */}
                 {Object.entries(MODE_COLORS)
                   .filter(([mode]) => result.results.some((r) => r.mode === mode))

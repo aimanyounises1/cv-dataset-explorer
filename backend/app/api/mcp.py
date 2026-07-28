@@ -173,11 +173,11 @@ TOOLS: dict[str, dict] = {
     "search_images": {
         "fn": _t_search, "readonly": True,
         "description": "Search the dataset by natural language. Modes: hybrid "
-                       "(default), semantic, keyword, boosted.",
+                       "(default), semantic, keyword.",
         "schema": {"type": "object", "required": ["query"], "properties": {
             "query": {"type": "string"},
             "mode": {"type": "string",
-                     "enum": ["hybrid", "semantic", "keyword", "boosted"]},
+                     "enum": ["hybrid", "semantic", "keyword"]},
             "top_k": {"type": "integer", "minimum": 1, "maximum": 30}}}},
     "get_sample": {
         "fn": _t_sample, "readonly": True,

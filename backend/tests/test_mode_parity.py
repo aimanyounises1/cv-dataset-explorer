@@ -1,10 +1,10 @@
 """Every search mode the gallery can produce must survive into export.
 
-`mode` is validated by a regex on two separate endpoints, and they drifted: the
-PRISM work added `boosted` to `/api/search` and not to `/api/export`, so the
-gallery happily rendered a boosted result set while the CSV / JSONL / JSON
-buttons sitting beside it returned 422. A mode the user can select and cannot
-take away is a broken button they can see.
+`mode` is validated by a regex on two separate endpoints, and they once
+drifted: a mode was added to `/api/search` and not to `/api/export`, so the
+gallery happily rendered a result set while the CSV / JSONL / JSON buttons
+sitting beside it returned 422. A mode the user can select and cannot take
+away is a broken button they can see.
 
 The patterns are read out of the OpenAPI schema rather than hardcoded here, so
 adding a fifth mode to search without adding it to export fails this test instead
@@ -43,9 +43,12 @@ def test_search_and_export_accept_the_same_modes(schema):
         "a mode the gallery can produce would 422 on the export button")
 
 
-def test_boosted_is_one_of_them(schema):
-    """Named explicitly, because this is the mode that was actually missing."""
-    assert "boosted" in _mode_pattern(schema, EXPORT_PATH)
+def test_removed_boosted_mode_stays_removed(schema):
+    """PRISM/boosted was removed deliberately; a request for it must 422, not
+    silently rank as something else."""
+    assert "boosted" not in _mode_pattern(schema, MODE_PATH)
+    r = TestClient(app).get("/api/search", params={"q": "dog", "mode": "boosted"})
+    assert r.status_code == 422
 
 
 def test_every_declared_mode_is_actually_accepted(schema):
@@ -56,7 +59,7 @@ def test_every_declared_mode_is_actually_accepted(schema):
     assertion and the result count is irrelevant.
     """
     modes = re.findall(r"\w+", _mode_pattern(schema, MODE_PATH).strip("^$()"))
-    assert len(modes) >= 4, f"expected several modes, parsed {modes}"
+    assert set(modes) == {"semantic", "keyword", "hybrid"}, f"parsed {modes}"
 
     with TestClient(app) as client:
         for mode in modes:

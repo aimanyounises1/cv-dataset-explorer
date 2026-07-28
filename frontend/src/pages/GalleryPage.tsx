@@ -23,7 +23,7 @@ interface SearchMeta {
 }
 
 const PER_PAGE = 60;
-const MODES: SearchMode[] = ["hybrid", "semantic", "keyword", "boosted"];
+const MODES: SearchMode[] = ["hybrid", "semantic", "keyword"];
 
 /** Frame width per density. Scanning thousands of thumbnails for one anomaly
  * and reading a handful of captions closely are different jobs. */
@@ -374,13 +374,12 @@ export default function GalleryPage() {
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") return; // superseded
         setError(e instanceof Error ? e.message : String(e));
-        // Drop the previous answer. Leaving it on screen was worse than an empty
-        // grid, because the heading and the cards came from different queries: a
-        // failed `boosted` request kept the earlier hybrid results, relabelled
-        // them "60+ results for … (boosted)", and left every card wearing an
-        // `rrf 0.007` badge and a "fused by reciprocal rank, k=60" note that the
-        // boosted path never produces. The error was visible and still the page
-        // read as an answer.
+        // Drop the previous answer. Leaving it on screen was worse than an
+        // empty grid, because the heading and the cards came from different
+        // queries: a failed request once kept the earlier hybrid results,
+        // relabelled them with the new mode, and left every card wearing a
+        // score badge the failed path never produced. The error was visible
+        // and still the page read as an answer.
         setItems([]);
         setTotal(0);
         setHasMore(false);
@@ -481,8 +480,6 @@ export default function GalleryPage() {
               title={
                 m === "semantic" ? `${providerName} text-to-image similarity`
                 : m === "keyword" ? "BM25 full-text over captions + VLM tags (Porter-stemmed)"
-                : m === "boosted" ? "Semantic ranking through PRISM speaker models trained on "
-                  + "this corpus (measured +2.2 pts R@1; falls back to semantic if untrained)"
                 : "Reciprocal-rank fusion of semantic + keyword"
               }
             >
