@@ -588,9 +588,9 @@ query. That is a stricter test — it measures what a user's query actually goes
 through — and it is why `PROTOCOL_VERSION` moved to 4, so results cached under
 the old method can never be read back as if they were comparable. It moved to
 **5** because holding out the hubness bank changed the evaluated sample, which is
-exactly the kind of change a cached row must not survive, and to **6** when the
-paired PRISM rows arrived: those grade a trained model, so they draw a dedicated
-test-split sample and the cache key carries the artifact stamp.
+exactly the kind of change a cached row must not survive, and stands at **8**
+after the trained-reranker experiment was removed from the product: its rows
+left the protocol, so earlier caches cannot be read as this protocol's results.
 
 Two things this table is honest about, both of which cost real work to learn:
 
@@ -765,7 +765,7 @@ backend fails `tsc` in the frontend until a renderer exists. See
 
 | Tier | What | Count |
 |---|---|---|
-| `backend/tests/` | API contracts, degraded modes, id-list limits, provider resolution/fallback, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **351 passed** locally (2026-07-28); CI's light install skips the torch/langgraph modules |
+| `backend/tests/` | API contracts, degraded modes, id-list limits, provider resolution/fallback, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **340 passed** locally (2026-07-28); CI's light install skips the torch/langgraph modules |
 | `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **17 workflows registered**; the 2026-07-28 sweep passed 104/104 checks in 91 s (run 20260728-130140-8eff) |
 | `python scripts/capabilities.py --check` | Fails when the docs drift from the running system | — |
 

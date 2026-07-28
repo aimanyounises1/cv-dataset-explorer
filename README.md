@@ -1,750 +1,263 @@
 # CV Dataset Explorer
 
-**A local tool for finding, auditing and curating slices of an image–caption
-dataset — the 8,000 images and 40,000 human captions of
-[Flickr8k](https://huggingface.co/datasets/jxie/flickr8k) — where every ranking,
-score and measurement is labelled with what produced it.**
+**A local workspace for finding, auditing and curating slices of an
+image–caption dataset — the 8,000 images and 40,000 human captions of
+[Flickr8k](https://huggingface.co/datasets/jxie/flickr8k) — where every
+ranking, score and measurement is labelled with what produced it.**
 
-Working with a dataset means answering questions a file browser cannot: where are
-the night scenes, which captions their own image does not support, which 300
-samples are hardest, whether the held-out split is contaminated by
-near-duplicates of training images. This answers those against a local corpus and
-lets the answer leave as a slice you can regenerate. The through-line is
-**long-tail discovery**: rare scenes, coverage gaps, and the annotations that
-don't hold up are what the rarity axis, the coverage dashboard, the similarity
-floor and the caption audit all exist to surface. Everything runs on one
-machine — SQLite for storage, SigLIP 2 for embeddings, no cloud services and no
-paid APIs.
-
-![The gallery: a hybrid search for "a crowded street at night" — images lead,
-with matched terms highlighted in each caption and the selection rail on the
-right; each card's difficulty sparkline and retrieval-path evidence appear on
-hover](docs/screenshots/1-gallery.png)
-
-Jump to: [what it looks like](#what-it-looks-like) ·
-[architecture](docs/ARCHITECTURE.md) ·
-[retrieval and evaluation](#retrieval-and-evaluation) ·
-[limits](#scale-where-the-exact-search-stops-being-the-right-choice) ·
-[setup](#setup) · [all documentation](#further-documentation)
-
-## Why this is technically interesting
-
-Four things, each checkable in this repository rather than taken on trust.
-
-**1. Every score names its own basis, and the tool grades its own retrieval.**
-Four search modes are labelled `cos`, `cos*`, `rrf` or `fit` on every card,
-because a cosine, a hubness-corrected cosine, a fused rank and a log-likelihood
-live on different scales and must never be read against each other. The Benchmark
-page recomputes standard Flickr8k text→image recall for every mode on demand, and
-excludes each query caption from the index it searches — without that exclusion
-keyword recall measured 99.1%, which is self-retrieval, not retrieval.
-
-**2. The retrieval work was measured, and most of it was refuted.** Normalising
-the query text before SigLIP encodes it is worth +7.2 points of R@1 (46.0 → 53.2)
-and the docs say which queries gain. A hubness correction improves MRR reliably
-and R@1 only weakly (paired bootstrap CI `[+0.0048, +0.0178]` on MRR, McNemar
-`p = 0.071` on R@1) and is reported that way. PRISM — a per-image speaker model
-original to this project — refuted its own headline hypothesis, and in the app it
-is [a wash](#the-boosted-mode-gain-honestly). Widening the lexical conjunction,
-prompt templating and RRF tuning were all measured and not shipped.
-
-**3. Layers, not a monolith.** Browsing, keyword search and statistics need
-nothing but SQLite. Every ML capability is an optional layer that probes its own
-availability and degrades with a message naming the command that would enable it
-— never a 500, and never the same label over a different number. The
-probe-and-behaviour table is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-**4. Difficulty is stored, not eyeballed.** Every sample carries four
-percentile-ranked axes — legibility, rarity, difficulty, clutter — with the raw
-components behind each score, so "the hardest 300 samples in validation" is a
-filter, a sort key and an export rather than an opinion. There is deliberately no
-fifth axis: see [Reading the difficulty axes](#reading-the-difficulty-axes).
+Working with a dataset means answering questions a file browser cannot: where
+are the night scenes, which captions their own image does not support, which
+300 samples are hardest, whether the held-out split is contaminated by
+near-duplicates of training images. The through-line is **long-tail
+discovery** — rare scenes, coverage gaps, and the annotations that don't hold
+up are what the rarity axis, the coverage dashboard, the similarity floor and
+the caption audit exist to surface. Everything runs on one machine: SQLite for
+storage, local embedding models for retrieval, no cloud services, no paid
+APIs, no external vector database.
 
 ## Quick start
 
-Two paths. The first is enough to see the product.
-
-**Browse and keyword-search, no model download.** Downloads the dataset, skips
-the 1.5 GB of model weights:
-
 ```bash
+# backend (Python 3.11+)
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m app.ingest --limit 300 --skip-embeddings
+python -m app.ingest            # downloads Flickr8k + SigLIP 2, builds everything (~20 min)
 uvicorn app.main:app --port 8000
+
+# frontend (Node 20+), second terminal
+cd frontend && npm install && npx vite --port 5173
 ```
 
-In a second shell:
+Open http://localhost:5173. `python -m app.ingest --skip-embeddings` skips the
+model download and runs keyword-only; every ML capability is an optional layer
+that reports its own availability and names the command that enables it.
 
-```bash
-cd frontend && npm install && npm run dev      # http://localhost:5173
-```
+Optional layers, each honest about its absence:
 
-**Everything — semantic search, the embedding map, caption QA, the benchmark.**
-One command, ~10–20 minutes on an Apple Silicon laptop, dominated by the dataset
-and model downloads:
+| Layer | Enable with |
+|---|---|
+| Assistant (local agents) | [Ollama](https://ollama.com) + `ollama pull qwen3:8b`, then `pip install -r requirements-agent.txt` |
+| VLM tag enrichment | `ollama pull qwen2.5vl:7b`, then `python -m app.enrich` |
+| Self-QA browser sweep | `pip install -r requirements-qa.txt` (Playwright + real Chrome) |
+| Qwen3-VL retrieval provider | `pip install -r requirements-qwen.txt`, then `python -m app.ingest --provider qwen3_vl` |
+| Container path | `docker compose up --build` — see [docs/DEPLOY.md](docs/DEPLOY.md) |
 
-```bash
-cd backend && python -m app.ingest
-```
+## The model decision, measured
 
-On macOS, once both installs are done, `./start.command` starts the API and the
-dev server and opens the browser. Optional layers (the assistant, the VLM
-enrichment, the browser QA sweep) and every flag are in [Setup](#setup).
+Retrieval defaults to **SigLIP 2** because it measures better on this corpus's
+own benchmark — not because it is smaller: parameter count is not quality.
+Qwen3-VL-Embedding-2B runs behind the same provider seam as an explicit
+opt-in (`CVDE_EMBED_PROVIDER=qwen3_vl`); each provider keeps its own index
+directory and manifest, so two embedding spaces can never mix, and the UI
+names whichever provider is actually ranking, with the reason whenever a
+fallback happened.
 
-## Contents
+Head-to-head on this machine (M4 Max, 64 GB; 1,000-query text→image sample of
+the repository's own protocol; `scripts/bench_providers.py` re-measures it):
 
-- [What it looks like](#what-it-looks-like) — one screenshot per view, each with the URL it came from
-- [Core workflows](#core-workflows) — search, curation, saved views, the axes
-- [Retrieval and evaluation](#retrieval-and-evaluation) — which protocol produced which number
-- [Reading the difficulty axes](#reading-the-difficulty-axes) — what they mean and where they mislead
-- [Scale](#scale-where-the-exact-search-stops-being-the-right-choice) — where exact search stops being right
-- [Reproducibility](#reproducibility) — how to re-derive the figures and the claims
-- [Data provenance and licensing](#data-provenance-and-licensing) — dataset, weights, and this repository
-- [Setup](#setup) · [Tests](#tests) · [Configuration](#configuration) · [Architecture](#architecture)
-- [Further documentation](#further-documentation)
+| provider | dim | text encode p50 | image encode p50 | semantic R@1/5/10 | hybrid R@1/5/10 | index size |
+|---|---|---|---|---|---|---|
+| SigLIP 2 base (default) | 768 | 7.7 ms | 14.4 ms | **55.2 / 79.0 / 86.4%** | **56.0 / 79.1 / 86.3%** | 197 MB |
+| Qwen3-VL-Embedding-2B (opt-in) | 2048 | 39.6 ms | 285.6 ms | 50.2 / 75.0 / 83.4% | 51.1 / 75.3 / 83.9% | 394 MB |
 
-## What it looks like
+Ollama serves the language models only (assistant `qwen3:8b`, enrichment
+`qwen2.5vl:7b`) — image embeddings are computed in-process. The map, difficulty
+axes and caption agreement are ingest-time, SigLIP-derived artifacts and say
+so; a provider switch changes retrieval, never rewrites stored analysis.
 
-### Describing a selection, and drilling into it
+## What a researcher can do
 
-![The "what is in this selection?" panel over the 223 images that are both night
-and indoor, listing over- and under-represented attributes with lift multipliers
-and raw counts](docs/screenshots/2-describe.png)
+### Search, three ways — and steer it
 
-`/?attr=time_of_day:night&attr=setting:indoor` — Every other view answers *given a
-filter, which samples*. This runs it backwards: *given these samples, what do they
-have in common*. Each row carries its raw count next to the multiplier, because ×6
-over five images and ×6 over five hundred are different findings, and each is
-tested against the hypergeometric distribution before it is shown.
+![Hybrid search for "a crowded street at night": ranked grid, per-card scores
+with their basis, term statistics](docs/screenshots/1-gallery.png)
 
-Two things it deliberately will not do. Clicking a row **narrows** this selection
-rather than replacing it — the count on the row is measured inside the current set,
-so it has to. And facets from a group you already filtered by are suppressed: a
-sample carries exactly one label per group, so "these night images are ×20 more
-nocturnal than the corpus" is true, useless, and would otherwise be the largest
-number on the page.
+Semantic, keyword (FTS5 BM25) and hybrid (reciprocal-rank fusion) — one
+ranking implementation serves the gallery, the export buttons and the agents,
+so they can never disagree. Every score names its basis (`cosine`,
+`cosine_adj`, `rrf`, `composed`); scores from different bases are never
+compared. Search by image (drop, paste or pick a file), or steer with
+reference chips: *More like this* / *Exclude* build a composed query in the
+URL (`?like=76&unlike=13` plus text), so a colleague can open the same
+steered search from a pasted link — and the Back button walks the trail.
 
-### Four search modes, each labelled with what produced its score
+![Zero-shot facet filters with a set description panel open](docs/screenshots/2-describe.png)
 
-![The boosted mode: results for "a crowded street at night" re-ranked by the
-trained PRISM speaker models, each card showing its candidate rank and
-fit score](docs/screenshots/3-boosted.png)
+Facet filters come from zero-shot attribute classification over the existing
+embeddings; the description panel summarizes any filtered set with counted,
+never generated, statements.
 
-`/?q=a+crowded+street+at+night&mode=boosted&sort=rarity_desc` — A score is only
-interpretable next to what produced it, so every card names its basis: `cos` for a
-plain cosine, `cos*` when the hubness correction re-ranked it, `rrf` for a fused
-rank, `fit` for a PRISM log-likelihood. These live on different scales and must
-never be read against each other. `boost 171` means this image placed 171st in the
-semantic candidate pool before re-ranking — the gap is the correction doing work.
+### Judge difficulty, not just content
 
-### The difficulty axes as a filter
-
-![The gallery filtered to samples scoring 8 or above on both difficulty and
-legibility](docs/screenshots/4-axes.png)
+![Gallery filtered to the hardest, least legible samples](docs/screenshots/4-axes.png)
 
-`/?difficulty_min=8&legibility_min=8` — "Show me the hardest samples" is a query
-this tool can answer, because *hard* is stored rather than eyeballed. See
-[Reading the difficulty axes](#reading-the-difficulty-axes) for what each of the
-four measures and where they mislead.
-
-### Embedding map
+Four 0–10 axes — legibility, rarity, difficulty, clutter — computed as
+percentile ranks over the corpus, each a filter, a badge and a sort key. "The
+300 hardest validation samples" is a URL.
 
-![UMAP scatter of all 8,000 images, coloured by cluster, with a hover
-thumbnail](docs/screenshots/5-map.png)
+### See the corpus shape
 
-`/map` — Shift+drag lassoes a region into a named tag, which then filters the
-gallery like any other constraint. The projection is for looking at; every
-similarity the tool acts on is computed in the full 768 dimensions.
+![UMAP embedding map with cluster colors and lasso selection](docs/screenshots/5-map.png)
 
-### Caption quality
+The embedding map projects the corpus (UMAP, ingest-time); lasso a region to
+tag or open it as a gallery slice. Isolated points are coverage-gap
+candidates.
 
-![The caption quality page: a distribution of image-caption agreement with a
-brush, over the captions least supported by their image](docs/screenshots/6-quality.png)
+### Audit the annotations
 
-`/quality` — Captions ranked by how little their own image supports them, which is
-where annotation errors are. The threshold brush is a real filter, so a triage
-selection made here can leave the page it was made on.
+![Caption quality view: least-supported captions first](docs/screenshots/6-quality.png)
 
-Verdicts are tags with a convention, not a schema: record
-`verdict:caption-error`, `verdict:scorer-error`, `verdict:ambiguous`,
-`verdict:duplicate` or `verdict:ok` on the sample page, and the review session
-becomes a filterable, exportable slice (`?tag=verdict:caption-error`) with zero
-new tables.
+CLIPScore-style agreement between each caption and its own image, worst
+first — likely annotation errors surface immediately. Per-sample caption
+consistency flags images whose five captions disagree with each other.
 
-### Dataset profile
+### Trust, measured
 
-![Split sizes, caption length and vocabulary distributions, zero-shot attribute
-coverage, and near-duplicate pairs](docs/screenshots/7-stats.png)
+![Dataset profile with provenance caveats and split statistics](docs/screenshots/7-stats.png)
+![The self-benchmark table: recall@k for all three modes](docs/screenshots/8-eval.png)
 
-`/stats` — Clicking an attribute bar opens that slice in the gallery. The small
-bars are the long tail, which is the point.
+The stats page states the dataset's provenance and known defects. The
+benchmark page measures the tool's own retrieval (text→image recall@1/5/10
+per mode, the dataset's captions as ground truth) with its protocol and
+caveats stated inline; `GET /api/stats/leakage` reports train/test
+near-duplicate contamination as a threshold ladder rather than one arbitrary
+number.
 
-### The tool measuring its own search quality
+### Inspect one sample deeply
 
-![The benchmark page: recall chart and table for semantic, keyword, hybrid, and a
-paired test-split comparison of semantic against boosted](docs/screenshots/8-eval.png)
+![Sample inspector: image, five captions with agreement, attributes, neighbours](docs/screenshots/9-sample.png)
+![Provenance banner: surfaced by hybrid search, rank 1](docs/screenshots/12-provenance.png)
+![The similarity floor: two real neighbours above the divider, greyed context below](docs/screenshots/13-floor.png)
 
-`/eval` — Flickr8k's captions are ground truth, so the tool can grade itself. The
-query caption is excluded from the index it searches; without that the number
-measures nothing but self-retrieval, and it was 99.1%.
-
-Read the keyword row as a property of the query rather than of BM25: these queries
-are whole ~12-word captions and keyword mode requires every content term in one
-caption, so for 85% of them the lexical path has nothing to rank at all. The
-candidates column reports that directly rather than letting the recall figure imply
-a ranking failure.
-
-One caveat on that column, disclosed rather than quietly re-derived: **hybrid's
-figure is a sum, not a set**. It adds the semantic pool to the mean lexical match
-count, but every lexical match is already inside the semantic pool, so two
-overlapping sets are added where they should be unioned and the honest figure is
-the pool itself (8,000). The overstatement equals the lexical mean — 2.1 here.
-Correcting the number would change what every cached run means, so the page says
-what it is instead.
-
-#### The boosted mode gain, honestly
-
-The two bottom rows are the like-for-like comparison — the same test-split queries,
-ranked by semantic and by boosted. This is what the page above reports:
-
-| on the same 1,000 test queries | R@1 | R@5 | R@10 | MRR@10 |
-|---|---|---|---|---|
-| semantic | 57.8% | **81.0%** | **86.8%** | 0.6746 |
-| boosted (PRISM) | **57.9%** | 80.3% | 86.4% | **0.6774** |
-
-So in this app, on this protocol, boosted is **+0.1 pts R@1 and +0.003 MRR**, and
-slightly *behind* on R@5 and R@10. It is a wash, and the page says so.
-
-That is not the `+2.2 pts R@1` figure in [docs/PRISM.md](docs/PRISM.md), and the
-two are not comparable. That result is from PRISM's own offline harness against a
-**49.4% baseline** (49.4 → 51.6, two seeds, paired bootstrap CI `[+1.28, +3.18]`);
-this page's semantic baseline on test queries is **57.8%**. The two runs use
-different query samples; the candidate pool is identical (8,000 images in both).
-The residual gap is under investigation, so the offline delta cannot be quoted as
-the in-app gain — a reviewer who clicks **Run benchmark** gets the table above.
-
-The offline ablation is worth reading on its own terms: it refuted the per-image
-variance hypothesis it was built to test and kept only the component that survived
-measurement. But the honest headline for the shipped feature is the wash, not the
-ablation's win.
-
-### Sample inspector
-
-![A sample detail page: full image, all five captions with agreement scores,
-zero-shot attributes, metadata, tags, and nearest neighbours](docs/screenshots/9-sample.png)
-
-`/samples/1865` — All five captions with their individual agreement scores, so a
-disagreement is visible rather than averaged away, plus nearest neighbours in
-embedding space. Each neighbour carries its cosine similarity; below a
-corpus-derived floor (the 10th percentile of nearest-neighbour similarity,
-`?min_sim=` to override) neighbours grey out rather than pose as a class, and
-when nothing clears it the page reports a possible coverage gap — the grid
-always returns k cards, so an absence has to be said, not padded over.
-
-![The similarity floor on a well-connected sample: two genuine neighbours above
-a dashed divider, ten greyed below it](docs/screenshots/13-floor.png)
-
-`/samples/76` — the floor separating a real class (two fire performers, cosine
-0.92 and 0.83) from ten greyed near-misses shown for context.
-
-![The provenance banner: "Surfaced by hybrid search 'a crowded street at night'
-— rank 1"](docs/screenshots/12-provenance.png)
-
-Reached from a search instead of a bookmark, the same inspector says *why* you
-are looking at it — query, mode, rank, score — read from the URL, so a pasted
-link carries the same answer.
-
-### Command palette
-
-![The command palette filtered on "night", offering tags, attributes, saved views
-and actions](docs/screenshots/10-palette.png)
-
-`⌘K` — One place to reach any filter, saved view, or action by name.
-
-### Assistant
-
-![The assistant answering "show me the 12 images with the worst caption
-agreement" with a tool trace and an interactive image block](docs/screenshots/11-assistant.png)
-
-`/chat` — A LangGraph orchestrator over local Ollama routes to retrieval and
-insights specialists. Two things worth noticing: the chips name every agent and
-tool the turn used, and the answer is a **rendered block** the UI can make
-interactive, not prose describing images you then have to go find. Answers are
-generated by a local 8B model, so quality varies between runs.
-
-## Core workflows
-
-- **Gallery** — browse all samples with split / tag / attribute filters. All search
-  and filter state lives in the URL: shareable links, working back-button.
-- **Search** — four modes, switchable in the UI:
-  - *Semantic*: natural-language text-to-image search via SigLIP 2 embeddings ("dog jumping into water").
-  - *Keyword*: BM25 full-text search over all 40k captions (SQLite FTS5, Porter-stemmed).
-  - *Hybrid* (default): reciprocal-rank fusion of both.
-  - *Boosted*: the semantic ranking replaced by **PRISM speaker models trained on this corpus** (`python -m app.train_prism --no-sigma`). Degrades gracefully to semantic when no trained artifacts exist. **Two different numbers describe this and they are not interchangeable** — see [the gain, honestly](#the-boosted-mode-gain-honestly) before quoting either.
-
-  Every result shows *why* it matched: the best-matching caption, highlighted terms, and the relevance score.
-- **Search by image** — drop, paste or pick a picture and the corpus is ranked against it, image-to-image, on the same embeddings and index as text search. The query cannot live in a URL (it *is* the image), so the ranked ids are offered as an `?ids=` slice — that link is the shareable artifact.
-- **Composed search** — every result card offers *More like this* and *Exclude*: reference images become chips in the URL (`?like=76,2259&unlike=13`), steering text is the same search box, and the blended ranking carries basis `composed` (cosine to the blended query minus half the strongest negative-example cosine — a chosen, untuned weight, and the code says so). Adding a reference pushes history, so the similarity trail is literally the Back button. On demand, **scenario groups** propose at most three explainable clusters of the current ranking (k-means, fixed seed, labels templated from measured attributes — never generated), each saveable as an album whole. The composed ranking itself is unmeasured — the retrieval benchmark covers the text modes only.
-- **Compare & focus** — `/compare?a=&b=` (or pick two and press Compare): two frames under one synchronized zoom/pan, a deterministic shared/different panel from the samples' own attributes and axes, and the honest cosine between them — or "not in the top-60 neighbours" instead of a fake number. Draw a rectangle on either frame to **search within that region** (the crop runs through the by-image endpoint) or save it as a stored annotation (normalized geometry; source images stay immutable).
-- **Sample inspector** — full image, all 5 captions **with image-caption agreement scores**, zero-shot attributes, metadata, editable curation tags, and "similar images" via embedding nearest neighbors.
-- **Embedding map** — interactive UMAP scatter of the whole dataset (zoom/pan/hover thumbnails, click-through). **Shift+drag selects a region for bulk tagging** — lasso a visual cluster, name it, filter the gallery by it.
-- **Statistics** — split sizes, caption length/vocabulary distributions, **zero-shot attribute coverage** (click a bar to open that slice in the gallery — small slices are the long tail), and **near-duplicate detection**.
-- **Difficulty axes** — every sample is scored 0–10 on four axes describing how *hard* it is, not what is in it: **legibility** (blur and darkness), **rarity** (rare caption vocabulary, and isolation in embedding space), **difficulty** (where image–caption agreement and inter-caption agreement are weakest), and **clutter** (how much the captions name, and how much their lengths vary). Each is a range filter, a badge on every result card, and a sort key — so "show me the hardest 300 samples in the validation split" is a query the tool can answer. See [Reading the difficulty axes](#reading-the-difficulty-axes).
-- **Quality (annotation QA)** — CLIPScore-style ranking of captions least supported by their image (likely annotation errors), plus samples whose 5 captions disagree most with each other.
-- **Benchmark** — the tool measures its own search quality: standard Flickr8k text→image retrieval recall@1/5/10 for every mode, using the dataset's captions as ground truth. When a trained PRISM model is present, the table adds a paired test-split comparison so the boosted mode's gain is measured, not asserted.
-- **Assistant (optional)** — a chat interface backed by a **Fugu-style multi-agent orchestration** (LangGraph over local Ollama): an orchestrator routes requests to retrieval and insights specialist agents, and a synthesizer quality-gates the answer. Agents use the same service functions as the REST API and can search, inspect, analyze coverage, audit captions, and tag samples. The UI shows the agent/tool trace for every answer.
-- **Curation workflow, closing both ways** — the point of a search tool over a dataset is composing a training set, so a slice has to be able to leave and come back:
-  - **Out:** export the current view — filters *or* a ranked search result — as JSON, JSONL or CSV. The manifest records the query, the axis bounds, the embedding model and a fingerprint of the embeddings that scored it, because a slice you cannot regenerate is not curation.
-  - **In:** paste or upload a list of ids or filenames (the **Id list** panel). Both are accepted because both are things you already have — this tool's own export, or anything that touched the images on disk. It composes with every other filter rather than replacing them, and reports how many entries exist here, so a list carried over from a larger corpus tells you "412 of your 500" instead of failing.
-  - Tag samples manually, in bulk by lassoing a region of the map, or via the assistant; filter by tag. Tags are flat labels — converting one into an album is an explicit act (`POST /api/albums/from-tag`), and the tag survives it.
-- **Albums** — first-class ordered collections, not tags: a shelf in the library rail with stacked covers, each row a drop target. Drag a card (or a picked bundle) onto an album to file it — every drop offers Undo when the add was clean — or pick images in **Select** mode and name the set from the tray. An album carries provenance (`manual` | `tag` — `agent` is reserved in the schema; nothing writes it yet), keeps its own item order, and opens as `?album=<id>` — a real slice that filters, chips and exports like any other. An **Analyze** view counts what its members share and where they split (majority attributes, tag shares, embedding coherence and centroid outliers — all measured, labeled as such), and a summary draft from the local chat model is generated only on explicit request, edited by you, and saved only by you.
-- **Named views** — save the current filter set under a name and restore it later. Stored as the URL query string, opaquely, so a view keeps working when the UI grows a filter the backend has no column for. A view also pins the embedding model and corpus fingerprint it was saved under; restored in a different environment it still loads, with a non-blocking "env differs" warning instead of a silent lie.
-- **Legible filter state** — every active constraint appears as a removable chip above the results, so you never reach an empty page wondering which of five filters emptied it.
-- **Optional VLM enrichment** — tag every image with a local vision-language model via [Ollama](https://ollama.com).
-
-**Design intent — layers, not a monolith.** Browsing, keyword search, and stats
-run on plain SQLite with nothing else installed; every ML capability (semantic
-search, map, QA, benchmark, assistant) is an optional layer that reports its
-own availability and degrades gracefully when its prerequisites are missing —
-without embeddings you still get browsing/keyword search/stats, and without
-the agent stack the assistant tab explains exactly how to enable it.
-
-## Retrieval and evaluation
-
-Four protocols in this repository produce retrieval numbers, and quoting one as
-another is the easiest mistake available here. They are kept apart on purpose:
-
-| Protocol | Pool | Queries | Where it runs | What it supports |
-| --- | --- | --- | --- | --- |
-| **In-app benchmark** | full 8,000-image corpus | 1,000 captions, fixed seed, hubness-bank captions excluded, each query caption excluded from the lexical index | the Benchmark page and `GET /api/eval/retrieval` | the per-mode table a reviewer sees, plus paired semantic-vs-boosted rows on a test-split sample |
-| **Offline PRISM harness** | full 8,000-image corpus | ~5,000 test-split captions, 2 seeds, paired bootstrap | `python -m app.train_prism --eval`, [docs/PRISM.md](docs/PRISM.md) | the A0–A3 ablation ladder and the `+2.2 pts R@1` result against a 49.4% baseline |
-| **Offline hubness A/B** | full 8,000-image corpus | one fixed 1,000-caption sample, held constant across arms | `python -m app.ml.hubness` | MRR 0.6280 → 0.6366 with the sample held fixed, and the R@1 result that only weakly replicates |
-| **Published Flickr figures** | 1,000-image gallery | the literature protocol | cited in [docs/PRISM.md](docs/PRISM.md) | reference points only — an ~8x easier pool, never compared against the rows above |
-
-Two consequences the repository states rather than smooths over:
-
-- **The shipped boosted mode is a wash**, and the Benchmark page says so — see
-  [the boosted mode gain, honestly](#the-boosted-mode-gain-honestly). The offline
-  `+2.2 pts` came from a different protocol against a baseline eight points lower
-  and cannot be quoted as the in-app gain.
-- **Nothing is tuned on test.** Anything trained sees the train split; anything
-  tuned is tuned on validation; the PRISM comparison rows are the only place test
-  captions are used as queries, and they are used once per protocol.
-
-What the tests pin about this, and what CI cannot check, is in
-[docs/TESTING.md](docs/TESTING.md).
-
-## Reading the difficulty axes
-
-Computed once by `python -m app.analyze --only axes` and stored on each sample.
-Three things about them are worth knowing before you trust a number.
-
-**They are percentile ranks, not measurements.** A Laplacian variance, a cosine
-distance and an inverse document frequency live on entirely different scales
-with distributions you cannot guess in advance, so a range filter over the raw
-values behaves erratically — "blur ≥ 40" means something different on every
-dataset and nothing at all to a person. Each axis is therefore ranked across the
-dataset and bucketed 0–10, which makes `rarity ≥ 7` and `difficulty ≥ 7` both
-mean "roughly the top 30% of this corpus" and lets four sliders be used
-together. The cost: the scores are **dataset-relative**. A 7 here is not a 7 on
-COCO, the buckets are near-uniformly populated by construction, and ingesting
-more images can move a sample's bucket without its pixels changing.
-
-**Every score carries its components.** `axis_detail` stores the raw values
-behind each axis (blur, luminance, agreement, and so on), so the interface can
-explain a score in place rather than asking you to trust it. Nothing here is
-model-generated prose — the explanations are templated from measured numbers.
-
-**There is no fifth axis, on purpose.** Systems of this kind usually carry a
-*dynamic complexity* axis — how badly the agents in a scene are behaving. There
-is no honest analogue in Flickr8k: these are still photographs, with no motion,
-no agents and no rules to violate. Inventing one to round the count to five
-would have made the panel look more complete and the data less true, so the
-axis is absent and this paragraph is the reason.
-
-### Two limits worth knowing before you rely on them
-
-**Ranked results stop at 300 per query.** Reciprocal-rank fusion is computed over
-the retrieved candidate lists, so its output depends on how deep those lists go:
-row 300 of a 300-deep fusion is a different image from row 300 of a 350-deep one.
-Widening the pool to let a user page further therefore re-ranks the tail and
-repeats images across adjacent pages — measured, before this was fixed, at 4
-duplicates either side of the boundary. The depth is now a hard horizon: paging
-stops there and the gallery says so, rather than offering a "Load more" that
-quietly runs out. Raise `CVDE_SEARCH_DEPTH` to see further, or narrow the query.
-
-**A pasted id list is capped at 60,000 entries.** Past 10,000 the entries go into
-a temporary table rather than an `IN (...)` clause, because SQLite binds each
-entry as a host parameter and its default ceiling is 32,766 — a list of ~40,000
-would otherwise fail with "too many SQL variables" rather than working.
-
-## Scale: where the exact search stops being the right choice
-
-Retrieval is exact brute-force cosine in NumPy — no approximate-nearest-neighbour
-index. At 8,000 × 768 the embedding matrix is ~25 MB and a full scan takes well
-under a millisecond, which is about 2% of query latency; the text encode
-dominates by two orders of magnitude. An ANN index here would optimise the
-fastest stage of the pipeline while adding a dependency, a build step and recall
-loss, so `EmbeddingIndex` stays exact and remains the single seam where that
-would change.
-
-It stops being the right choice somewhere around **~400k vectors** (measured by extrapolating the
-scan against the encode — see [docs/TECHNICAL.md](docs/TECHNICAL.md)), or
-whenever the scan exceeds ~10% of end-to-end query latency, whichever comes
-first. At that point the substitution is local and does not change the API:
-`EmbeddingIndex.search` already takes an `allowed_ids` candidate mask, so a
-FAISS `IndexIVFFlat`, `hnswlib`, or `sqlite-vec` can be dropped in behind it.
-Hosted vector databases are excluded by design — everything here runs on one
-machine.
-
-The index is one of two seams that scale would widen. The other is scoring: at
-fleet scale the per-sample signals worth ranking by stop being intrinsic (blur,
-rare words) and start coming from models — per-example loss, detector
-confidence, ensemble disagreement. Those would enter through a `ScoreProvider`
-protocol — `rank(query_vec, allowed_ids, k) → [(id, score, basis)]` — with the
-hubness penalty and PRISM as its first two implementations, and every score
-still arriving labelled with its basis. It is deliberately not implemented: at
-8,000 images with two ranking signals, the protocol would be abstraction with
-nothing to abstract over. A second dataset needs no new seam at all — it is one
-adapter class in `app/datasets/`.
-
-## Reproducibility
-
-- **The figures.** Every screenshot in this README was captured from the running
-  app by [`scripts/screenshots.py`](scripts/screenshots.py), which records the URL
-  each one came from — so any claim can be checked by opening the same address.
-  Regenerate them with the API on `:8000` and the dev server on `:5173`:
-  `cd backend && .venv/bin/python ../scripts/screenshots.py` (`--headed` to watch).
-- **The capability inventory.** [docs/CAPABILITIES.md](docs/CAPABILITIES.md) is
-  generated from the live OpenAPI schema, the agent registry, the QA flow registry
-  and the router in `App.tsx`. `python scripts/capabilities.py --check` fails when
-  it is stale, so it cannot claim a capability the code does not have.
-- **The benchmark.** Its cache key carries the protocol version, the query sample
-  size, `CVDE_RRF_K`, `CVDE_SEARCH_DEPTH`, the hubness constants, whether PRISM
-  artifacts exist, and the mtimes of the embeddings and the database — so a result
-  computed under an older definition is never served as current. The query sample
-  is drawn with a fixed seed.
-- **What CI checks.** The backend suite, the frontend type-check and production
-  build, and a relative-link check over the Markdown, on every pull request.
-  Real model weights, ingestion, the browser sweep and the assistant do not run
-  there — [docs/TESTING.md](docs/TESTING.md) lists both sides.
-- **Configuration.** [`.env.example`](.env.example) lists every environment
-  variable the code reads, with its default and what it changes.
-
-## Data provenance and licensing
-
-**What gets ingested.** The `jxie/flickr8k` copy on Hugging Face contains exactly
-**8,000 rows** (6,000 train / 1,000 validation / 1,000 test), while the original
-Flickr8k distribution has roughly **8,091 images**. About 90 images are absent
-from this copy, with no explanation upstream — worth knowing before comparing
-any number here against a published Flickr8k result. The split *counts* match the
-canonical Hodosh split; the per-image *assignments* are undocumented in this copy
-and are not verified by this tool.
-
-**Licensing.** Upstream Flickr8k is distributed for **non-commercial research and
-education only**, and the individual photographs remain under their original
-Flickr licenses. The `jxie/flickr8k` copy specifies **no license of its own**, so
-the upstream terms are the safe assumption. This repository contains **no dataset
-images**: ingestion downloads them to your machine, and `data/` is gitignored.
-Treat anything you export as carrying the same restrictions.
-
-**Model weights** are downloaded from Hugging Face at first use
-(SigLIP 2 base, ~1.5 GB, Apache-2.0). The optional Ollama models carry their own
-licenses. No dataset or model weights are redistributed here.
-
-**Network access.** Preparation makes two one-time downloads — the dataset and the
-model weights. After they are cached, the entire system runs offline; no cloud
-services, hosted APIs, or external vector databases are in the runtime path.
-
-**This repository's own source code has no licence file yet.** Under default
-copyright that means no reuse rights are granted, which is a decision for the
-owner rather than something to assume — it is deliberately not guessed here. It
-is a separate question from the dataset terms above and from the model weights.
-
-## Requirements
-
-- Python 3.10+
-- Node.js 18+
-- ~2 GB disk for the dataset, images, and model weights
-- Any OS; Apple Silicon (MPS) and NVIDIA (CUDA) are used automatically when available, otherwise CPU
-
-## Setup
-
-### 1. Backend
-
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Ingest the dataset (one-time, idempotent)
-
-```bash
-python -m app.ingest
-```
-
-This downloads Flickr8k from Hugging Face, stores images + thumbnails +
-captions locally, builds the FTS index, computes SigLIP 2 embeddings, fits the
-UMAP projection, and runs the analysis passes (caption QA scores + zero-shot
-attributes). Expect ~10–20 minutes total on an Apple Silicon laptop (dataset
-download is the bulk of it).
-
-Useful variants:
-
-```bash
-python -m app.ingest --limit 300        # quick trial run
-python -m app.ingest --skip-embeddings  # browse/keyword-search only, no model download
-python -m app.analyze                   # (re)run QA scores + attributes on an existing DB
-```
-
-If the API is already running, `curl -X POST localhost:8000/api/admin/reload`
-picks up new embeddings/analysis without a restart.
-
-### 3. Run the API
-
-```bash
-uvicorn app.main:app --port 8000
-```
-
-### 4. Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open http://localhost:5173.
-
-### 5. (Optional) Assistant — Fugu-style agent orchestration
-
-With [Ollama](https://ollama.com) installed:
-
-```bash
-cd backend && pip install -r requirements-agent.txt
-ollama pull qwen3:8b        # any Ollama chat model with tool calling
-uvicorn app.main:app --port 8000   # restart the API
-```
-
-The Assistant tab then routes each question through an orchestrator → up to two
-specialist agents in parallel → a quality-gate synthesizer, all running locally.
-Four specialists are registered: **retrieval** (search, similar, inspect, tag),
-**insights** (statistics, coverage, caption QA), **visualization** (charts,
-diagrams, reports) and **qa** (drives the app itself and reports its status).
-
-Answers come back as **interactive components, not prose about data**: charts you
-can hover, sort and zoom, and whose bars, slices and rows navigate to the exact
-gallery slice they count. Every chart states the SQL that produced it. Try:
-
-- *"Plot how the dataset splits into train, validation and test"*
-- *"Which time of day is hardest? Compare the slices"*
-- *"Generate a dataset report"* — rendered inline, downloadable as Markdown/JSON
-- *"How does this platform work architecturally?"*
-- *"Show me the status of the application"* — see step 6
-
-`docs/AGENTS.md` covers the design; `docs/DEMO.md` is an eight-minute walkthrough.
-
-### 6. (Optional) Autonomous UI QA and status deck
-
-```bash
-cd backend && uv pip install --python .venv/bin/python -r requirements-qa.txt
-```
-
-Then ask the assistant *"show me the status of the application"*, or:
-
-```bash
-curl -sX POST localhost:8000/api/qa/run -H 'Content-Type: application/json' -d '{}'
-```
-
-A real Chrome drives every registered workflow, screenshots each, and compiles a
-pass/fail report plus a `.pptx` deck — including a degradation flow that injects
-500s and asserts the UI announces them. The last full sweep (2026-07-28) reported
-**104/104 checks across 17/17 workflows in 91 s** (run `20260728-130140-8eff`). Re-run it rather than quoting that
-number: the flow registry grows, and the count is only true of the day it was taken.
-One sweep runs at a time; a second request attaches to the one in flight.
-Artifacts land in `backend/data/qa/<run_id>/` and are served at `/media/qa/`.
-
-The same flows back the command-line smoke test — one definition, three
-consumers — so the suite a developer runs cannot drift from the one the app runs:
-
-```bash
-cd backend && uv run --with playwright --with python-pptx \
-    --python .venv/bin/python python ../scripts/ui_smoke.py
-```
-
-Playwright and `python-pptx` stay out of `requirements.txt` deliberately: neither
-is needed to serve the app. Without them the endpoint returns setup instructions,
-and without `python-pptx` alone the Markdown report is still produced.
-
-### 7. (Optional) Train the PRISM booster
-
-```bash
-cd backend && .venv/bin/python -m app.train_prism
-```
-
-Boosted mode needs these artifacts — they are generated locally, never
-shipped, so on a fresh clone the mode falls back to semantic and says so (the
-benchmark page names this command when its boosted rows are absent). Training
-runs offline on the train split only; see [docs/PRISM.md](docs/PRISM.md).
-
-### 8. (Optional) VLM enrichment
-
-```bash
-ollama pull qwen2.5vl:7b
-cd backend && python -m app.enrich
-```
-
-Runtime is roughly 1–3 s/image locally; `--limit 500` enriches a subset. The
-app is fully functional without either optional step.
-
-### 9. (Optional) The container path
-
-```bash
-docker compose up --build                    # API :8000 + UI :5173
-docker compose --profile ollama up --build   # ... plus a local Ollama
-```
-
-Same ports, same `backend/data` state as the host workflow — one ingest serves
-both. In-container inference is CPU-only (no MPS/CUDA), so semantic queries run
-slower than on the host; [docs/DEPLOY.md](docs/DEPLOY.md) carries first-run
-ingest, health checks, resource expectations and what deliberately stays
-outside the containers.
-
-## Tests
-
-```bash
-cd backend && pytest
-```
-
-The smoke tests exercise the API end-to-end on a seeded temporary database,
-including the degraded-mode path (no embeddings installed). The agent suite runs
-without Ollama and without a browser — the graph accepts an injected model, so
-parallel fan-out, lane isolation and lane timeouts are asserted at unit-test
-speed rather than assumed.
-
-For the UI, `scripts/ui_smoke.py` drives real Chrome through every workflow (see
-step 6). It is the tier that catches what `tsc` cannot: a view that renders empty,
-a control that stopped filtering, a console error, a 404.
-
-The full local suite reports **351 passed** (2026-07-28). On the light install
-CI uses (no torch, no transformers, no langgraph — see
-[docs/TESTING.md](docs/TESTING.md)) the modules needing `torch` or `langgraph`
-skip, so CI's number is lower; like the sweep count above, re-run rather than
-quote — the suite grows.
-
-## Models
-
-Three separate local models, three separate jobs — and the app names which of
-them is actually serving at any moment (rail footer, `/api/stats/overview`):
-
-| Job | Model | Runs where | Env var |
-|---|---|---|---|
-| **Retrieval (preferred)** | `Qwen/Qwen3-VL-Embedding-2B` | in-process (sentence-transformers, MPS/CUDA/CPU) | `CVDE_EMBED_PROVIDER=qwen3_vl` (default), `CVDE_QWEN_EMBED_MODEL` |
-| **Retrieval (fallback)** | SigLIP 2 base | in-process (transformers) | `CVDE_EMBED_MODEL` |
-| **Assistant** | `qwen3:8b` | Ollama | `CVDE_CHAT_MODEL` |
-| **Enrichment** | `qwen2.5vl:7b` | Ollama | `CVDE_VLM_MODEL` |
-
-Ollama serves the language models only — it cannot host a multimodal embedding
-model, so the retrieval embedder always runs in-process. When the preferred
-provider's stack, weights or index are missing, retrieval falls back to SigLIP 2
-**visibly**: the UI and the status API name the active provider and the exact
-reason, with the command that would fix it. Each provider keeps its own index
-directory (`data/embeddings/` for SigLIP, `data/embeddings/qwen3_vl/` + a
-manifest recording model, measured dimension, prompt version and similarity
-floor) — two embedding spaces never mix, and saved views pin which one scored
-them. The map, clusters and difficulty axes are computed in the SigLIP space at
-ingest time and are not re-derived by a provider switch.
-
-Enable the preferred provider (fully local after the first download):
-
-```bash
-cd backend && uv pip install --python .venv/bin/python -r requirements-qwen.txt
-.venv/bin/python -m app.ingest --provider qwen3_vl   # first run downloads ~4 GB
-curl -sX POST localhost:8000/api/admin/reload
-.venv/bin/python ../scripts/bench_providers.py       # measures both providers on your machine
-```
-
-Measured head-to-head on this corpus (M4 Max, 64 GB, 2026-07-28; 1,000-query
-text→image sample of the repository's own benchmark protocol; re-run the
-script rather than quoting this table):
-
-| provider | dim | text encode p50/p95 | image encode p50 | semantic R@1/5/10 | hybrid R@1/5/10 | index size | 8k ingest |
-|---|---|---|---|---|---|---|---|
-| SigLIP 2 base | 768 | 7.7 / 10.2 ms | 14.4 ms | **55.2% / 79.0% / 86.4%** | **56.0% / 79.1% / 86.3%** | 197 MB | (shipped) |
-| Qwen3-VL-Embedding-2B | 2048 | 39.6 / 57.3 ms | 285.6 ms | 50.2% / 75.0% / 83.4% | 51.1% / 75.3% / 83.9% | 394 MB | 27 + 9 min |
-
-The honest reading: **on this benchmark, SigLIP 2 wins** — about five points of
-R@1 and ~5× the encode speed. Qwen3-VL remains the configured preferred
-provider as a product decision (a multimodal embedding stack behind the same
-seam), the UI names whichever is active, and one line restores the
-measured-better ranking: `CVDE_EMBED_PROVIDER=siglip2`. One caveat worth
-knowing: the hubness constants were tuned in the SigLIP space and are applied
-as-is in both — untuned in Qwen's; whether tuning closes any of the gap is
-unmeasured.
-
-## Configuration
-
-Everything is environment variables, and [`.env.example`](.env.example) lists
-every one the code reads with its default, what it changes, and the
-model-versus-index warning that matters most. Nothing auto-loads that file:
-`app/config.py` reads the process environment, so export what you need or pass
-the file to `uvicorn --env-file`.
-
-The ones worth knowing before changing anything: `CVDE_DATA_DIR` (where every
-generated artifact lives), `CVDE_EMBED_MODEL` (must be identical for indexing and
-for serving), `CVDE_SEARCH_DEPTH` (the 300-row ranking horizon), `CVDE_RRF_K`
-(the fusion constant, reported with every fused response) and
-`CVDE_HUBNESS_BETA` (0 restores the plain cosine ranking exactly).
+Every caption carries its agreement score. Neighbours below the corpus-derived
+similarity floor (the measured 10th percentile of nearest-neighbour cosine in
+the active index; `?min_sim=` overrides) grey out rather than posing as a
+class — and when nothing clears it, the page says "possible coverage gap"
+instead of padding. A sample reached from a search says *why* it surfaced.
+
+### Compare two frames
+
+![Compare canvas: synchronized zoom, shared/different panel](docs/screenshots/14-compare.png)
+
+`/compare` puts two samples under one loupe — synchronized zoom and pan, a
+counted shared/different panel, and manual rectangle regions (drawn by you, no
+segmentation model) that can be saved as annotations or cropped into an
+image search. Source images are never modified.
+
+### Curate into albums, and let them leave
+
+![An album's header: editable details and the measured analysis panel](docs/screenshots/15-album.png)
+![The Share menu: copy link, email, Teams compose, downloads — everything local](docs/screenshots/16-share.png)
+
+Albums are first-class ordered collections (provenance `manual` | `tag` —
+converting a tag is explicit and keeps the tag). Drag cards onto the shelf —
+every drop offers an Undo that removes exactly what the drop added — reorder
+by drag or arrow keys, set a cover, edit the summary where you read it. The
+Analyze panel counts what members share and where they split, and computes
+coherence and outliers from the active index; a summary draft from the local
+chat model is generated only on request, edited by you, saved only by you.
+Share stays local-first: copy the URL, compose an email or Teams message
+(nothing is uploaded), or download the slice as JSON/CSV/JSONL with a
+manifest that records the query, model and embedding fingerprint that
+produced it.
+
+### Ask an assistant that shows its work
+
+![Assistant conversation with agent trace and rendered blocks](docs/screenshots/11-assistant.png)
+
+An optional LangGraph orchestration over local Ollama: an orchestrator routes
+to retrieval/insights specialists, a synthesizer quality-gates the answer, and
+the per-answer agent/tool trace is shown. Agents call the same service
+functions as the REST API — retrieval stays deterministic. The assistant's one
+mutation is a **proposal**: tagging waits for your click, and conversations
+persist locally with rename/reopen/delete.
+
+![Command palette over every route and action](docs/screenshots/10-palette.png)
+![The front door, with the rail's local-models card](docs/screenshots/17-models.png)
+
+⌘K reaches everything; the rail's models card says which retrieval provider,
+assistant and enrichment model are real, live and local right now — with the
+named reason when one is missing.
+
+### Let other agents in, read-only
+
+A local [MCP server](docs/MCP.md) at `POST /mcp` exposes six strictly
+read-only tools (search, sample inspection, similar images, dataset stats,
+caption audit, album inspection) over the same service layer — any local MCP
+client, LangGraph included, can investigate the corpus and cannot curate it.
 
 ## Architecture
 
-One FastAPI process, one SQLite file, one directory of images, and a React
-frontend whose search and filter state lives in the URL (the assistant
-transcript — conversation, not view state — persists in localStorage). A
-request does SQLite lookups plus at most one text-encoder forward pass;
-everything heavy is precomputed by idempotent batch CLIs.
+One FastAPI process, one SQLite file (WAL), embeddings as `.npy`, images on
+disk; a React 18 + TypeScript frontend whose search and filter state lives in
+the URL (an investigation is a link). Heavy work happens in idempotent batch
+CLIs (`ingest`, `analyze`, `enrich`); a request does SQLite lookups plus at
+most one text-encoder forward pass. Retrieval is an exact NumPy cosine scan —
+measured at ~0.2 ms against the 7–8 ms encode it waits behind, with the ANN
+crossover (~400k vectors) and the seam it would slot into documented rather
+than built. Optional capabilities degrade with a named reason, never a 500.
+
+The deeper documents: [ARCHITECTURE](docs/ARCHITECTURE.md) (topology, seams,
+scale path) · [TECHNICAL](docs/TECHNICAL.md) (schema, query plans,
+measurements) · [DESIGN](docs/DESIGN.md) (decisions and trade-offs) ·
+[TESTING](docs/TESTING.md) · [AGENTS](docs/AGENTS.md) ·
+[CAPABILITIES](docs/CAPABILITIES.md) (generated; CI fails if it drifts) ·
+[MCP](docs/MCP.md) · [DEPLOY](docs/DEPLOY.md) · [DEMO](docs/DEMO.md).
 
 ```
-frontend/                 React 18 + TypeScript + Vite
-  src/pages/              Gallery · Sample · Compare · Map · Stats · Quality · Benchmark · Assistant
-  src/components/         FilterBar · ImageCard · canvas ScatterPlot · CommandPalette (⌘K)
-  src/components/blocks/  one renderer per visualization kind + an exhaustive registry
-  src/lib/viz.ts          the only source of colour and axis tokens
-
-backend/                  FastAPI + SQLite
-  app/api/                samples · search · stats · map · tags · views · describe
-                          attributes · qa · qa_run · eval · leakage · admin · chat · albums
-                          activity · annotations   (export is an endpoint in samples)
-  app/datasets/           adapter interface + the Flickr8k adapter (pluggable)
-  app/ml/                 SigLIP 2 embedder · exact index · hubness · PRISM · UMAP · labels
-  app/agent/              registry · graph (parallel orchestration) · blocks · tools
-  app/qa/                 flow registry · browser runner · deck
-  app/ingest.py           download → store → index → embed → project
-  app/analyze.py          caption embeddings · agreement · attributes · difficulty axes
-  data/                   images · thumbs · explorer.db · embeddings · cache · qa · reports
-                          (all gitignored; nothing generated is committed)
+frontend/src/
+  pages/          Gallery · Sample · Compare · Map · Stats · Quality · Benchmark · Assistant
+  components/     rail, cards, album shelf/header, share menu, render blocks
+  api/            typed client — the only fetch layer
+backend/app/
+  api/            17 routers over one service layer (run_search is the one ranking impl)
+  ml/             providers (SigLIP 2 / Qwen3-VL) · exact index · hubness correction
+  agent/          LangGraph graph, tools, render-block contract
+  qa/             flow registry + real-Chrome runner (one definition, three consumers)
+  ingest/analyze/enrich    idempotent batch CLIs
+docker/ + docker-compose.yml    the container path
+scripts/        benchmarks, screenshots, capabilities/link checks
 ```
 
-The reasoning — a rendered topology diagram, the degradation table, how model and
-index consistency is enforced, how the splits stay apart, and the production scale
-path — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+## Test evidence
 
-## Further documentation
+```bash
+cd backend && pytest                  # 340 passed (2026-07-28)
+cd frontend && npx tsc --noEmit && npm run build
+cd backend && python ../scripts/ui_smoke.py   # real-Chrome sweep, 17 workflows
+```
 
-| Document | What is in it |
-| --- | --- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | runtime topology, seams, degradation boundaries, scale path |
-| [docs/TECHNICAL.md](docs/TECHNICAL.md) | schema, the real SQL with query plans, retrieval maths, frontend, measured performance and the ceilings it will hit |
-| [docs/DESIGN.md](docs/DESIGN.md) | who the user is, what was deliberately not built, and the trade-offs accepted |
-| [docs/CAPABILITIES.md](docs/CAPABILITIES.md) | generated inventory: every view, endpoint, agent tool and tested workflow |
-| [docs/TESTING.md](docs/TESTING.md) | what each test tier covers, what CI cannot see, and the known gaps |
-| [docs/PRISM.md](docs/PRISM.md) | the speaker-model method, its pre-registered predictions, and the results that refuted them |
-| [docs/PRISM.md](docs/PRISM.md) | the retrieval-accuracy research programme: ranked falsifiable hypotheses with noise floors and pool honesty, and the method this project proposes |
-| [docs/AGENTS.md](docs/AGENTS.md) | agent orchestration, the render-block contract, the self-QA sweep |
-| [docs/DEMO.md](docs/DEMO.md) | an eight-minute walkthrough |
-| [docs/screenshots/](docs/screenshots/) | one image per view |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | the six checks a change has to pass, and the conventions that are load-bearing |
-| [SECURITY.md](SECURITY.md) | the security model of a local single-user tool |
+The last full sweep at this commit: **104/104 checks across 17/17 workflows**
+(run id in `backend/data/qa/`). Re-run rather than quote — the registry grows,
+and every number above is only true of the day it was measured. CI runs the
+light install (no torch/langgraph — those modules skip), ruff, tsc, the build,
+the link check and the capabilities contract.
+
+## Honest limitations
+
+- Qwen3-VL underperforms SigLIP 2 on this benchmark (table above); the hubness
+  constants were tuned in the SigLIP space and applied untuned in Qwen's —
+  whether tuning closes any of the gap is unmeasured.
+- The composed (reference-steered) ranking is unmeasured — the benchmark
+  covers the text modes only; its blend weight is chosen, not tuned, and the
+  code says so.
+- The keyword benchmark row is flattered by construction (query captions are
+  indexed); the benchmark page states this where the number appears.
+- The assistant needs Ollama and a ~5 GB model; agent answers arrive after the
+  full orchestration round rather than streaming.
+- MCP is stateless JSON (no SSE streaming, no sessions); it binds to the same
+  local server and adds no authentication — a local, single-user tool by the
+  assignment's constraint.
+- In-container inference is CPU-only and slower than the host path
+  ([docs/DEPLOY.md](docs/DEPLOY.md) states expectations).
+- The dataset copy itself is imperfect and the stats page says how (missing
+  ~90 images vs the original distribution, undocumented split assignments, no
+  upstream license).
+
+## Configuration
+
+Everything is environment variables; [.env.example](.env.example) lists each
+one with its default and effect. The ones that matter first:
+`CVDE_DATA_DIR`, `CVDE_EMBED_PROVIDER` (`siglip2` default | `qwen3_vl`),
+`CVDE_EMBED_MODEL`, `CVDE_OLLAMA_URL`, `CVDE_CHAT_MODEL`, `CVDE_VLM_MODEL`.
