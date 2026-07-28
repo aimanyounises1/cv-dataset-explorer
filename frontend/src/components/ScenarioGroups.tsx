@@ -61,9 +61,14 @@ export default function ScenarioGroups({
     <section className="groups-panel" aria-label="Grouped exploration">
       <div className="groups-head">
         <span className="eyebrow">Proposed groups</span>
+        {/* Says what was grouped, not what is visible. The server clusters the
+            ranking to its own depth, so a group can be larger than the page —
+            claiming "the results on screen" while showing a group of 118 over
+            60 rendered cards was the panel contradicting itself. */}
         <span className="groups-note">
-          Proposals over the {resultCount}{hasMore ? "+" : ""} results on
-          screen{answer?.basis ? ` · ${answer.basis}` : ""} · nothing is
+          Proposals over this ranking, deeper than the {resultCount}
+          {hasMore ? "+" : ""} shown
+          {answer?.basis ? ` · ${answer.basis}` : ""} · nothing is
           kept until you save a group as an album
         </span>
         <button className="link-btn groups-back" onClick={onBack}>

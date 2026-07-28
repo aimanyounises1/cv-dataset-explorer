@@ -35,6 +35,12 @@ const GROUPS: Group[] = [
         hint: "Search and filter the corpus" },
       { to: "/map", label: "Embedding map",
         hint: "Lasso a region of embedding space" },
+      // Reachable by name, not only by picking two cards. It is the only place
+      // a region can be saved as an annotation, and a destination you can get
+      // to solely by a side effect of another screen is one most people never
+      // find. It opens empty and says how to fill itself.
+      { to: "/compare", label: "Compare two",
+        hint: "Two frames under one loupe: synced zoom, shared/different, regions" },
     ],
   },
   {

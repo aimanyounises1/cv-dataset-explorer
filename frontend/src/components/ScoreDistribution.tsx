@@ -142,7 +142,9 @@ export default function ScoreDistribution({ scores, basis, floor, threshold, onT
             + "(the 10th percentile of every image's nearest-neighbour cosine), "
             + "and these scores are cos* — that cosine minus a query-bank hubness "
             + "penalty. Same units, different quantity, so the two do not belong "
-            + "on one axis. Switch to a raw-cosine ranking to see the floor."
+            + "on one axis. The floor is drawn when the active index ranks "
+            + "without that penalty — a property of the index, not a setting "
+            + "here."
           : floor === undefined
           ? "Reading this index's measured similarity floor…"
           : floor == null
