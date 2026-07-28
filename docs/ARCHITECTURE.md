@@ -23,12 +23,11 @@ flowchart TB
     EM["Embedder: SigLIP 2 text/image towers<br/>MPS · CUDA · CPU, inference serialized by a lock"]
     IX["EmbeddingIndex: exact cosine, 8,000 x 768 float32<br/>candidate mask applied before top-k"]
     HB["Hubness penalty: per-image scalar from a held-out caption bank"]
-    PR["PrismIndex: trained mu / log-sigma speaker models — boosted mode"]
   end
 
   subgraph st["Local state — all of it under backend/data, gitignored"]
     DB[("SQLite in WAL mode<br/>samples · captions · FTS5 porter · tags · attributes · axes · saved_views<br/>albums · album_items · annotations · activity_events")]
-    NP[["embeddings/*.npy — image, caption, PRISM mu and log-sigma, hubness penalty"]]
+    NP[["embeddings/*.npy — image, caption, hubness penalty"]]
     IM[["images/ and thumbs/ on disk, served read-only under /media"]]
     CA[["cache/ — benchmark results, keyed by protocol version and artifact stamps"]]
   end
@@ -36,7 +35,6 @@ flowchart TB
   subgraph bt["Batch CLIs — idempotent, re-runnable, never on the request path"]
     IG["app.ingest: download → store → thumbnail → FTS → embed → UMAP"]
     AN["app.analyze: caption embeddings · agreement · attributes · difficulty axes"]
-    TP["app.train_prism: torch, offline, writes mu and log-sigma"]
     EN["app.enrich: optional VLM tags through Ollama"]
   end
 
@@ -51,8 +49,6 @@ flowchart TB
   SV -.-> EM
   IX --> NP
   IX -.->|"positionally aligned, invalidated together"| HB
-  SV -.->|"absent: falls back to semantic"| PR
-  PR --> NP
   AG -->|"calls the same service functions, never the DB"| SV
   QA -.->|"drives the real UI in a browser"| UI
   IG --> DB
@@ -60,7 +56,6 @@ flowchart TB
   IG --> IM
   AN --> DB
   AN --> NP
-  TP --> NP
   EN --> DB
 ```
 
@@ -75,10 +70,13 @@ over the same service layer: no new processes, no schema migrations, and the
 degradation rule below applies to each of them.
 
 **Retrieval providers.** One active provider supplies both the query encoder
-and the vector index: `qwen3_vl` (Qwen3-VL-Embedding-2B, in-process through
-sentence-transformers — Ollama serves language models only and cannot host it)
-is preferred, `siglip2` is the automatic fallback, and every step down the
-chain carries a named reason that the status API and the rail surface. Each
+and the vector index: `siglip2` is the default because it measures better on
+this corpus's own benchmark (R@1 55.2% vs 50.2%, ~5x the encode speed —
+parameter count is not quality), and `qwen3_vl` (Qwen3-VL-Embedding-2B,
+in-process through sentence-transformers — Ollama serves language models only
+and cannot host it) is the explicit opt-in alternative behind the same seam.
+Every step down the resolution chain carries a named reason that the status
+API and the rail surface. Each
 provider owns its index directory with a manifest (model id, measured
 dimension, prompt version, similarity floor), so two embedding spaces can
 never mix; fingerprints, saved-view provenance, the hubness penalty and the
@@ -91,7 +89,7 @@ SigLIP-derived signals and the docs say so.
 
 A request does SQLite lookups plus, at most, one text-encoder forward pass.
 Everything else -- embeddings, the UMAP projection, clusters, thumbnails,
-agreement scores, attributes, difficulty axes, PRISM heads -- is precomputed by
+agreement scores, attributes, difficulty axes -- is precomputed by
 a batch CLI and read as an artifact.
 
 Endpoints are deliberately sync `def`. FastAPI runs them on a threadpool and
@@ -129,10 +127,9 @@ under the same label.
 
 | Layer | Probe | Behaviour when absent |
 | --- | --- | --- |
-| Preferred retrieval provider (qwen3_vl) | provider probe: stack imports, cached weights, index manifest | falls back to SigLIP 2 with the named reason and the rerun command; the flat SigLIP index is never touched |
+| Opt-in retrieval provider (qwen3_vl) | provider probe: stack imports, cached weights, index manifest | falls back to SigLIP 2 with the named reason and the rerun command; the flat SigLIP index is never touched |
 | Semantic and hybrid search | `get_index()` and `get_embedder()` | ranks by BM25 instead, sets `degraded`, `mode_used: keyword`, and a message naming the command to run |
 | Composed search (`?like=`/`?unlike=`) | index + encoder presence | ranks the steering text by keyword instead, says so, and reports the references as ignored |
-| Boosted search | `get_prism_index(index)` | falls back to semantic, names `python -m app.train_prism`, and publishes a cosine basis rather than `prism_ll` |
 | Embedding map, duplicates, similar images | index presence | the view states what to run |
 | Caption QA, attributes, difficulty axes | analysis columns | the view states what to run |
 | Retrieval benchmark | image + caption indexes | `available: false` with the command; with no embedder it falls back to stored caption vectors and says the rows understate the shipped path |
@@ -152,14 +149,8 @@ produced it, so each consumer validates rather than assumes.
   outlive it: `invalidate_index()` invalidates the penalty in the same call, and
   `EmbeddingIndex.search` raises if a penalty vector does not match the score
   vector it would be subtracted from.
-- PRISM artifacts are validated against the live index when they load. The id
-  set must match the corpus, and the `mu` dimension must match the index
-  dimension -- after a backbone swap the ids are unchanged and only the
-  dimension betrays that those vectors no longer live where the queries do.
-  Either mismatch returns `None`, which degrades the request instead of raising
-  a shape error on the first boosted query.
 - The benchmark cache key carries the protocol version, the query sample size,
-  `RRF_K`, `SEARCH_DEPTH`, the hubness constants, the PRISM artifact presence and
+  `RRF_K`, `SEARCH_DEPTH`, the hubness constants and
   the mtimes of the embeddings and the database -- so a cached row computed under
   a different definition can never be served as if it were current.
 - `CVDE_EMBED_MODEL` must be identical for indexing and for serving, because the
@@ -172,11 +163,6 @@ produced it, so each consumer validates rather than assumes.
 The split is a column on `samples`, and three separate things depend on keeping
 it honest.
 
-- **PRISM** trains on train-split captions only, and its epoch and WiSE-FT
-  interpolation are selected on validation. The paired rows the Benchmark page
-  adds therefore draw a dedicated **test-split** query sample: grading it on the
-  main sample, which is ~75% train captions, would score the model on its own
-  training text.
 - **The hubness bank** is drawn from captions, and those caption ids are removed
   from the benchmark sample, so no query is one of the captions that built the
   correction being measured.
@@ -213,7 +199,7 @@ inside each ranking, never after a LIMIT.**
    it.
 6. Each card carries the path that retrieved it and its absolute rank, and the
    response names the basis of its score: `cosine`, `cosine_adj` when the hubness
-   penalty re-ranked, `rrf` for a fused rank, `prism_ll` for a log-likelihood.
+   penalty re-ranked, `rrf` for a fused rank.
    These live on different scales and must never be read against each other.
 
 `/api/export` reuses `run_search`, so an exported slice is exactly the result set
@@ -229,7 +215,7 @@ images, database, embeddings or model weights.
 | --- | --- | --- |
 | `backend/data/explorer.db` | `app.ingest`, `app.analyze`, tag and view writes | every request |
 | `backend/data/images/`, `thumbs/` | `app.ingest` | `/media` static mounts |
-| `backend/data/embeddings/*.npy` | `app.ingest`, `app.analyze`, `app.train_prism`, `app.ml.hubness` | `EmbeddingIndex`, `PrismIndex`, hubness |
+| `backend/data/embeddings/*.npy` | `app.ingest`, `app.analyze`, `app.ml.hubness` | `EmbeddingIndex`, hubness |
 | `backend/data/cache/` | the benchmark and the hubness build | the benchmark, keyed as above |
 | `backend/data/qa/<run_id>/` | the self-QA sweep | `/media/qa` and `/api/qa/artifact` |
 | `backend/data/reports/` | assistant report generation | `/api/reports/{name}` |

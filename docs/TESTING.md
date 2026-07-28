@@ -54,10 +54,7 @@ wrong label rather than an exception.
 
 | Contract | Test |
 | --- | --- |
-| `boosted` degrades to semantic when no PRISM artifacts exist, and does not publish `prism_ll` for a cosine | `test_with_embeddings.py::test_boosted_degrades_to_semantic_without_trained_artifacts` |
-| `boosted` degrades all the way to keyword with no embeddings at all | `test_smoke.py::test_boosted_falls_all_the_way_back_to_keyword` |
 | semantic and hybrid degrade to keyword and say so | `test_smoke.py::test_hybrid_degrades_without_embeddings` |
-| PRISM artifacts from another corpus (id set) or another embedding space (dimension) refuse to rank instead of ranking wrongly | `test_prism.py::test_serving_cache_probes_validates_and_reloads` |
 | filters are applied inside the ranking, never after a LIMIT | `test_smoke.py::test_keyword_search_respects_filters_in_sql`, `::test_axis_filter_is_applied_inside_the_ranking_not_after_it`, `test_with_embeddings.py::test_semantic_search_respects_filters` |
 | paging partitions one ranking and stops at the fusion horizon | `test_with_embeddings.py::test_search_pages_partition_the_ranking`, `test_smoke.py::test_paging_stops_at_the_ranking_horizon_instead_of_repeating` |
 | a mode that exposes no score publishes no score basis | `test_smoke.py::test_keyword_mode_publishes_no_score_basis` |
@@ -76,10 +73,7 @@ Sources: [../backend/tests/](../backend/tests/).
 
 ## Known gaps, stated rather than closed
 
-- **The PRISM paired benchmark rows draw only test-split captions.** That
-  isolation lives in `app/api/eval.py` and is visible on `/eval`; no unit test
-  pins it, because a fixture would need trained artifacts. It is the highest
-  value test still missing.
+
 - **No frontend unit tier.** A deliberate trade recorded in
   [TECHNICAL.md](TECHNICAL.md): for a UI this size the failures that matter are
   "the view rendered empty" and "the control stopped filtering", which the

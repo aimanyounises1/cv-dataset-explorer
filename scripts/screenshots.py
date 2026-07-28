@@ -182,7 +182,66 @@ SHOTS = [
     # the divider, greyed context below it. The grid sits below the inspector,
     # so the shot scrolls to it — a figure about the floor must show the floor.
     ("13-floor.png", "/samples/76", 3500, _show_floor),
+    # The compare canvas: two frames under one loupe, shared/different panel.
+    ("14-compare.png", "/compare?a=76&b=2259", 4000, None),
+    # A real album with its header open: editable details and the measured
+    # analysis panel. The action builds the album live (and main() deletes it
+    # after the run) so the figure never depends on leftover user data.
+    ("15-album.png", "/", 1500, None),   # action assigned below
+    ("16-share.png", "/", 1500, None),   # action assigned below
+    # The front door plus the rail's local-models card: which models are
+    # real, live and local — retrieval, assistant, enrichment.
+    ("17-models.png", "/", 2500, None),
 ]
+
+FIG_ALBUM = "fig-night-streets"
+
+
+def _album_id(page: Page) -> int:
+    """Create (or reuse) the figure album from a real search's top results."""
+    api = BASE.replace(":5173", ":8000")
+    for a in page.request.get(f"{api}/api/albums").json():
+        if a["name"] == FIG_ALBUM:
+            return a["id"]
+    hits = page.request.get(
+        f"{api}/api/search?q=a+crowded+street+at+night&mode=hybrid&top_k=8"
+    ).json()["items"]
+    album = page.request.post(f"{api}/api/albums",
+                              data={"name": FIG_ALBUM}).json()
+    page.request.post(f"{api}/api/albums/{album['id']}/items",
+                      data={"sample_ids": [h["id"] for h in hits]})
+    return album["id"]
+
+
+def _album_figure(page: Page) -> None:
+    aid = _album_id(page)
+    page.goto(f"{BASE}/?album={aid}", wait_until="domcontentloaded")
+    page.wait_for_selector(".album-header .ah-name")
+    page.click("button:has-text('Details & analysis')")
+    page.click("button:has-text('Analyze')")
+    page.wait_for_selector(".ah-measured")
+    page.wait_for_timeout(1500)
+
+
+def _share_figure(page: Page) -> None:
+    aid = _album_id(page)
+    page.goto(f"{BASE}/?album={aid}", wait_until="domcontentloaded")
+    page.wait_for_selector(".album-header .ah-name")
+    page.click("button:has-text('Share')")
+    page.wait_for_selector(".share-menu")
+    page.wait_for_timeout(600)
+
+
+def _cleanup_album(page: Page) -> None:
+    api = BASE.replace(":5173", ":8000")
+    for a in page.request.get(f"{api}/api/albums").json():
+        if a["name"] == FIG_ALBUM:
+            page.request.delete(f"{api}/api/albums/{a['id']}")
+
+
+SHOTS = [(n, u, s, {"15-album.png": _album_figure,
+                    "16-share.png": _share_figure}.get(n, a))
+         for n, u, s, a in SHOTS]
 
 
 def main() -> int:
@@ -224,6 +283,12 @@ def main() -> int:
                 failures.append(f"{name}: API errors {bad[:3]}")
                 print(f"    API ERRORS: {bad[:3]}")
 
+        # The figure album is scaffolding, not user data: it never survives
+        # the run that needed it.
+        try:
+            _cleanup_album(page)
+        except Exception as exc:                          # noqa: BLE001
+            failures.append(f"album cleanup: {exc}")
         browser.close()
 
     if failures:
