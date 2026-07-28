@@ -1,0 +1,93 @@
+# Containerised stack for the CV Dataset Explorer. The direct workflow in the
+# README (uvicorn + vite on the host) is unchanged and remains the reference;
+# this is the same application with its dependencies pinned into images.
+#
+#   docker compose up --build                    # API + UI
+#   docker compose --profile ollama up --build   # ... and a local Ollama
+#
+# The published ports match the host workflow on purpose — API on 8000, UI on
+# 5173 — so every URL in the README and docs/, and the host QA sweep with its
+# CVDE_QA_BASE_URL default, address this stack without being told about it.
+#
+# See docs/DEPLOY.md for first-run ingest, resource expectations, and what is
+# deliberately left outside the containers.
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    image: cvde-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Every piece of state the app owns: explorer.db, images, thumbs,
+      # embeddings, caches, QA artifacts, generated reports. Bound to the same
+      # directory the host workflow uses, so one ingest serves both and neither
+      # can see a different corpus than the other.
+      - ./backend/data:/data
+      # Model weights are not application state — they are a ~1.5 GB download
+      # that should survive `docker compose down` without landing in the
+      # corpus directory and without being fetched again on every rebuild.
+      - hf-cache:/opt/hf
+    environment:
+      CVDE_DATA_DIR: /data
+      # siglip2 | qwen3_vl | mock. The default matches the host default and is
+      # the provider that measures better on this corpus's own benchmark;
+      # qwen3_vl additionally needs backend/requirements-qwen.txt, which this
+      # image does not install (docs/DEPLOY.md says how).
+      CVDE_EMBED_PROVIDER: ${CVDE_EMBED_PROVIDER:-siglip2}
+      # Defaults to an Ollama already running on the host, which is the common
+      # case on a developer machine. Point it at the container instead with:
+      #   CVDE_OLLAMA_URL=http://ollama:11434 docker compose --profile ollama up
+      # Absent either, the assistant and VLM enrichment degrade with a message
+      # naming what to start — they do not fail the stack.
+      CVDE_OLLAMA_URL: ${CVDE_OLLAMA_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      # Resolves automatically on Docker Desktop; on a Linux host it does not
+      # exist unless mapped, and the host-Ollama default above would fail to
+      # resolve rather than degrade cleanly.
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      # Repeated from the image so `depends_on: service_healthy` below has a
+      # contract that survives someone running a differently built image here.
+      # 127.0.0.1, not localhost — see the note in docker/frontend.Dockerfile.
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/tags"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # Generous: the first request that touches retrieval loads SigLIP 2, and
+      # on a cold volume that download is the slow part, not the boot.
+      start_period: 60s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    image: cvde-frontend
+    ports:
+      # 5173 is the Vite dev port, kept so documented URLs stay correct.
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional. Off unless `--profile ollama` is passed, because the usual setup
+  # is an Ollama already running on the host with the models pulled — a second
+  # copy in a container would re-download several GB to no benefit.
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      # Named, not bound: pulled models are large and belong to Ollama, not to
+      # this repository's data directory.
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  ollama-models:
