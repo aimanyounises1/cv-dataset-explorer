@@ -288,6 +288,195 @@ def remove_item(album_id: PathId, sample_id: PathId,
     return {"ok": True}
 
 
+# -- album intelligence -------------------------------------------------------
+# Deliberately small and split by epistemic status: everything under "measured"
+# is counted or computed from stored data (attributes, tags, VLM tags, the
+# active provider's embeddings) and works with no model running; everything
+# under "generated" names its model and never happens without an explicit
+# request. The generated summary is never persisted here — the user edits it
+# and saves through PATCH, which is the approval.
+
+ANALYSIS_MEMBER_CAP = 2000       # pairwise cosine is O(n²); a cap this high is
+                                 # only reachable by a bulk-built album
+COMMON_SHARE = 0.6               # a signal a clear majority of members carries
+TAG_SHARE = 0.5
+
+
+def _analysis_signals(conn: sqlite3.Connection, ids: list[int]) -> tuple[list, list]:
+    """(common, different) — counted from stored rows, never generated.
+
+    Shares are over ALL members: a sample the zero-shot classifier abstained on
+    lowers the share rather than being quietly dropped from the denominator.
+    """
+    n = len(ids)
+    qmarks = ",".join("?" * n)
+    common: list[dict] = []
+    different: list[dict] = []
+    by_grp: dict[str, list[tuple[str, int]]] = {}
+    for r in conn.execute(
+            f"SELECT grp, label, COUNT(*) AS c FROM attributes "
+            f"WHERE sample_id IN ({qmarks}) GROUP BY grp, label "
+            f"ORDER BY c DESC, label", ids):
+        by_grp.setdefault(r["grp"], []).append((r["label"], r["c"]))
+    for grp in sorted(by_grp):
+        labels = by_grp[grp]
+        top_label, top_n = labels[0]
+        if top_n / n >= COMMON_SHARE:
+            common.append({"kind": "attribute", "grp": grp, "label": top_label,
+                           "share": round(top_n / n, 2)})
+        elif len(labels) > 1 and (top_n + labels[1][1]) / n >= 0.5:
+            different.append({"grp": grp, "top": [
+                {"label": lab, "share": round(c / n, 2)} for lab, c in labels[:2]]})
+    for kind, sql in (
+            ("tag", f"SELECT t.name AS label, COUNT(*) AS c FROM tags t "
+                    f"JOIN sample_tags st ON st.tag_id = t.id "
+                    f"WHERE st.sample_id IN ({qmarks}) GROUP BY t.name "
+                    f"ORDER BY c DESC, t.name"),
+            ("vlm_tag", f"SELECT tag AS label, COUNT(*) AS c FROM vlm_tags "
+                        f"WHERE sample_id IN ({qmarks}) GROUP BY tag "
+                        f"ORDER BY c DESC, tag")):
+        for r in conn.execute(sql, ids):
+            if r["c"] / n >= TAG_SHARE:
+                common.append({"kind": kind, "label": r["label"],
+                               "share": round(r["c"] / n, 2)})
+    return common, different
+
+
+def _summary_prompt(name: str, common: list, different: list,
+                    captions: list[str]) -> str:
+    parts = [f"You are summarizing a research album named {name!r} from an "
+             "image-caption dataset. Write 2-3 plain sentences: what the "
+             "images have in common, what varies, and anything a computer "
+             "vision researcher should look at. No preamble, no markdown."]
+    if common:
+        parts.append("Measured common signals: " + "; ".join(
+            f"{c['label']} ({int(c['share'] * 100)}%)" for c in common[:8]))
+    if different:
+        parts.append("Measured splits: " + "; ".join(
+            f"{d['grp']}: " + " vs ".join(t["label"] for t in d["top"])
+            for d in different[:4]))
+    if captions:
+        parts.append("Sample captions:\n" + "\n".join(f"- {c}" for c in captions))
+    return "\n\n".join(parts)
+
+
+@router.get("/albums/{album_id}/analysis")
+def album_analysis(album_id: PathId,
+                   conn: sqlite3.Connection = Depends(get_conn)):
+    import httpx
+
+    from .. import config
+    from ..ml.index import get_index
+
+    _album_row(conn, album_id)
+    ids = [r["sample_id"] for r in conn.execute(
+        "SELECT sample_id FROM album_items WHERE album_id = ? "
+        "ORDER BY position, sample_id", (album_id,))]
+    truncated = len(ids) > ANALYSIS_MEMBER_CAP
+    ids = ids[:ANALYSIS_MEMBER_CAP]
+    n = len(ids)
+
+    generated = {"available": False, "model": config.CHAT_MODEL, "summary": None,
+                 "message": f"Ollama is not running — `ollama serve` (and "
+                            f"`ollama pull {config.CHAT_MODEL}`) enables "
+                            "generated summaries."}
+    try:
+        httpx.get(f"{config.OLLAMA_URL}/api/tags", timeout=1.5).raise_for_status()
+        generated.update(available=True, message=None)
+    except Exception:
+        pass
+
+    measured: dict = {"score_basis": "cosine", "coherence": None,
+                      "common": [], "different": [], "outliers": [], "note": None}
+    out = {"album_id": album_id, "count": n, "truncated": truncated,
+           "measured": measured, "generated": generated}
+    if n == 0:
+        measured["note"] = "Empty album — add images to analyze."
+        return out
+
+    measured["common"], measured["different"] = _analysis_signals(conn, ids)
+    if not measured["common"] and not measured["different"]:
+        has_attrs = conn.execute("SELECT 1 FROM attributes LIMIT 1").fetchone()
+        if has_attrs is None:
+            measured["note"] = ("No attribute analysis in this corpus — run "
+                                "`python -m app.analyze` for richer signals.")
+
+    index = get_index()
+    vecs = None
+    if index is not None:
+        import numpy as np
+
+        found = [(i, index.vector_of(i)) for i in ids]
+        found = [(i, v) for i, v in found if v is not None]
+        if len(found) >= 2:
+            vecs = np.stack([v for _, v in found])
+            vec_ids = [i for i, _ in found]
+    if vecs is None:
+        measured["note"] = (measured["note"] or
+                            "No embeddings for these members — run "
+                            "`python -m app.ingest` to enable coherence and "
+                            "outliers.")
+        return out
+
+    import numpy as np
+
+    sims = vecs @ vecs.T
+    m = len(vecs)
+    measured["coherence"] = round(float((sims.sum() - m) / (m * (m - 1))), 3)
+    centroid = vecs.mean(axis=0)
+    centroid /= np.linalg.norm(centroid) or 1.0
+    to_center = vecs @ centroid
+    if m >= 4:
+        worst = np.argsort(to_center)[:3]
+        measured["outliers"] = [
+            {"id": int(vec_ids[i]), "score": round(float(to_center[i]), 3)}
+            for i in worst]
+    return out
+
+
+@router.post("/albums/{album_id}/analysis/summary")
+def album_summary_generate(album_id: PathId,
+                           conn: sqlite3.Connection = Depends(get_conn)):
+    """Generate a draft album summary with the local chat model, on explicit
+    request only. Grounded in captions and measured signals — no pixels; the
+    VLM's pixel knowledge arrives through its stored enrichment tags. Nothing
+    is persisted: the user edits the draft and saves via PATCH, which is the
+    approval boundary."""
+    import httpx
+
+    from .. import config
+
+    album = _album_row(conn, album_id)
+    ids = [r["sample_id"] for r in conn.execute(
+        "SELECT sample_id FROM album_items WHERE album_id = ? "
+        "ORDER BY position, sample_id LIMIT 12", (album_id,))]
+    if not ids:
+        raise HTTPException(400, "Empty album — nothing to summarize.")
+    common, different = _analysis_signals(conn, ids)
+    qmarks = ",".join("?" * len(ids))
+    captions = [r["text"] for r in conn.execute(
+        f"SELECT text FROM captions WHERE sample_id IN ({qmarks}) AND idx = 0 "
+        f"ORDER BY sample_id", ids)]
+    prompt = _summary_prompt(album["name"], common, different, captions)
+    try:
+        resp = httpx.post(
+            f"{config.OLLAMA_URL}/api/generate",
+            json={"model": config.CHAT_MODEL, "prompt": prompt, "stream": False,
+                  "options": {"temperature": 0.2}},
+            timeout=config.OLLAMA_TIMEOUT)
+        resp.raise_for_status()
+        text = (resp.json().get("response") or "").strip()
+    except Exception as exc:
+        raise HTTPException(
+            503, f"Ollama is not available for summary generation "
+                 f"({config.OLLAMA_URL}) — `ollama serve`, then "
+                 f"`ollama pull {config.CHAT_MODEL}`.") from exc
+    if not text:
+        raise HTTPException(502, "The model returned an empty summary.")
+    return {"summary": text, "model": config.CHAT_MODEL,
+            "based_on": "captions and measured signals — no pixels"}
+
+
 @router.put("/albums/{album_id}/items/order")
 def reorder_items(album_id: PathId,
                   sample_ids: list[BoundedId] = Body(..., embed=True),
