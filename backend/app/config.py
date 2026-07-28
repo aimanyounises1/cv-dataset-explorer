@@ -27,7 +27,7 @@ EMBED_BATCH_SIZE = int(os.environ.get("CVDE_EMBED_BATCH", "32"))
 # in-process through sentence-transformers (Ollama serves the language models
 # only — it cannot host an image-embedding model), falling back to siglip2
 # with a visible, named reason whenever its stack, weights or index are
-# missing. "mock" is the deterministic test provider.
+# missing.
 EMBED_PROVIDER = os.environ.get("CVDE_EMBED_PROVIDER", "siglip2")
 QWEN_EMBED_MODEL = os.environ.get("CVDE_QWEN_EMBED_MODEL", "Qwen/Qwen3-VL-Embedding-2B")
 QWEN_EMBED_BATCH = int(os.environ.get("CVDE_QWEN_EMBED_BATCH", "8"))

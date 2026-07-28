@@ -1,6 +1,6 @@
 """The local MCP server at POST /mcp: JSON-RPC handshake, tool listing,
-invocation through the same service layer as the REST API, and the mutation
-boundary — propose_tag returns a token and provably writes nothing.
+invocation through the same service layer as the REST API, and the read-only
+guarantee — every tool is annotated read-only and none can mutate.
 
     cd backend && pytest tests/test_mcp.py
 """
@@ -67,12 +67,12 @@ def test_tools_list_names_schemas_and_readonly_hints(ctx):
     tools = rpc(client, "tools/list").json()["result"]["tools"]
     byname = {t["name"]: t for t in tools}
     assert set(byname) == {"search_images", "get_sample", "find_similar",
-                           "dataset_stats", "audit_captions", "get_album",
-                           "propose_tag"}
+                           "dataset_stats", "audit_captions", "get_album"}
     for t in tools:
         assert t["inputSchema"]["type"] == "object"
-    assert byname["propose_tag"]["annotations"]["readOnlyHint"] is False
-    assert byname["search_images"]["annotations"]["readOnlyHint"] is True
+        # Strictly read-only: a tool without this annotation set to True is a
+        # regression, not a feature.
+        assert t["annotations"]["readOnlyHint"] is True, t["name"]
 
 
 def test_search_tool_uses_the_real_service_layer(ctx):
@@ -97,31 +97,14 @@ def test_get_sample_and_audit(ctx):
     assert audit["captions"][0]["agreement"] <= audit["captions"][-1]["agreement"]
 
 
-def test_propose_tag_returns_token_and_writes_nothing(ctx):
+def test_removed_propose_tag_stays_removed(ctx):
+    """The MCP surface is strictly read-only by mandate: the old mutating
+    intent must be an unknown tool, not a quiet survivor."""
     client, sids = ctx
     r = rpc(client, "tools/call",
             {"name": "propose_tag",
-             "arguments": {"sample_ids": [sids[0], 999_999_999],
-                           "tag": "MCP-Probe", "reason": "test"}})
-    payload = json.loads(r.json()["result"]["content"][0]["text"])
-    assert payload["proposal_token"].startswith("mcp-")
-    assert payload["status"] == "awaiting-approval"
-    assert payload["candidates"] == 1
-    conn = db.connect()
-    try:
-        assert conn.execute(
-            "SELECT COUNT(*) FROM sample_tags WHERE sample_id = ?",
-            (sids[0],)).fetchone()[0] == 0, "a proposal must write no tags"
-        assert conn.execute(
-            "SELECT COUNT(*) FROM tags WHERE name = 'mcp-probe'"
-        ).fetchone()[0] == 0
-        row = conn.execute(
-            "SELECT payload FROM activity_events WHERE kind = 'mcp_tag_proposal' "
-            "ORDER BY id DESC LIMIT 1").fetchone()
-        assert row is not None
-        assert json.loads(row["payload"])["token"] == payload["proposal_token"]
-    finally:
-        conn.close()
+             "arguments": {"sample_ids": [sids[0]], "tag": "mcp-probe"}})
+    assert r.json()["error"]["code"] == -32602
 
 
 def test_protocol_errors(ctx):
@@ -138,4 +121,5 @@ def test_protocol_errors(ctx):
 def test_get_mcp_is_a_signpost(ctx):
     client, _ = ctx
     info = client.get("/mcp").json()
-    assert info["endpoint"] == "POST /mcp" and "propose_tag" in info["tools"]
+    assert info["endpoint"] == "POST /mcp"
+    assert "search_images" in info["tools"] and "propose_tag" not in info["tools"]

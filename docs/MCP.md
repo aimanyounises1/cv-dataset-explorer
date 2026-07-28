@@ -17,14 +17,12 @@ assistant use, so every client sees identical answers.
 | `dataset_stats` | corpus counts, splits, active retrieval provider + fallback reason | — |
 | `audit_captions` | lowest image–caption agreement first (ingest-time SigLIP scores) | — |
 | `get_album` | album metadata + ordered member ids | — |
-| `propose_tag` | validates ids | **nothing** — returns a proposal token |
 
-**The mutation boundary:** `propose_tag` never touches curation data. It
-records the proposal in the activity trail (visible in the app's History
-drawer) and returns `{proposal_token, status: "awaiting-approval"}`. A tag is
-applied only when a human does it inside the app — through the assistant's
-approval flow or manual tagging. An MCP client cannot curate this dataset by
-itself, which is the same rule the in-app assistant lives under.
+**Strictly read-only.** Every tool carries `readOnlyHint: true` and none can
+mutate anything: an MCP client can search, inspect and audit this dataset,
+never curate it. Curation — tagging, albums, annotations — is a human act
+performed inside the app, where the assistant's own proposals also wait for a
+click.
 
 ## Handshake, by hand
 
@@ -51,7 +49,7 @@ Any MCP client that speaks Streamable HTTP connects with just the URL:
   `http://localhost:8000/mcp`.
 - **LangGraph / LangChain**: `pip install langchain-mcp-adapters`, then
   `MultiServerMCPClient({"cvde": {"transport": "streamable_http", "url":
-  "http://localhost:8000/mcp"}})` yields the seven tools as LangChain tools.
+  "http://localhost:8000/mcp"}})` yields the six tools as LangChain tools.
   (The in-app assistant does NOT go through MCP — it calls the service layer
   directly; MCP is the door for agents living outside this process.)
 - **Anything else**: POST the three requests above; notifications (requests
@@ -66,4 +64,4 @@ a local, single-user tool by the assignment's own constraint, and exposing it
 beyond localhost is the operator's decision, not the default.
 
 Tests: `backend/tests/test_mcp.py` (handshake, listing, invocation through the
-real search stack, protocol errors, and the propose-writes-nothing guarantee).
+real search stack, protocol errors, and the strictly-read-only guarantee).
