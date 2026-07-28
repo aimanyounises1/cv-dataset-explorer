@@ -1,4 +1,5 @@
 import { AXES, Axis } from "../api/types";
+import { DualRange } from "./controls";
 
 /** What each axis means, in the user's terms rather than the pipeline's. The
  * low→high wording matters: every axis runs easy→hard, so "higher is harder"
@@ -68,18 +69,23 @@ export default function AxisFilters({ value, onChange }: Props) {
                 <span className="axis-scale">{meta.low} → {meta.high}</span>
               </label>
               <div className="axis-sliders">
-                <input type="range" min={0} max={10} value={min}
-                       aria-label={`${meta.label} minimum`}
-                       onChange={(e) => {
-                         const v = Number(e.target.value);
-                         set(axis, v, Math.max(v, max) === 10 && hi == null ? null : Math.max(v, max));
-                       }} />
-                <input type="range" min={0} max={10} value={max}
-                       aria-label={`${meta.label} maximum`}
-                       onChange={(e) => {
-                         const v = Number(e.target.value);
-                         set(axis, Math.min(v, min) === 0 && lo == null ? null : Math.min(v, min), v);
-                       }} />
+                {/* One track, two thumbs: the filter is a window on the axis
+                    and now looks like one. The bound rules are unchanged — a
+                    thumb parked at its own end while the other bound was never
+                    chosen still means "unbounded", so the URL stays free of
+                    values the user did not pick. */}
+                <DualRange
+                  min={0} max={10} lo={min} hi={max}
+                  labelLo={`${meta.label} minimum`}
+                  labelHi={`${meta.label} maximum`}
+                  onInput={(which, v) => {
+                    if (which === "lo") {
+                      set(axis, v, Math.max(v, max) === 10 && hi == null ? null : Math.max(v, max));
+                    } else {
+                      set(axis, Math.min(v, min) === 0 && lo == null ? null : Math.min(v, min), v);
+                    }
+                  }}
+                />
               </div>
               <span className={`axis-readout ${value[axis] ? "on" : ""}`}>
                 {value[axis] ? `${min}–${max}` : "any"}

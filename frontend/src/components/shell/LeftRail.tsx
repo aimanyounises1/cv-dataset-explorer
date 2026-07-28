@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
 import type { ActivityEvent, ChatStatus, StatsOverview } from "../../api/types";
@@ -226,7 +227,12 @@ export default function LeftRail() {
         <ModelsCard overview={overview} chat={chat} />
       </div>
 
-      {histOpen && <HistoryDrawer onClose={() => setHistOpen(false)} />}
+      {/* Portalled to <body>: the rail is a stacking context (sticky on
+          desktop, masked on the phone strip), so as a child of this <nav> the
+          drawer's z-index only ranked it against its rail siblings — the page
+          painted over it and the backdrop never dimmed anything. */}
+      {histOpen && createPortal(
+        <HistoryDrawer onClose={() => setHistOpen(false)} />, document.body)}
     </nav>
   );
 }

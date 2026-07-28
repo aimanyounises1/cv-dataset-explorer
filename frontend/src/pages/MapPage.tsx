@@ -40,6 +40,11 @@ export default function MapPage() {
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
+  // Counted from the data, not configured: k is the backend's choice and this
+  // page should report what arrived, not what was asked for.
+  const clusterCount = useMemo(
+    () => new Set((points ?? []).map((p) => p.cluster)).size, [points]);
+
   // Rebuilt only when the data or the dimension changes: the canvas redraws on
   // every pan and zoom, so the scale must not be reconstructed per frame.
   const { colorOf, ramp } = useMemo(
@@ -115,10 +120,39 @@ export default function MapPage() {
         </div>
       </div>
 
+      {/* How to read and use the picture, before the picture: one line per
+          mark. The full honesty panel stays below the canvas — this strip is
+          the part a first-time reader needs before their first click. */}
+      <div className="map-key" aria-label="How to read the map">
+        <span className="map-key-item">
+          <i className="legend-dot" style={{ background: "var(--accent)" }} /> one
+          image — click opens its sample page
+        </span>
+        <span className="map-key-item">
+          <span className="map-key-kbd">shift+drag</span> lasso a region into a
+          working set
+        </span>
+        <span className="map-key-item">
+          isolated dots are coverage-gap candidates — confirm with the sample
+          page's exact neighbours
+        </span>
+      </div>
+
       <div className="controls" style={{ marginBottom: 10 }}>
         <div className="meta-line" style={{ marginBottom: 0 }}>
           {points.length.toLocaleString()} images in embedding space
+          {clusterCount > 0 && (
+            <> · {clusterCount} clusters (k-means in the original 768-D space)</>
+          )}
         </div>
+        {/* The action row keeps its place in both states: what a lasso will do
+            before one exists, what this lasso can do once it does. */}
+        {selected.length === 0 && (
+          <span className="map-actions-hint">
+            Lasso a region to act on it — open the slice in the gallery, or tag
+            it in bulk.
+          </span>
+        )}
         {selected.length > 0 && (
           <form className="selection-bar" onSubmit={(e) => void bulkTag(e)}>
             <span className="pill accent">{selected.length} selected</span>
@@ -162,13 +196,23 @@ export default function MapPage() {
           </span>
         )}
       </div>
+      <ScatterPlot
+        points={points}
+        onSelect={(id) => navigate(`/samples/${id}`)}
+        onSelectBox={(ids) => { setToast(null); setSelected(ids); }}
+        selectedIds={selectedSet}
+        colorOf={colorOf}
+      />
+
       {/* A 2-D projection of a 768-D space is a way to get around the dataset,
           not a measurement of it: most of a point's true nearest neighbours are
           not its neighbours here, and neither cluster size nor the gap between
           clusters carries meaning. Saying so in-product is the difference
           between a navigation aid and a misleading chart. */}
       {/* Open by default: a caveat you have to discover does not prevent the
-          misreading it exists to prevent. */}
+          misreading it exists to prevent. It sits after the canvas because the
+          map is the page's subject — the key strip above carries the one-line
+          version a reader needs before their first click. */}
       <details className="caveat" open>
         <summary>
           Reading this map: it is a navigation surface, not an analysis surface
@@ -206,14 +250,6 @@ export default function MapPage() {
           (shift+drag) and inspect the actual images.
         </p>
       </details>
-
-      <ScatterPlot
-        points={points}
-        onSelect={(id) => navigate(`/samples/${id}`)}
-        onSelectBox={(ids) => { setToast(null); setSelected(ids); }}
-        selectedIds={selectedSet}
-        colorOf={colorOf}
-      />
     </div>
   );
 }

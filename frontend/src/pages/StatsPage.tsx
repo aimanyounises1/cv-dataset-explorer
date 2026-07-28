@@ -74,6 +74,48 @@ export default function StatsPage() {
         </div>
       )}
 
+      {/* Integrity findings lead the page: whether the splits can be trusted
+          changes how every chart below is read, so the reviewer meets the
+          cross-split pairs before the word-frequency bars, not after. */}
+      <div className="section-title">Train/test leakage</div>
+      <p className="meta-line">
+        A held-out image with a near-duplicate in training means reported
+        accuracy on it is partly memorisation. Move the threshold and look at
+        the pairs — “near-duplicate” is a cut on a cosine, not a fact.
+      </p>
+      <div className="panel"><LeakagePanel /></div>
+
+      <div className="section-title">
+        Near-duplicate pairs {dups.length > 0 && `(${dups.length})`}
+      </div>
+      {dups.length === 0 ? (
+        <div className="empty">
+          {overview.embeddings_available
+            ? "No near-duplicate pairs above the similarity threshold."
+            : <>Requires embeddings — run <code>python -m app.ingest</code> first.</>}
+        </div>
+      ) : (
+        <>
+          {/* The list arrives sorted by similarity, so the top rows are the
+              finding; two hundred rows of the same egret is scrolling, not
+              information. The rest stays one click away for auditing. */}
+          <div className="dup-list">
+            {(allDups ? dups : dups.slice(0, 9)).map((d, i) => (
+              <div className="dup-pair" key={i}>
+                <Link to={`/samples/${d.a.id}`}><img src={d.a.thumb_url} alt="" /></Link>
+                <Link to={`/samples/${d.b.id}`}><img src={d.b.thumb_url} alt="" /></Link>
+                <span className="pill score">{(d.similarity * 100).toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+          {dups.length > 9 && (
+            <button className="ghost dup-more" onClick={() => setAllDups(!allDups)}>
+              {allDups ? "Show only the top 9" : `Show all ${dups.length} pairs`}
+            </button>
+          )}
+        </>
+      )}
+
       {/* Where the data came from and what is known to be off about it —
           a dataset tool that hides its own provenance is asking to be trusted
           on faith. */}
@@ -202,51 +244,6 @@ export default function StatsPage() {
         </>
       )}
 
-      <div className="section-title">Train/test leakage</div>
-
-      <p className="meta-line">
-
-        A held-out image with a near-duplicate in training means reported
-
-        accuracy on it is partly memorisation. Move the threshold and look at
-
-        the pairs — “near-duplicate” is a cut on a cosine, not a fact.
-
-      </p>
-
-      <div className="panel"><LeakagePanel /></div>
-
-
-      <div className="section-title">
-        Near-duplicate pairs {dups.length > 0 && `(${dups.length})`}
-      </div>
-      {dups.length === 0 ? (
-        <div className="empty">
-          {overview.embeddings_available
-            ? "No near-duplicate pairs above the similarity threshold."
-            : <>Requires embeddings — run <code>python -m app.ingest</code> first.</>}
-        </div>
-      ) : (
-        <>
-          {/* The list arrives sorted by similarity, so the top rows are the
-              finding; two hundred rows of the same egret is scrolling, not
-              information. The rest stays one click away for auditing. */}
-          <div className="dup-list">
-            {(allDups ? dups : dups.slice(0, 9)).map((d, i) => (
-              <div className="dup-pair" key={i}>
-                <Link to={`/samples/${d.a.id}`}><img src={d.a.thumb_url} alt="" /></Link>
-                <Link to={`/samples/${d.b.id}`}><img src={d.b.thumb_url} alt="" /></Link>
-                <span className="pill score">{(d.similarity * 100).toFixed(1)}%</span>
-              </div>
-            ))}
-          </div>
-          {dups.length > 9 && (
-            <button className="ghost dup-more" onClick={() => setAllDups(!allDups)}>
-              {allDups ? "Show only the top 9" : `Show all ${dups.length} pairs`}
-            </button>
-          )}
-        </>
-      )}
     </div>
   );
 }

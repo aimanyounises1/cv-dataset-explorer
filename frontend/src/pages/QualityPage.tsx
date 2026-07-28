@@ -22,25 +22,42 @@ function defaultThreshold(summary: QASummary): number {
   return summary.max_agreement ?? 1;
 }
 
+/** One suspect per line: thumb, caption, figures. A reviewer triages this list
+ * by the hundred, so the unit of reading is the row, not a card — the caption
+ * ellipsizes rather than wraps and the full text rides on the title. */
 function SuspectRow({ item, scoreLabel }: { item: SuspectCaption; scoreLabel: string }) {
   return (
-    <Link className="suspect-row" to={`/samples/${item.sample.id}`}>
+    <Link className="suspect-row" to={`/samples/${item.sample.id}`}
+          title={`“${item.caption}” — ${scoreLabel} ${item.agreement.toFixed(3)}`}>
       <img src={item.sample.thumb_url} alt="" loading="lazy" />
-      <div className="suspect-body">
-        <div className="suspect-caption">“{item.caption}”</div>
-        <div className="suspect-meta">
-          <span className="pill warn-pill">{scoreLabel} {item.agreement.toFixed(3)}</span>
-          {item.sibling_mean != null && (
-            <span className="pill" title="Mean agreement of the sample's other captions">
-              siblings {item.sibling_mean.toFixed(3)}
-            </span>
-          )}
-          <span className="pill">{item.sample.split}</span>
-        </div>
-      </div>
+      <span className="suspect-caption">“{item.caption}”</span>
+      <span className="suspect-score" title={`${scoreLabel} score`}>
+        {item.agreement.toFixed(3)}
+      </span>
+      <span className="suspect-sib" title="Mean agreement of the sample's other captions">
+        {item.sibling_mean != null ? item.sibling_mean.toFixed(3) : "—"}
+      </span>
+      <span className="suspect-split">{item.sample.split}</span>
     </Link>
   );
 }
+
+/** Column labels once, over rows that are all figures — the per-row pills that
+ * used to carry them repeated the same three words a hundred times. */
+function SuspectHead({ scoreLabel }: { scoreLabel: string }) {
+  return (
+    <div className="suspect-head" aria-hidden="true">
+      <span className="suspect-caption">caption</span>
+      <span className="suspect-score">{scoreLabel}</span>
+      <span className="suspect-sib">siblings</span>
+      <span className="suspect-split">split</span>
+    </div>
+  );
+}
+
+/** The lists load in pages: rows 26-100 are one click away, not 3,000px of
+ * scroll between the reviewer and the consistency section below. */
+const LIST_PAGE = 25;
 
 /** Annotation QA: CLIPScore-style ranking of captions least supported by
  * their image — the mislabel-hunting workflow. */
@@ -70,6 +87,8 @@ export default function QualityPage() {
   }, [threshold, setSearchParams]);
   const [listLoading, setListLoading] = useState(false);
   const [selection, setSelection] = useState<QASelection | null>(null);
+  const [shownSuspects, setShownSuspects] = useState(LIST_PAGE);
+  const [shownInconsistent, setShownInconsistent] = useState(LIST_PAGE);
 
   useEffect(() => {
     // On a QA page, a swallowed error rendering as "no problems found" is the
@@ -154,6 +173,17 @@ export default function QualityPage() {
           <div className="value">{summary.mean_agreement?.toFixed(3) ?? "—"}</div>
           <div className="label">Mean image-caption agreement</div>
         </div>
+        {/* The page's working number, stated where the page starts: how much is
+            under the review line right now. It moves with the slider below. */}
+        {threshold != null && (
+          <div className="stat-card">
+            <div className="value">{belowCount.toLocaleString()}</div>
+            <div className="label">
+              Captions ≤ {threshold.toFixed(3)} (review line ·{" "}
+              {((belowCount / Math.max(1, totalScored)) * 100).toFixed(1)}%)
+            </div>
+          </div>
+        )}
       </div>
 
       {sectionErrors.length > 0 && (
@@ -219,7 +249,8 @@ export default function QualityPage() {
               onChange={(e) => { touched.current = true; setThreshold(Number(e.target.value)); }}
             />
             <span className="dist-readout" style={{ color: SURFACE.textDim }}>
-              {listLoading ? "updating…" : `${suspects.length} shown`}
+              {listLoading ? "updating…"
+                : `${Math.min(shownSuspects, suspects.length)} of ${suspects.length} listed`}
             </span>
           </div>
 
@@ -265,11 +296,21 @@ export default function QualityPage() {
       {suspects.length === 0 ? (
         <div className="empty">No scored captions to show.</div>
       ) : (
-        <div className="suspect-list">
-          {suspects.map((s, i) => (
-            <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="agreement" />
-          ))}
-        </div>
+        <>
+          <div className="suspect-list">
+            <SuspectHead scoreLabel="agreement" />
+            {suspects.slice(0, shownSuspects).map((s, i) => (
+              <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="agreement" />
+            ))}
+          </div>
+          {suspects.length > shownSuspects && (
+            <button className="ghost suspect-more"
+                    onClick={() => setShownSuspects(shownSuspects + LIST_PAGE)}>
+              Show {Math.min(LIST_PAGE, suspects.length - shownSuspects)} more
+              ({suspects.length - shownSuspects} loaded beyond this point)
+            </button>
+          )}
+        </>
       )}
 
       {inconsistent.length > 0 && (
@@ -277,13 +318,22 @@ export default function QualityPage() {
           <div className="section-title">Least consistent samples</div>
           <p className="meta-line">
             Samples whose 5 captions disagree most with each other — ambiguous
-            images or outlier annotations.
+            images or outlier annotations. The score is the sample's caption
+            consistency, lowest first.
           </p>
           <div className="suspect-list">
-            {inconsistent.map((s, i) => (
+            <SuspectHead scoreLabel="consistency" />
+            {inconsistent.slice(0, shownInconsistent).map((s, i) => (
               <SuspectRow key={`${s.sample.id}-${i}`} item={s} scoreLabel="consistency" />
             ))}
           </div>
+          {inconsistent.length > shownInconsistent && (
+            <button className="ghost suspect-more"
+                    onClick={() => setShownInconsistent(shownInconsistent + LIST_PAGE)}>
+              Show {Math.min(LIST_PAGE, inconsistent.length - shownInconsistent)} more
+              ({inconsistent.length - shownInconsistent} loaded beyond this point)
+            </button>
+          )}
         </>
       )}
     </div>
