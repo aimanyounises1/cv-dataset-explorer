@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from .. import config
 from ..schemas import SavedView, SavedViewCreate
 from .deps import embeddings_fingerprint, get_conn
 

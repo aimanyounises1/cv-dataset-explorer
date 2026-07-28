@@ -25,7 +25,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
-from .. import config, db
+from .. import db
 from .deps import thumb_url
 
 logger = logging.getLogger(__name__)

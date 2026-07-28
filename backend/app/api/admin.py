@@ -68,8 +68,8 @@ def integrity(conn: sqlite3.Connection = Depends(get_conn)):
 
 @router.post("/admin/reload")
 def reload_indexes(conn: sqlite3.Connection = Depends(get_conn)):
-    from . import leakage, stats
     from ..ml import providers
+    from . import leakage, stats
 
     # Providers first: index loading below resolves through the active
     # provider, so a freshly built Qwen index (or a repaired SigLIP one) must
