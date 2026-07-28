@@ -8,6 +8,7 @@ import { albumsChanged } from "../components/AlbumShelf";
 import AlbumHeader from "../components/AlbumHeader";
 import ImageCard from "../components/ImageCard";
 import { showToast } from "../components/Toast";
+import { useActiveProviderName } from "../lib/activeProvider";
 import { useDebounce } from "../hooks/useDebounce";
 import { useSelection } from "../hooks/useSelection";
 import { saveResultOrder } from "../hooks/useResultOrder";
@@ -74,6 +75,8 @@ export default function GalleryPage() {
    * chip kept and says inline what would make the exclusion take effect. */
   const composedValid = likeIds.length > 0 || query.trim() !== "";
   const albumId = Number(searchParams.get("album")) || null;
+  // Labels naming the ACTIVE embedding model read the one truth source.
+  const providerName = useActiveProviderName();
   const [refThumbs, setRefThumbs] = useState<Record<number, string>>({});
   /* Scenario groups are proposals, not state: at most three, on demand,
    * temporary until "Save as album" makes one durable. */
@@ -476,7 +479,7 @@ export default function GalleryPage() {
               aria-pressed={mode === m}
               onClick={() => setParams({ mode: m === "hybrid" ? "" : m, page: "" })}
               title={
-                m === "semantic" ? "SigLIP text-to-image similarity"
+                m === "semantic" ? `${providerName} text-to-image similarity`
                 : m === "keyword" ? "BM25 full-text over captions + VLM tags (Porter-stemmed)"
                 : m === "boosted" ? "Semantic ranking through PRISM speaker models trained on "
                   + "this corpus (measured +2.2 pts R@1; falls back to semantic if untrained)"

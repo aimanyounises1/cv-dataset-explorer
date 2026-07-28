@@ -37,6 +37,7 @@ export default function StatsPage() {
 
   return (
     <div>
+      <h1 className="section-title" style={{ marginTop: 0 }}>Dataset profile</h1>
       <div className="stat-cards">
         <div className="stat-card">
           <div className="value">{overview.total_samples.toLocaleString()}</div>
@@ -54,7 +55,10 @@ export default function StatsPage() {
           <div className={`value ${overview.embeddings_available ? "ok" : "warn"}`}>
             {overview.embeddings_available ? "Ready" : "Off"}
           </div>
-          <div className="label">Semantic search (SigLIP)</div>
+          <div className="label">
+            Semantic search ({overview.embed_provider === "qwen3_vl" ? "Qwen3-VL"
+              : overview.embed_provider === "siglip2" ? "SigLIP 2" : "off"})
+          </div>
         </div>
         <div className="stat-card">
           <div className={`value ${overview.vlm_enriched > 0 ? "ok" : "warn"}`}>

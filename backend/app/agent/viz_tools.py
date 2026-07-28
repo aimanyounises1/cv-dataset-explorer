@@ -454,9 +454,15 @@ def system_diagram() -> str:
     """Draw how this platform is built: the request path from the UI through the
     agents, tools, retrieval stack and storage. Use when the user asks how the
     system works, what the architecture is, or which components exist."""
+    from ..ml import providers
     from ..ml.index import get_caption_index, get_index
 
     semantic = get_index() is not None
+    # The diagram names the ACTIVE retrieval provider — a hard-coded model
+    # name here would credit the wrong model the moment the provider flips.
+    pstate = providers.resolve()
+    prov_short = {"qwen3_vl": "Qwen3-VL", "siglip2": "SigLIP 2",
+                  "mock": "mock"}.get(pstate.active or "", "no embedder")
     nodes = [
         {"id": "ui", "label": "React UI\ngallery · map · chat", "group": "ui"},
         {"id": "api", "label": "FastAPI\nREST + agent", "group": "api"},
@@ -466,8 +472,10 @@ def system_diagram() -> str:
         {"id": "viz", "label": "Visualization\nagent", "group": "agent"},
         {"id": "qa", "label": "QA agent", "group": "agent"},
         {"id": "synth", "label": "Synthesizer\nquality gate", "group": "agent"},
-        {"id": "search", "label": "Hybrid search\nBM25 + SigLIP, RRF", "group": "engine"},
-        {"id": "embed", "label": f"SigLIP 2\n{'loaded' if semantic else 'not computed'}",
+        {"id": "search", "label": f"Hybrid search\nBM25 + {prov_short}, RRF",
+         "group": "engine"},
+        {"id": "embed",
+         "label": f"{prov_short}\n{'loaded' if semantic else 'not computed'}",
          "group": "engine"},
         {"id": "sqlite", "label": "SQLite + FTS5\n8k images · 40k captions", "group": "store"},
         {"id": "npy", "label": "Embedding matrix\n.npy, exact cosine", "group": "store"},

@@ -2,6 +2,7 @@ import {
   useCallback, useEffect, useRef, useState,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { useActiveProviderName } from "../lib/activeProvider";
 import "../styles/compare.css";
 
 /**
@@ -564,6 +565,7 @@ interface DiffPanelProps {
 }
 
 function DiffPanel({ a, b, sim }: DiffPanelProps) {
+  const providerName = useActiveProviderName();
   const row = (name: string, va: string | null, vb: string | null) => ({
     name, va, vb, same: va != null && va === vb,
   });
@@ -590,7 +592,7 @@ function DiffPanel({ a, b, sim }: DiffPanelProps) {
           {sim === "absent"
             ? `#${b.id} is not in #${a.id}'s top-60 neighbours — no cosine to report`
             : `cosine ${sim.score.toFixed(4)} — #${b.id} is #${a.id}'s neighbour `
-              + `${sim.rank} of 60 (SigLIP image embeddings)`}
+              + `${sim.rank} of 60 (${providerName} image embeddings)`}
         </p>
       )}
 
