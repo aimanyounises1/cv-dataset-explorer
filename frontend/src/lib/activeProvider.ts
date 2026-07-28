@@ -17,9 +17,11 @@ export interface ActiveProvider {
   short: string;          // "SigLIP 2" | "Qwen3-VL" | neutral fallback
   model: string;          // full model id, "" when unknown
   provider: string | null;
+  total: number | null;   // corpus size, for copy that counts the frames
 }
 
-const NEUTRAL: ActiveProvider = { short: "the embedding model", model: "", provider: null };
+const NEUTRAL: ActiveProvider = { short: "the embedding model", model: "",
+                                  provider: null, total: null };
 let memo: Promise<ActiveProvider> | null = null;
 
 export function activeProvider(): Promise<ActiveProvider> {
@@ -29,9 +31,16 @@ export function activeProvider(): Promise<ActiveProvider> {
     const short = provider === "qwen3_vl" ? "Qwen3-VL"
       : provider === "siglip2" ? "SigLIP 2"
       : model || "the embedding model";
-    return { short, model, provider };
+    return { short, model, provider, total: o.total_samples ?? null };
   }).catch(() => NEUTRAL);
   return memo;
+}
+
+/** Corpus size for copy that counts frames; null until known or on failure. */
+export function useCorpusTotal(): number | null {
+  const [total, setTotal] = useState<number | null>(null);
+  useEffect(() => { activeProvider().then((p) => setTotal(p.total)); }, []);
+  return total;
 }
 
 /** The short display name, for labels built during render. */

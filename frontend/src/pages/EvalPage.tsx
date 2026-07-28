@@ -124,6 +124,14 @@ export default function EvalPage() {
             rather than silently re-derived, because changing the number would also
             change what every cached run means.
           </div>
+          {!result.results.some((r) => r.mode === "boosted (test)") && (
+            <div className="meta-line">
+              No boosted rows: there is no trained PRISM model for the active
+              embedding space. <code>python -m app.train_prism</code> trains one
+              offline (train split only) and adds the paired test-split
+              comparison here — the artifacts are generated, never shipped.
+            </div>
+          )}
           {result.results.some((r) => r.mode === "boosted (test)") && (
             <div className="meta-line">
               The two <strong>“(test)”</strong> rows are measured on their own

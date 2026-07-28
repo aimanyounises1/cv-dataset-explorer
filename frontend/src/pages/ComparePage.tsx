@@ -2,7 +2,7 @@ import {
   useCallback, useEffect, useRef, useState,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useActiveProviderName } from "../lib/activeProvider";
+import { useActiveProviderName, useCorpusTotal } from "../lib/activeProvider";
 import "../styles/compare.css";
 
 /**
@@ -229,7 +229,7 @@ export default function ComparePage() {
   return (
     <div className="compare-page">
       <div className="eyebrow">Compare &amp; focus</div>
-      <h2 className="section-title compare-title">Two frames, one loupe</h2>
+      <h1 className="section-title compare-title">Two frames, one loupe</h1>
 
       <div className="compare-panes">
         <Pane slot="a" sample={a.data} error={a.error} view={view} setView={setView}
@@ -566,6 +566,7 @@ interface DiffPanelProps {
 
 function DiffPanel({ a, b, sim }: DiffPanelProps) {
   const providerName = useActiveProviderName();
+  const corpusTotal = useCorpusTotal();
   const row = (name: string, va: string | null, vb: string | null) => ({
     name, va, vb, same: va != null && va === vb,
   });
@@ -649,7 +650,9 @@ function DiffPanel({ a, b, sim }: DiffPanelProps) {
         })}
         <p className="axis-pair-note">
           Percentile ranks over the corpus, 0–10 — a longer bar is harder,
-          rarer, or busier, relative to the other 8,090 frames.
+          rarer, or busier, relative to the other{" "}
+          {corpusTotal != null ? (corpusTotal - 1).toLocaleString() : ""} frames
+          in the corpus.
         </p>
       </div>
     </section>

@@ -9,7 +9,7 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 51 HTTP endpoints · 4 agent specialists · 18 agent tools · 16 tested workflows
+- 52 HTTP endpoints · 4 agent specialists · 18 agent tools · 17 tested workflows
 
 ## Views
 
@@ -139,6 +139,8 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `DELETE /api/albums/{album_id}/items/{sample_id}` | |
 | `DELETE /api/annotations/{annotation_id}` | |
 | `GET /api/describe` | |
+| `GET /mcp` | |
+| `POST /mcp` | |
 
 ## Assistant
 
@@ -211,6 +213,7 @@ and by the assistant on request — one registry, three consumers.
 | Command palette | 60s | ⌘K reaches anything without navigating first, and gets out of the way. |
 | Assistant canvas | 300s | A charting request comes back as a live component that drills into the data. |
 | Compare | 60s | Two samples under one loupe: the transform is genuinely shared, the |
+| Hero journey | 180s | The workspace's spine as one continuous story: search -> inspect |
 
 ## Optional layers and how they degrade
 

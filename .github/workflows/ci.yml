@@ -40,6 +40,9 @@ jobs:
       - run: pip install fastapi httpx pydantic numpy pillow pytest ruff tqdm uvicorn
       - run: ruff check app tests
       - run: pytest -q
+      # The docs/CAPABILITIES.md contract: fails when the documented surface
+      # drifts from the actual routers. README cites this check by name.
+      - run: python ../scripts/capabilities.py --check
 
   frontend:
     name: frontend (tsc + build)
