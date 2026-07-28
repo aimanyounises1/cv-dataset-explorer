@@ -469,8 +469,12 @@ class ActivityEvent(BaseModel):
 class ActivityCreate(BaseModel):
     """Client-written snapshot events. `album_*` kinds are deliberately not
     accepted here: those are written by the endpoints that performed the
-    action, and a client claiming one would forge server history."""
-    kind: Literal["search_snapshot", "image_search", "composed_search"]
+    action, and a client claiming one would forge server history.
+    `tag_approval` is a client kind on purpose — approving an assistant's tag
+    proposal happens in the browser, on the user's click, so the client is the
+    honest witness for it."""
+    kind: Literal["search_snapshot", "image_search", "composed_search",
+                  "tag_approval"]
     payload: dict = {}
 
 

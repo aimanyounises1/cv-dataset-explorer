@@ -174,7 +174,7 @@ class TagProposalBlock(_Base):
     sample_ids: list[int]
     reason: Optional[str] = None
     # Requested ids that do not exist — reported, never silently dropped.
-    missing: list[int] = []
+    missing: list[int] = Field(default_factory=list)
 
 
 class ReportSection(BaseModel):

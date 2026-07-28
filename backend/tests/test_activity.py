@@ -122,3 +122,15 @@ def test_album_endpoints_write_their_own_events(ctx):
     client.delete(f"/api/albums/{from_tag_id}")
     client.delete(f"/api/samples/{s[0]}/tags/act-scratch")
     client.delete("/api/activity")
+
+
+def test_tag_approval_is_a_client_kind(ctx):
+    """Approving an assistant tag proposal happens in the browser, so the
+    client is the honest witness: the kind must pass the allowlist."""
+    client = ctx[0]
+    r = client.post("/api/activity",
+                    json={"kind": "tag_approval",
+                          "payload": {"tag": "edge-case", "tagged": 3}})
+    assert r.status_code == 201
+    assert r.json()["kind"] == "tag_approval"
+    client.delete(f"/api/activity/{r.json()['id']}")
