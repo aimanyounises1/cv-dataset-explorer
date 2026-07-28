@@ -1,0 +1,187 @@
+/* ---- Compare & focus ----------------------------------------------------
+   Two frames on one bench. The layout promise the coordinate math relies on:
+   `.compare-img-layer` gets the sample's own aspect-ratio inline and the img
+   fills it absolutely, so the layer's border box IS the image content box —
+   normalized region coords (0..1 of the layer) are 0..1 of the photograph,
+   with no letterbox offsets to subtract. The shared zoom/pan transform lands
+   on the layer with origin 0 0, which is what makes the anchor-point algebra
+   in ComparePage.tsx two lines instead of a matrix. */
+
+.compare-page { max-width: 1280px; }
+.compare-title { margin-top: 2px; }
+
+.compare-panes {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  margin-bottom: 14px;
+}
+
+.compare-pane {
+  display: flex; flex-direction: column;
+  background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+}
+/* An empty seat is an invitation, not an error: dashed, and it says what fills it. */
+.compare-pane.empty {
+  align-items: center; justify-content: center;
+  min-height: 380px; border-style: dashed;
+}
+.compare-pane.drop { border-color: var(--accent); background: var(--accent-soft); }
+.compare-empty-msg {
+  color: var(--text-faint); font-size: 13.5px; line-height: 1.6;
+  max-width: 32ch; text-align: center; padding: 20px;
+}
+
+.pane-head {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.pane-id {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 11.5px; color: var(--text-dim); white-space: nowrap;
+}
+.pane-head a {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--accent); text-decoration: none;
+  font-size: 12.5px;
+}
+.pane-head a:hover { text-decoration: underline; }
+.pane-head .pill { flex-shrink: 0; }
+.draw-toggle { padding: 5px 11px; font-size: 12.5px; flex-shrink: 0; }
+
+.pane-stage {
+  position: relative; height: 46vh; min-height: 320px;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; background: var(--bg-inset);
+  cursor: grab; touch-action: none;
+}
+.pane-stage:active { cursor: grabbing; }
+.pane-stage.drawing { cursor: crosshair; }
+
+.compare-img-layer {
+  position: relative; width: 100%; max-height: 100%;
+  /* aspect-ratio arrives inline per sample; max-height transfers through it,
+     so the layer is the largest same-shape box that fits the stage. */
+  transform-origin: 0 0;
+  flex-shrink: 0;
+}
+.compare-img-layer img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; user-select: none; -webkit-user-drag: none;
+}
+
+/* Regions. Saved ones are thin sage outlines — marks in the margin, not paint
+   over the evidence. The draft is dashed until it becomes a claim. */
+.region-rect { position: absolute; pointer-events: none; }
+.region-rect.saved { border: 1.5px solid var(--accent); }
+.region-rect.draft {
+  border: 1.5px dashed var(--accent);
+  background: rgba(33, 109, 80, 0.12);
+}
+.region-label {
+  position: absolute; top: 0; left: -1.5px; transform: translateY(-100%);
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.5;
+  padding: 0 5px; border-radius: 3px 3px 0 0;
+  background: var(--accent-deep); color: #ffffff; white-space: nowrap;
+}
+
+/* One dominant action per panel: searching the region is the point; saving
+   and discarding are ghosts beside it. */
+.region-actions {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; border-top: 1px solid var(--border);
+}
+.region-actions input {
+  flex: 1; min-width: 0; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset); color: var(--text);
+  font-family: var(--font-sans); font-size: 12.5px; outline: none;
+}
+.region-actions input:focus { border-color: var(--accent); }
+.region-actions .primary { padding: 7px 14px; font-size: 12.5px; white-space: nowrap; }
+.region-actions .ghost { padding: 7px 12px; font-size: 12.5px; white-space: nowrap; }
+.region-save-err { margin: 0 12px 10px; }
+
+/* The crop's nearest neighbours: a film strip, each frame citing its cosine. */
+.region-results h3 { margin-bottom: 10px; }
+.region-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.region-hit {
+  flex: 0 0 auto; display: flex; flex-direction: column; gap: 3px;
+  text-decoration: none; color: var(--text-dim);
+}
+.region-hit img {
+  width: 118px; height: 88px; object-fit: cover; display: block;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  transition: border-color var(--t-quick);
+}
+.region-hit:hover img { border-color: var(--accent); }
+.region-hit .mono { font-size: 10.5px; }
+
+/* ---- Shared / different -------------------------------------------------
+   Deterministic readout: same metadata fields for any pair, verdict first,
+   values in the mono face because they are the facts being compared. */
+.compare-sim {
+  margin: 0 0 12px;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--text-dim);
+}
+.diff-rows { display: grid; }
+.diff-row {
+  display: grid; grid-template-columns: 130px 72px 1fr; gap: 12px;
+  align-items: baseline; padding: 6px 0;
+  border-top: 1px solid var(--border); font-size: 13px;
+}
+.diff-row:first-child { border-top: none; }
+.diff-name { color: var(--text-faint); }
+.diff-verdict {
+  font-family: var(--font-mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.07em;
+}
+.diff-row.same .diff-verdict { color: var(--text-faint); }
+.diff-row.differs .diff-verdict { color: var(--amber); }
+.diff-value { font-size: 12px; color: var(--text-dim); }
+.diff-row.differs .diff-value { color: var(--text); }
+
+.diff-tags {
+  display: flex; flex-direction: column; gap: 7px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.diff-tag-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.diff-tag-row .eyebrow { width: 96px; flex-shrink: 0; }
+.diff-tags-none { margin: 0; font-size: 12px; color: var(--text-faint); font-style: italic; }
+
+/* Paired axis bars: a and b on the same track length so the eye subtracts. */
+.axis-pairs {
+  display: grid; gap: 8px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.axis-pair-key {
+  margin: 0; display: flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+}
+.axis-pair-key .key {
+  width: 14px; height: 7px; border-radius: 2px; display: inline-block;
+}
+.axis-pair-key .key.b { margin-left: 10px; }
+.axis-pair { display: grid; grid-template-columns: 92px 1fr 88px; gap: 12px; align-items: center; }
+.axis-pair-name { font-size: 12.5px; color: var(--text-dim); text-transform: capitalize; }
+.axis-pair-bars { display: grid; gap: 3px; }
+.bar-track {
+  display: block; height: 7px; overflow: hidden;
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: 2px;
+}
+.bar-fill { display: block; height: 100%; }
+/* a wears the product's sage; b a neutral ink — NOT the agent indigo, which
+   is reserved for "a model did this", and neither of these frames is that. */
+.bar-fill.a, .axis-pair-key .key.a { background: var(--accent); }
+.bar-fill.b, .axis-pair-key .key.b { background: var(--text-faint); }
+.axis-pair-vals {
+  font-size: 11.5px; color: var(--text-dim); text-align: right; white-space: nowrap;
+}
+.axis-pair-note { margin: 2px 0 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
+
+@media (max-width: 900px) {
+  .compare-panes { grid-template-columns: 1fr; }
+  .diff-row { grid-template-columns: 104px 64px 1fr; }
+  .axis-pair { grid-template-columns: 84px 1fr 80px; }
+}
