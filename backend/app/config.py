@@ -20,13 +20,15 @@ EMBED_MODEL = os.environ.get("CVDE_EMBED_MODEL", "google/siglip2-base-patch16-25
 EMBED_BATCH_SIZE = int(os.environ.get("CVDE_EMBED_BATCH", "32"))
 
 # Retrieval provider ----------------------------------------------------------
-# Preferred multimodal retrieval provider. "qwen3_vl" runs
-# Qwen/Qwen3-VL-Embedding-2B in-process through sentence-transformers (Ollama
-# serves the language models only — it cannot host an image-embedding model)
-# and falls back to "siglip2" with a visible, named reason whenever its stack,
-# weights or index are missing. "siglip2" pins the original behavior exactly;
-# "mock" is the deterministic test provider.
-EMBED_PROVIDER = os.environ.get("CVDE_EMBED_PROVIDER", "qwen3_vl")
+# Default is "siglip2" because it MEASURES better on this corpus's own
+# benchmark (R@1 55.2% vs 50.2%, ~5x the encode speed — scripts/
+# bench_providers.py; parameter count is not quality). "qwen3_vl" is the
+# explicit opt-in multimodal alternative: Qwen/Qwen3-VL-Embedding-2B
+# in-process through sentence-transformers (Ollama serves the language models
+# only — it cannot host an image-embedding model), falling back to siglip2
+# with a visible, named reason whenever its stack, weights or index are
+# missing. "mock" is the deterministic test provider.
+EMBED_PROVIDER = os.environ.get("CVDE_EMBED_PROVIDER", "siglip2")
 QWEN_EMBED_MODEL = os.environ.get("CVDE_QWEN_EMBED_MODEL", "Qwen/Qwen3-VL-Embedding-2B")
 QWEN_EMBED_BATCH = int(os.environ.get("CVDE_QWEN_EMBED_BATCH", "8"))
 

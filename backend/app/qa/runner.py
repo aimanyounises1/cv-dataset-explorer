@@ -443,11 +443,23 @@ def load_report(run_id: str) -> Optional[dict]:
 
 
 def latest_report() -> Optional[dict]:
-    """The in-memory run if there is one, else the newest report on disk."""
+    """The in-memory run if there is one, else the newest COMPLETE report.
+
+    A failed or empty run must never shadow a successful one: it stays on
+    disk, loadable by id and clearly marked by its own status, but it is not
+    "the latest report". On a QA surface, an empty report presented as current
+    is the worst failure mode — it reads as "nothing to show" when the truth
+    is "the newest attempt died". Only when no complete run exists at all is
+    the newest attempt returned, status and all.
+    """
     live = MANAGER.latest()
     if live is not None:
         return live
     runs = sorted(p.parent.name for p in Path(config.QA_DIR).glob("*/report.json"))
+    for rid in reversed(runs):
+        rep = load_report(rid)
+        if rep and rep.get("status") == "done" and (rep.get("total") or 0) > 0:
+            return rep
     return load_report(runs[-1]) if runs else None
 
 
