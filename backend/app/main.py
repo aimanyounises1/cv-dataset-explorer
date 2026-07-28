@@ -22,6 +22,7 @@ from .api import (
     attributes,
     chat,
     describe,
+    detect,
     leakage,
     mcp,
     qa,
@@ -81,7 +82,7 @@ app.add_middleware(
 
 for router in (samples.router, search.router, stats.router, map_api.router,
                tags.router, qa.router, qa_run.router, attributes.router,
-               describe.router, leakage.router,
+               describe.router, detect.router, leakage.router,
                eval_api.router, admin.router, chat.router,
                views.router, albums.router, activity.router,
                annotations.router):

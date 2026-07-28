@@ -6,6 +6,7 @@ import AxisBreakdown from "../components/AxisBreakdown";
 import AxisLegend from "../components/AxisLegend";
 import ImageCard from "../components/ImageCard";
 import ProvenanceBanner from "../components/ProvenanceBanner";
+import RegionSearch from "../components/RegionSearch";
 import TagEditor from "../components/TagEditor";
 import { useNeighbours } from "../hooks/useResultOrder";
 
@@ -164,6 +165,9 @@ export default function SamplePage() {
       <div className="detail" style={{ marginTop: 12 }}>
         <div>
           <img className="detail-image" src={detail.image_url} alt={detail.captions[0]?.text ?? detail.filename} />
+          {/* Region evidence: mark or accept a suggested box on THIS image and
+              search toward or away from it. Lives under the image it marks. */}
+          <RegionSearch sampleId={detail.id} imageUrl={detail.image_url} />
         </div>
         <div>
           <div className="panel">
