@@ -532,7 +532,17 @@ body {
   .rail-group { display: flex; align-items: center; gap: 4px; }
   .rail-group-title { padding: 0 4px 0 0; }
   .rail-link { white-space: nowrap; margin: 0; }
-  .rail-foot { display: none; }
+  /* The strip carries navigation only — and History IS navigation here: with
+     no keyboard for ⌘K, it is the only way back to a search you already ran.
+     Its shelf-mates stay hidden; a corpus count, a keyboard hint and the
+     models card are reference, not routes. */
+  .rail-foot {
+    display: flex; flex-direction: row; align-items: center;
+    flex: 0 0 auto; margin: 0 0 0 auto;
+    padding: 0; border-top: none;
+  }
+  .rail-corpus, .rail-kbd, .rail-foot .models-card { display: none; }
+  .rail-history-btn { align-self: center; margin-top: 0; }
   /* The filter column has no honest home in a horizontal strip: as a flex
      item it stretched the header to ~250px of dead space while itself sitting
      off-screen to the right, reachable only by an unindicated sideways
