@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import { Fragment, KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 /**
  * The rail's own control vocabulary: segmented pills, a listbox, a dual-range.
@@ -110,6 +110,19 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
     return i >= 0 && i < options.length ? i : from;
   };
 
+  // A listbox owns only options and groups. The <li> wrapper this markup used
+  // to have is neither, so every option fell out of the accessibility mapping
+  // and the control exposed nothing to pick. Options arrive grouped in runs;
+  // each run becomes a role="group" named by the header it already draws, and
+  // the options are the listbox's own children. `from` keeps the flat index
+  // that ids, aria-activedescendant and the arrow keys are stated in.
+  const runs: { group?: string; from: number; items: PickOption[] }[] = [];
+  options.forEach((o, i) => {
+    const last = runs[runs.length - 1];
+    if (last && last.group === o.group) last.items.push(o);
+    else runs.push({ group: o.group, from: i, items: [o] });
+  });
+
   const onKey = (e: KeyboardEvent) => {
     if (!open) {
       if (["ArrowDown", "ArrowUp", "Enter", " "].includes(e.key)) {
@@ -151,39 +164,47 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
         <span className="listbox-caret" aria-hidden="true">▾</span>
       </button>
       {open && (
-        <ul className="listbox-pop" role="listbox" id={`${id}-list`} aria-label={label}
-            // Focus stays on the trigger (select-only combobox pattern). Without
-            // this, mousedown on an option blurs the button, the blur handler
-            // unmounts the popup, and the click lands on a detached node —
-            // the pick silently never happens.
-            onMouseDown={(e) => e.preventDefault()}>
+        <div className="listbox-pop" role="listbox" id={`${id}-list`} aria-label={label}
+             // Focus stays on the trigger (select-only combobox pattern). Without
+             // this, mousedown on an option blurs the button, the blur handler
+             // unmounts the popup, and the click lands on a detached node —
+             // the pick silently never happens.
+             onMouseDown={(e) => e.preventDefault()}>
 
-          {options.map((o, i) => (
-            <li key={`${o.group ?? ""}:${o.value}`}>
-              {o.group && o.group !== options[i - 1]?.group && (
-                <div className="listbox-group" role="presentation">{o.group}</div>
-              )}
-              <div
-                id={`${id}-opt-${i}`}
-                role="option"
-                aria-selected={o.value === selected}
-                aria-disabled={o.disabled || undefined}
-                className={"listbox-opt"
-                  + (i === active ? " active" : "")
-                  + (o.disabled ? " disabled" : "")
-                  + (o.value === selected ? " selected" : "")}
-                onPointerMove={() => { if (!o.disabled) setActive(i); }}
-                onClick={() => {
-                  if (!o.disabled) { onPick(o.value); setOpen(false); }
-                }}
-              >
-                <span className="listbox-opt-label">{o.label}</span>
-                {o.disabled && <span className="listbox-check" aria-hidden="true">✓</span>}
-                {o.figure && <span className="listbox-figure">{o.figure}</span>}
+          {runs.map((run) => {
+            const opts = run.items.map((o, j) => {
+              const i = run.from + j;
+              return (
+                <div
+                  key={`${o.group ?? ""}:${o.value}`}
+                  id={`${id}-opt-${i}`}
+                  role="option"
+                  aria-selected={o.value === selected}
+                  aria-disabled={o.disabled || undefined}
+                  className={"listbox-opt"
+                    + (i === active ? " active" : "")
+                    + (o.disabled ? " disabled" : "")
+                    + (o.value === selected ? " selected" : "")}
+                  onPointerMove={() => { if (!o.disabled) setActive(i); }}
+                  onClick={() => {
+                    if (!o.disabled) { onPick(o.value); setOpen(false); }
+                  }}
+                >
+                  <span className="listbox-opt-label">{o.label}</span>
+                  {o.disabled && <span className="listbox-check" aria-hidden="true">✓</span>}
+                  {o.figure && <span className="listbox-figure">{o.figure}</span>}
+                </div>
+              );
+            });
+            // The header is the group's name; aria-label says it once.
+            return run.group ? (
+              <div key={`g${run.from}`} role="group" aria-label={run.group}>
+                <div className="listbox-group" aria-hidden="true">{run.group}</div>
+                {opts}
               </div>
-            </li>
-          ))}
-        </ul>
+            ) : <Fragment key={`g${run.from}`}>{opts}</Fragment>;
+          })}
+        </div>
       )}
     </div>
   );
