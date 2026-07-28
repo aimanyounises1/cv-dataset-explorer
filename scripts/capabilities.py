@@ -30,13 +30,18 @@ API = "http://127.0.0.1:8000"
 # deliberate: a new /api/samples/... route lands in the right section by itself.
 GROUPS = [
     ("Browse and inspect", ("/api/samples", "/api/export")),
-    ("Search", ("/api/search",)),
-    ("Statistics and map", ("/api/stats", "/api/map", "/api/attributes")),
+    # The detector exists only to propose regions for a search to use, so it
+    # is documented where its results are consumed.
+    ("Search", ("/api/search", "/api/detect")),
+    ("Statistics and map", ("/api/stats", "/api/map", "/api/attributes",
+                            "/api/describe")),
     ("Annotation QA", ("/api/qa/summary", "/api/qa/captions", "/api/qa/consistency",
                        "/api/qa/selection")),
     ("Retrieval benchmark", ("/api/eval",)),
-    ("Curation", ("/api/tags", "/api/vlm-tags", "/api/views")),
+    ("Curation", ("/api/tags", "/api/vlm-tags", "/api/views", "/api/albums",
+                  "/api/annotations", "/api/activity")),
     ("Assistant", ("/api/chat", "/api/agent", "/api/reports")),
+    ("Other agents (MCP)", ("/mcp",)),
     ("Application self-QA", ("/api/qa/run", "/api/qa/flows", "/api/qa/artifact")),
     ("Operations", ("/api/health", "/api/admin")),
 ]
