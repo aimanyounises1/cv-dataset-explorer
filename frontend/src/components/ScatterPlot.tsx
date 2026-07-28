@@ -6,6 +6,12 @@ interface Props {
   onSelect: (id: number) => void;
   onSelectBox?: (ids: number[]) => void;
   selectedIds?: Set<number>;
+  /** Points to ring in ink, over whatever colour they already have — the map
+   * side of a link with something outside the canvas (the working-set grid
+   * points at one image; this is where it is). A ring rather than a fill
+   * because on the paper canvas a light fill has nothing to contrast with.
+   * Paint only: it reads the same projection every other dot does. */
+  ringIds?: Set<number>;
   /** Colour per point, from lib/mapColor. Passed in rather than computed here so
    * the same scale drives the canvas and the legend beside it. */
   colorOf: (p: MapPoint) => string;
@@ -16,7 +22,9 @@ interface Box { x0: number; y0: number; x1: number; y1: number; }
 
 /** Canvas scatter of the embedding space. Scroll = zoom, drag = pan,
  * click = open sample, Shift+drag = box-select for bulk actions. */
-export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds, colorOf }: Props) {
+export default function ScatterPlot({
+  points, onSelect, onSelectBox, selectedIds, ringIds, colorOf,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const viewRef = useRef<View>({ scale: 1, tx: 0, ty: 0 });
   const dragRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
@@ -55,6 +63,14 @@ export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds
       ctx.beginPath();
       ctx.arc(sx, sy, selected ? r + 1 : r, 0, Math.PI * 2);
       ctx.fill();
+      if (ringIds?.has(p.id)) {
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#17231e";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy, r + 4, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     ctx.globalAlpha = 1;
     if (boxRef.current) {
@@ -67,7 +83,7 @@ export default function ScatterPlot({ points, onSelect, onSelectBox, selectedIds
       ctx.fillRect(x, y, bw, bh);
       ctx.strokeRect(x, y, bw, bh);
     }
-  }, [points, toScreen, selectedIds, colorOf]);
+  }, [points, toScreen, selectedIds, ringIds, colorOf]);
 
   // Native non-passive wheel listener: zoom without scrolling the page.
   useEffect(() => {

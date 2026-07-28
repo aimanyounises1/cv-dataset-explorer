@@ -20,9 +20,13 @@ router = APIRouter()
 def embedding_map(conn: sqlite3.Connection = Depends(get_conn)):
     # Agreement is per-caption, so it is averaged per sample here rather than in
     # Python: one grouped subquery beats 8,000 round trips.
+    # `isolation` is read out of the stored axis_detail rather than recomputed:
+    # it is the measured mean cosine distance to the 10 nearest images, already
+    # produced by the axis pass. json_extract keeps it one query.
     rows = conn.execute(
         "SELECT s.id, s.filename, s.umap_x, s.umap_y, s.cluster, s.split, "
-        "       s.legibility, s.rarity, s.difficulty, s.clutter, a.mean_agreement "
+        "       s.legibility, s.rarity, s.difficulty, s.clutter, a.mean_agreement, "
+        "       json_extract(s.axis_detail, '$.rarity.isolation') AS isolation "
         "FROM samples s "
         "LEFT JOIN (SELECT sample_id, AVG(agreement) AS mean_agreement "
         "           FROM captions WHERE agreement IS NOT NULL "
@@ -38,6 +42,7 @@ def embedding_map(conn: sqlite3.Connection = Depends(get_conn)):
             agreement=round(r["mean_agreement"], 4) if r["mean_agreement"] is not None else None,
             legibility=r["legibility"], rarity=r["rarity"],
             difficulty=r["difficulty"], clutter=r["clutter"],
+            isolation=r["isolation"],
         )
         for r in rows
     ]
