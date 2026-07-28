@@ -56,6 +56,11 @@ interface Props {
    * gallery passes the whole picked set when this card is part of it, so a
    * selection drags as one bundle. */
   getDragIds?: (id: number) => number[];
+  /** Steering actions for composed search: add this frame as a positive
+   * reference ("more like this") or a negative example. Only the gallery
+   * passes them — a chat transcript or the similar strip steers nothing. */
+  onLike?: (id: number) => void;
+  onExclude?: (id: number) => void;
   mode?: string;
   rank?: number;
 }
@@ -67,7 +72,7 @@ const TERM_SEP = "|";
 
 export default function ImageCard({ sample, scoreBasis, query, mode, rank,
                                     selectMode, selected, onToggleSelect,
-                                    getDragIds }: Props) {
+                                    getDragIds, onLike, onExclude }: Props) {
   const caption = sample.match_caption ?? sample.caption ?? sample.filename;
   const basis = scoreBasis ?? undefined;
 
@@ -157,6 +162,24 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
             only on hover — the mock's rule: hide secondary detail until it
             is requested. The sample page still shows all of it, always. */}
         <div className="card-details">
+          {(onLike || onExclude) && (
+            <div className="card-actions">
+              {onLike && (
+                <button type="button"
+                        title="More like this — add as a positive reference and re-rank"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onLike(sample.id); }}>
+                  ⊕ More like this
+                </button>
+              )}
+              {onExclude && (
+                <button type="button"
+                        title="Exclude images like this — add as a negative example"
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onExclude(sample.id); }}>
+                  ⊖
+                </button>
+              )}
+            </div>
+          )}
           <div className="card-evidence">
             <span className="ev">{sample.split}</span>
             {sample.match_paths?.map((p) => (
