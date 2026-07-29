@@ -7,9 +7,19 @@ import type { LeakageContamination, LeakageReport } from "../api/types";
  * Held-out images that have a near-duplicate in training.
  *
  * This is the highest-consequence thing embeddings alone can detect about a
- * dataset: a test image with a training twin means reported accuracy on it is
- * partly memorisation. Barz & Denzler measured 3.3% of CIFAR-10 and 10% of
- * CIFAR-100 test images in that state, worth 9-14% relative accuracy.
+ * dataset. Barz & Denzler measured 3.3% of CIFAR-10 and 10% of CIFAR-100 test
+ * images with a training near-duplicate, worth 9-14% relative accuracy — there
+ * the duplicated thing is the *photograph*, so the accuracy it buys is
+ * memorisation.
+ *
+ * That reading does not transfer here, and the tool now says so because it
+ * measured it rather than assuming it. `GET /api/stats/leakage/pixel` hashes
+ * every flagged pair perceptually: on this corpus they sit a median 31 bits of
+ * 64 apart, against 32 for images picked at random, so what they share is a
+ * subject and not a frame. Flickr8k has many photographs of one scene, and the
+ * split assignment does not know that. The contamination is real and worth
+ * excluding from a benchmark; calling it memorisation would be a borrowed
+ * conclusion.
  *
  * The design decision that matters here is showing a **curve, not a number**.
  * "Near-duplicate" is a threshold on a cosine, not a fact, and the answer can

@@ -412,9 +412,14 @@ function FindingsRow() {
       to: `/?ids=${ids.join(",")}`,
       n: leak.n,
       unit: `of ${leak.of.toLocaleString()} held-out images`,
-      what: "repeat a training image",
+      what: "have a near-twin in training",
       cut: `cosine ≥ ${CONTAMINATION_CUT.toFixed(2)}`,
-      why: "Reported accuracy on these is partly memorisation.",
+      /* Not "partly memorisation" any more. That reading was borrowed from
+         Barz & Denzler's CIFAR result, where the duplicated thing is the
+         photograph; measured here with a perceptual hash, these pairs are no
+         closer pixel-wise than two images picked at random from the corpus.
+         `/api/stats/leakage/pixel` is where that measurement lives. */
+      why: "The same subject, shot again — not the same photograph.",
     },
     qa && qa.n > 0 && {
       key: "qa",
