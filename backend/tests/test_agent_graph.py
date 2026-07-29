@@ -34,7 +34,6 @@ from pydantic import Field, ValidationError  # noqa: E402
 from app.agent import blocks, registry  # noqa: E402
 from app.agent.graph import (  # noqa: E402
     ClaimAssessment,
-    _split_retry,
     _unverified_claims,
     build_graph,
     normalise_routes,
@@ -60,6 +59,7 @@ class StubModel(BaseChatModel):
     claims: list[str] = Field(default_factory=list)
     assessments: list[dict] = Field(default_factory=list)
     synth: str = "Final answer."
+    retry_feedback: str = ""
     synth_delay: float = 0.0
     fail_on: set[str] = Field(default_factory=set)
     calls: list[str] = Field(default_factory=list)
@@ -71,6 +71,7 @@ class StubModel(BaseChatModel):
         claims=None,
         assessments=None,
         synth="Final answer.",
+        retry_feedback="",
         synth_delay=0.0,
         fail_on=None,
         **kw,
@@ -80,6 +81,7 @@ class StubModel(BaseChatModel):
             claims=list(claims or []),
             assessments=list(assessments or []),
             synth=synth,
+            retry_feedback=retry_feedback,
             synth_delay=synth_delay,
             fail_on=set(fail_on or ()),
             calls=[],
@@ -114,6 +116,7 @@ class StubModel(BaseChatModel):
                     reply = stub.invoke(messages, config=config, **kw)
                     return schema(
                         answer=reply.content,
+                        retry_feedback=stub.retry_feedback,
                         claim_assessments=stub.assessments,
                     )
 
@@ -128,8 +131,7 @@ class StubModel(BaseChatModel):
                 return schema(route=r[0],
                               also=r[1] if len(r) > 1 else None,
                               brief="go",
-                              premise_kind="assertion" if stub.claims else "none",
-                              claim_to_verify=stub.claims[0] if stub.claims else None)
+                              claims_to_verify=stub.claims)
 
             async def ainvoke(self, messages, config=None, **kw):
                 return self.invoke(messages, config=config, **kw)
@@ -224,22 +226,24 @@ def test_the_router_schema_only_admits_lanes_that_exist():
     """The names are an enum in the schema the model is constrained to, so an
     invented specialist is a validation error rather than a silent bad route."""
     Route = route_schema()
-    assert Route(route="insights", premise_kind="none", brief="x").route == "insights"
+    assert Route(route="insights", brief="x").route == "insights"
     assert Route(
-        route="insights", premise_kind="none", also="visualization"
+        route="insights", also="visualization"
     ).also == "visualization"
     # One lane is the default shape: a second is opt-in, not a list to fill.
-    assert Route(route="insights", premise_kind="none").also is None
+    assert Route(route="insights").also is None
     # Claims are semantic model output, not a hand-maintained verb/number regex.
-    assert Route(route="insights", premise_kind="none").claim_to_verify is None
+    assert Route(route="insights").claims_to_verify == []
     claim = "The system previously removed a duplicate cluster."
     assert Route(
-        route="insights", premise_kind="assertion", claim_to_verify=claim
-    ).claim_to_verify == claim
+        route="insights", claims_to_verify=[claim]
+    ).claims_to_verify == [claim]
     with pytest.raises(ValidationError):
-        Route(route="nonsense", premise_kind="none", brief="x")
+        Route(route="insights", claims_to_verify=[claim] * 4)
     with pytest.raises(ValidationError):
-        Route(route="insights", premise_kind="none", also="nonsense")
+        Route(route="nonsense", brief="x")
+    with pytest.raises(ValidationError):
+        Route(route="insights", also="nonsense")
     with pytest.raises(ValidationError):       # a lane must be named
         Route(brief="x")
 
@@ -548,37 +552,6 @@ def test_report_markdown_covers_every_block_kind():
         assert b.source in md
 
 
-# -------------------------------------------------- reasoning-model artifacts
-
-@pytest.mark.parametrize("raw,expected", [
-    ("<think>secret plan</think>\n\nThe answer is 42.", "The answer is 42."),
-    # The case that actually reached the screen: an orphan closing tag, because
-    # the opening tag arrived as a separate chunk.
-    ("No further action needed.\n</think>\n\nThe report covers X.",
-     "The report covers X."),
-    ("a<think>mid</think>b", "ab"),
-    ("<think>only thinking</think>", ""),
-    ("plain answer", "plain answer"),
-    ("", ""),
-    # An unmatched *opening* tag is left alone: cutting everything after it would
-    # discard the entire answer.
-    ("<think>unclosed and then the answer",
-     "<think>unclosed and then the answer"),
-])
-def test_reasoning_is_stripped_from_user_facing_text(raw, expected):
-    from app.agent.graph import strip_reasoning
-
-    assert strip_reasoning(raw) == expected
-
-
-def test_synthesized_answer_has_no_reasoning_markers():
-    a = RecordingLane("retrieval", delay=0.01)
-    model = StubModel(["retrieval"],
-                      synth="<think>hmm, let me see</think>\nThe dataset has 8,000 images.")
-    result = run(model, [a])
-    assert result["messages"][-1].content == "The dataset has 8,000 images."
-
-
 def test_chart_payload_precomputes_shares():
     """The model must never have to derive a percentage: given raw counts it
     reported "train 60%" under a chart correctly showing 75%. Tested on the
@@ -837,30 +810,19 @@ def test_a_proposal_lists_every_id_it_proposes_and_writes_nothing():
         conn.close()
 
 
-@pytest.mark.parametrize("reply,expect_retry,expect_answer", [
-    # The classic shape the handler already caught.
-    ("RETRY: ask for the split sizes instead", "ask for the split sizes instead", ""),
-    # The shape that leaked: a full answer, then the control token as its own
-    # paragraph. The user was shown the agent's instruction to itself.
-    ("The test split holds 1,000 images.\n\nRETRY: check whether agreement "
-     "metrics exist", "check whether agreement metrics exist",
-     "The test split holds 1,000 images."),
-    # Decorated by a model that likes markdown.
-    ("Answer.\n\n**RETRY:** try the other lane", "try the other lane", "Answer."),
-    # No token: the answer passes through untouched.
-    ("The corpus holds 8,000 images.", "", "The corpus holds 8,000 images."),
-])
-def test_the_quality_gate_token_never_reaches_the_reader(reply, expect_retry, expect_answer):
-    """`RETRY:` is the synthesizer's private word for "send this back".
+def test_quality_gate_retry_uses_the_structured_field():
+    """Retry control stays in SynthesisDecision rather than prose parsing."""
+    model = StubModel(
+        ["retrieval"],
+        synth="The corpus holds 8,000 images.",
+        retry_feedback="name the score basis",
+    )
+    result = run(model, [RecordingLane("retrieval")])
 
-    It was recognised only at position 0, so a model that answered and *then*
-    appended the token both skipped the retry and printed its own control
-    instruction into the chat, in the same voice as the answer.
-    """
-    retry, answer = _split_retry(reply)
-    assert retry == expect_retry
-    assert answer == expect_answer
-    assert "RETRY:" not in answer
+    assert model.calls.count("orchestrate") == 2
+    assert model.calls.count("synthesize") == 2
+    assert result["retries"] == 1
+    assert result["messages"][-1].content == "The corpus holds 8,000 images."
 
 
 @pytest.mark.parametrize("note", [
@@ -912,6 +874,19 @@ def test_router_propagates_arbitrary_claims_without_keyword_rules():
     assert "Claims requiring tool evidence" in orchestrator.content
 
 
+def test_router_discards_nonquoted_and_duplicate_claim_items():
+    """Only unique, exact, contiguous quotes from the latest user cross the gate."""
+    quoted = "The test split contains 1,000 images."
+    contradicted = "The test split contains 2,000 images."
+    result = run(
+        StubModel(["insights"], claims=[quoted, contradicted, quoted]),
+        [RecordingLane("insights")],
+        message=f"Please summarize this premise: {quoted}",
+    )
+
+    assert result["claims_to_verify"] == [quoted]
+
+
 def test_unverified_claim_cannot_escape_through_adversarial_synthesis():
     """A model that ignores its prompt cannot turn a flagged premise into fact."""
     claim = "Hubness correction improved accuracy by 30%."
@@ -937,7 +912,7 @@ def test_unverified_claim_cannot_escape_through_adversarial_synthesis():
     assert "produced a 30% accuracy improvement" not in answer
 
 
-def test_supported_claim_requires_an_exact_current_tool_excerpt():
+def test_supported_assessment_requires_an_exact_current_tool_excerpt():
     from langchain_core.messages import ToolMessage
 
     claim = "The test split contains 1,000 images."

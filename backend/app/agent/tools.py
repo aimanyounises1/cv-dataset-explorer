@@ -237,9 +237,10 @@ def dataset_overview() -> str:
 
 @tool
 def attribute_coverage() -> str:
-    """Zero-shot attribute coverage: how the dataset splits across setting,
-    time of day, environment, and main subject. Use to find rare slices
-    (long-tail / potential edge cases)."""
+    """Exploratory zero-shot prompt-bank distributions across setting, time of
+    day, environment, and main subject. These are review hypotheses rather than
+    ground-truth labels or accuracy estimates. Use them to nominate rare slices,
+    then inspect examples before claiming a long-tail finding."""
     conn = db.connect()
     try:
         total = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0] or 1

@@ -12,11 +12,14 @@ from .base import RawSample
 class Flickr8kAdapter:
     name = "flickr8k"
     hf_repo = "jxie/flickr8k"
+    # Full Hub commit, not `main`: a fresh ingest must see the same files and
+    # splits as the submission being reviewed.
+    hf_revision = "56f58c967835f7c508d684f36bd7897cca9d7634"
 
     def iter_samples(self, limit: Optional[int] = None) -> Iterator[RawSample]:
         from datasets import load_dataset  # lazy: heavy import
 
-        ds = load_dataset(self.hf_repo)
+        ds = load_dataset(self.hf_repo, revision=self.hf_revision)
         count = 0
         for split in ds.keys():
             caption_cols = [c for c in ds[split].column_names if c.lower().startswith("caption")]

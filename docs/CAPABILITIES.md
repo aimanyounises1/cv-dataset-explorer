@@ -9,7 +9,7 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 63 HTTP endpoints · 4 agent specialists · 22 agent tools · 17 tested workflows
+- 64 HTTP endpoints · 4 agent specialists · 22 agent tools · 17 tested workflows
 
 ## Views
 
@@ -18,7 +18,7 @@ capability the code does not have.
 | Find | `/` | Browse | Browse and search; every filter and the paging depth live in the URL. |
 | — | `/samples/:id` | Sample | One image: captions, attributes, exact neighbours, and a promptable object-mask editor with annotation search. |
 | Find | `/map` | Embedding map | UMAP projection of all embeddings. Lasso a region to hand that exact set to the gallery. |
-| Trust | `/stats` | Overview | Splits, caption lengths, vocabulary, image sizes, zero-shot attribute coverage. Bars open their slice. |
+| Trust | `/stats` | Overview | Splits, caption lengths, vocabulary, image sizes, and abstaining prompt-slice review hypotheses. Bars open their slice. |
 | Audit | `/quality` | Caption quality | Caption agreement distribution with a review threshold; the selection can leave as a gallery filter or an export. |
 | Trust | `/eval` | Retrieval benchmark | The tool measuring its own retrieval accuracy — R@1/5/10 for all three search modes. |
 | Ask | `/chat` | Assistant | Multi-agent assistant. Answers render as interactive charts, tables and reports, not prose about data. |
@@ -72,6 +72,7 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `GET /api/stats/captions` | Caption Stats |
 | `GET /api/stats/duplicates` | Duplicates |
 | `GET /api/stats/leakage` | Leakage Report |
+| `GET /api/stats/leakage/contaminated` | Contaminated Ids |
 | `GET /api/stats/overview` | Overview |
 
 ### Annotation QA
@@ -174,7 +175,7 @@ Finding or showing images: search, similar images, inspecting or tagging specifi
 
 ### `insights`
 
-Dataset statistics, attribute coverage, rare or long-tail slices, caption quality and annotation errors, stated in numbers.
+Dataset statistics, abstaining prompt-slice review hypotheses and coverage, rare or long-tail slices, caption quality and annotation errors, stated in numbers.
 
 - `dataset_overview`
 - `attribute_coverage`
@@ -253,4 +254,4 @@ and by the assistant on request — one registry, three consumers.
 - `docs/DEMO.md` — an eight-minute walkthrough
 - `docs/screenshots/` — one image per view
 
-<!-- generated 2026-07-28 -->
+<!-- generated 2026-07-29 -->

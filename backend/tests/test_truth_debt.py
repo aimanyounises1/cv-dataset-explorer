@@ -2,7 +2,9 @@
 
 Both are cases where a comment asserted a property the code did not have.
 """
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import numpy as np
 import pytest
@@ -43,49 +45,57 @@ def test_pairs_are_cached_for_the_same_corpus():
     assert index.calls == 1, "the expensive scan ran twice for one corpus"
 
 
-def test_the_cache_is_keyed_on_contents_not_object_identity():
-    """The property `id(index)` did not have.
+def test_equal_ids_from_different_indexes_do_not_share_pairs():
+    """Provider generations share IDs but never an embedding space."""
+    qwen = _FakeIndex([1, 2, 3], [(1, 2, 0.99)])
+    siglip = _FakeIndex([1, 2, 3], [(2, 3, 0.98)])
 
-    Asserted on the key itself rather than on a returned value: two live indexes
-    never share an `id()`, so a "call _pairs twice and compare results" test
-    passes under both implementations and proves nothing. The collision the old
-    key allowed needs one index to be freed and the next to land at the same
-    address, which is real but not something a test can schedule.
-
-    What *is* deterministic is which key the cache used.
-    """
-    index = _FakeIndex([1, 2, 3], [(1, 2, 0.99)])
-    leakage._pairs(index)
-
-    assert list(leakage._cache) == [leakage._cache_key(index)]
-    assert id(index) not in leakage._cache, "cache is keyed on the object address"
+    assert leakage._pairs(qwen) == [(1, 2, 0.99)]
+    assert leakage._pairs(siglip) == [(2, 3, 0.98)]
+    assert qwen.calls == 1
+    assert siglip.calls == 1
 
 
-def test_two_corpora_with_equal_ids_share_the_cached_scan():
-    """The flip side: content keying must not re-scan an identical corpus."""
-    a = _FakeIndex([1, 2, 3], [(1, 2, 0.99)])
-    b = _FakeIndex([1, 2, 3], [(1, 2, 0.99)])
-    leakage._pairs(a)
-    leakage._pairs(b)
-    assert b.calls == 0, "rescanned a corpus whose ids were already cached"
+def test_concurrent_requests_scan_one_index_once():
+    """The report and ID hand-off cold-load in parallel in the UI."""
+    started = Event()
+    release = Event()
+    second_scan = Event()
 
+    class _BlockingIndex(_FakeIndex):
+        def all_pairs_above(self, threshold):
+            self.calls += 1
+            if self.calls == 1:
+                started.set()
+                assert release.wait(timeout=1)
+            else:
+                second_scan.set()
+            return self._pairs
 
-def test_cache_key_ignores_object_identity_and_follows_contents():
-    a = _FakeIndex([1, 2, 3], [])
-    b = _FakeIndex([1, 2, 3], [])
-    assert leakage._cache_key(a) == leakage._cache_key(b)
-    assert leakage._cache_key(a) != leakage._cache_key(_FakeIndex([1, 2, 4], []))
+    index = _BlockingIndex([1, 2, 3], [(1, 2, 0.99)])
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(leakage._pairs, index)
+        assert started.wait(timeout=1)
+        second = pool.submit(leakage._pairs, index)
+        assert not second_scan.wait(timeout=0.05)
+        release.set()
+        assert first.result(timeout=1) == [(1, 2, 0.99)]
+        assert second.result(timeout=1) == [(1, 2, 0.99)]
+
+    assert index.calls == 1
 
 
 def test_admin_reload_clears_the_pair_cache():
     index = _FakeIndex([1, 2, 3], [(1, 2, 0.99)])
     leakage._pairs(index)
-    assert leakage._cache, "nothing was cached, so the test proves nothing"
+    assert leakage._cached_index is index
+    assert leakage._cached_pairs == [(1, 2, 0.99)]
 
     with TestClient(app) as client:
         assert client.post("/api/admin/reload").status_code == 200
 
-    assert not leakage._cache, "/api/admin/reload left the superseded pairs resident"
+    assert leakage._cached_index is None
+    assert leakage._cached_pairs is None
 
 
 # -- G8: run_id is a path segment --------------------------------------------

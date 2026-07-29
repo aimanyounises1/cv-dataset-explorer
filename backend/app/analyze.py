@@ -26,30 +26,34 @@ import numpy as np
 from tqdm import tqdm
 
 from . import config, db
+from .ml import providers
 from .ml.labels import LABEL_BANK, SOFTMAX_SCALE
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("analyze")
 
 
-def embed_captions(conn) -> None:
+def embed_captions(conn, embedder=None) -> None:
+    """Encode captions with the exact model snapshot bound to the index."""
     from tqdm import tqdm
-
-    from .ml.embedder import Embedder
-    from .ml.index import EmbeddingIndex
 
     rows = conn.execute("SELECT id, text FROM captions ORDER BY id").fetchall()
     if not rows:
         logger.warning("No captions to embed.")
         return
-    embedder = Embedder()
+    embedder = embedder or providers.load_encoder_for("siglip2")
     ids = np.array([r["id"] for r in rows], dtype=np.int64)
     texts = [r["text"] for r in rows]
     chunks = []
     batch = 256
     for i in tqdm(range(0, len(texts), batch), desc="Embedding captions"):
         chunks.append(embedder.encode_texts(texts[i : i + batch]))
-    EmbeddingIndex.save(ids, np.concatenate(chunks, axis=0), kind="caption")
+    emb_dir = config.emb_dir_for("siglip2")
+    providers.atomic_save_npy(emb_dir / "caption_ids.npy", ids)
+    providers.atomic_save_npy(
+        emb_dir / "caption_embeddings.npy",
+        np.concatenate(chunks, axis=0),
+    )
     logger.info("Saved %d caption embeddings.", len(ids))
 
 
@@ -87,15 +91,14 @@ def compute_caption_scores(conn) -> None:
     logger.info("Scored %d captions, %d samples.", len(updates), len(cons))
 
 
-def compute_attributes(conn) -> None:
-    from .ml.embedder import Embedder
+def compute_attributes(conn, embedder=None) -> None:
     from .ml.index import EmbeddingIndex
 
     img = EmbeddingIndex.load("image")
     if img is None:
         logger.error("Need image embeddings first (run `python -m app.ingest`).")
         return
-    embedder = Embedder()
+    embedder = embedder or providers.load_encoder_for("siglip2")
 
     conn.execute("DELETE FROM attributes")
     for grp, labels in LABEL_BANK.items():
@@ -356,15 +359,36 @@ def compute_axes(conn) -> None:
     logger.info("Wrote axis scores for %d samples.", len(updates))
 
 
-def run_all(conn, only: str = "all") -> None:
+def run_all(
+    conn,
+    only: str = "all",
+    *,
+    embedder=None,
+    snapshot: providers.ModelSnapshot | None = None,
+) -> None:
+    """Run analysis and commit a new marker after any caption-vector rewrite."""
+    rewrites_index = only in ("all", "captions")
+    if rewrites_index:
+        snapshot = snapshot or providers.validated_siglip_snapshot()
+        embedder = embedder or providers.load_encoder_for(
+            "siglip2", snapshot=snapshot)
+        # Standalone analysis starts from a valid marker; ingest has already
+        # removed it before writing image arrays. Re-removing is idempotent.
+        providers.remove_manifest(config.emb_dir_for("siglip2"))
+    elif only == "attributes" and embedder is None:
+        embedder = providers.load_encoder_for("siglip2")
+
     if only in ("all", "captions"):
-        embed_captions(conn)
+        embed_captions(conn, embedder=embedder)
         compute_caption_scores(conn)
     if only in ("all", "attributes"):
-        compute_attributes(conn)
+        compute_attributes(conn, embedder=embedder)
     if only in ("all", "axes"):
         # Last: difficulty reads the caption scores the earlier passes write.
         compute_axes(conn)
+    if rewrites_index:
+        assert snapshot is not None
+        providers.finalize_siglip_manifest(conn, snapshot)
 
 
 def main() -> int:

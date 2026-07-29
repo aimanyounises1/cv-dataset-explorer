@@ -6,7 +6,7 @@ and never returns its own source image.
     cd backend && pytest tests/test_region_search.py
 """
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -52,11 +52,17 @@ def ctx():
     index_mod.invalidate_index()
 
     import app.api.search as search_api
-    original = search_api.get_embedder
-    search_api.get_embedder = lambda: enc          # explicit injection
+    original = search_api.get_retrieval_bundle
+    runtime = SimpleNamespace(
+        encoder=enc,
+        image_index=index_mod.EmbeddingIndex(
+            np.array(sids, dtype=np.int64), vecs),
+        caption_index=None,
+    )
+    search_api.get_retrieval_bundle = lambda: runtime
     with TestClient(app) as client:
         yield client, sids
-    search_api.get_embedder = original
+    search_api.get_retrieval_bundle = original
     for i, sid in enumerate(sids):
         conn.execute("DELETE FROM captions WHERE sample_id = ?", (sid,))
         conn.execute("DELETE FROM samples WHERE id = ?", (sid,))

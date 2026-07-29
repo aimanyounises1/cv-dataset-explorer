@@ -48,6 +48,7 @@ this corpus, tuned on a dev split disjoint from both the bank and the benchmark.
 """
 import logging
 import threading
+from pathlib import Path
 from typing import Callable, Optional
 
 import numpy as np
@@ -75,7 +76,11 @@ MAX_BANK_FRACTION = 0.25
 Encoder = Callable[[list[str]], np.ndarray]
 
 
-def bank_caption_ids(conn, size: int = None) -> list[int]:
+def bank_caption_ids(
+    conn,
+    size: int = None,
+    index: EmbeddingIndex | None = None,
+) -> list[int]:
     """The held-out caption ids that estimate hubness.
 
     Deterministic given the corpus: a fixed seed over the sorted list of caption
@@ -85,7 +90,7 @@ def bank_caption_ids(conn, size: int = None) -> list[int]:
     in every process.
     """
     size = config.HUBNESS_BANK_SIZE if size is None else size
-    index = get_index()
+    index = index if index is not None else get_index()
     if index is None or size <= 0:
         return []
     rows = conn.execute("SELECT id, sample_id FROM captions ORDER BY id").fetchall()
@@ -138,7 +143,13 @@ def compute(
 
 # -- persistence --------------------------------------------------------------
 
-def _fingerprint(index: EmbeddingIndex) -> str:
+def _fingerprint(
+    index: EmbeddingIndex,
+    *,
+    emb_dir: Path | None = None,
+    model_id: str | None = None,
+    generation: str | None = None,
+) -> str:
     """Everything the artifact depends on. A stale penalty vector is worse than
     none: it is silently mis-aligned with the index it is subtracted from.
 
@@ -160,25 +171,40 @@ def _fingerprint(index: EmbeddingIndex) -> str:
     """
     from . import providers
 
+    target = emb_dir if emb_dir is not None else providers.active_emb_dir()
+    bound_model = model_id or providers.active_model_id()
     stamp = 0.0
     for name in ("image_embeddings.npy", "sample_ids.npy"):
-        p = providers.active_emb_dir() / name
+        p = target / name
         if p.exists():
             stamp = max(stamp, p.stat().st_mtime)
-    return (f"{providers.active_model_id()}|{config.HUBNESS_TEMPERATURE}|"
+    return (f"{bound_model}|{generation or ''}|{config.HUBNESS_TEMPERATURE}|"
             f"{config.HUBNESS_BANK_SIZE}|{len(index.ids)}|{int(stamp)}")
 
 
-def _path():
+def _path(emb_dir: Path | None = None):
     # Provider-scoped: a penalty estimated in one embedding space is
     # meaningless in another, so each provider's index dir carries its own.
     from . import providers
 
-    return providers.active_emb_dir() / "hubness.npz"
+    target = emb_dir if emb_dir is not None else providers.active_emb_dir()
+    return target / "hubness.npz"
 
 
-def build(conn, encode: Encoder, index: Optional[EmbeddingIndex] = None
-          ) -> Optional[np.ndarray]:
+def _bound_path(emb_dir: Path | None):
+    """Keep the legacy no-argument path seam for direct unit callers."""
+    return _path() if emb_dir is None else _path(emb_dir)
+
+
+def build(
+    conn,
+    encode: Encoder,
+    index: Optional[EmbeddingIndex] = None,
+    *,
+    emb_dir: Path | None = None,
+    model_id: str | None = None,
+    generation: str | None = None,
+) -> Optional[np.ndarray]:
     """Encode the bank, compute the penalty, and cache it. Returns None if there
     is nothing to build from.
 
@@ -188,7 +214,7 @@ def build(conn, encode: Encoder, index: Optional[EmbeddingIndex] = None
     index = index if index is not None else get_index()
     if index is None:
         return None
-    ids = bank_caption_ids(conn)
+    ids = bank_caption_ids(conn, index=index)
     if not ids:
         return None
     qmarks = ",".join("?" * len(ids))
@@ -201,20 +227,43 @@ def build(conn, encode: Encoder, index: Optional[EmbeddingIndex] = None
     sample_ids = np.array([r["sample_id"] for r in rows], dtype=np.int64)
     penalty = compute(vectors, sample_ids, index)
     config.ensure_dirs()
-    np.savez(_path(), penalty=penalty, ids=index.ids,
-             fingerprint=np.array(_fingerprint(index)))
+    artifact_path = _bound_path(emb_dir)
+    np.savez(
+        artifact_path,
+        penalty=penalty,
+        ids=index.ids,
+        fingerprint=np.array(_fingerprint(
+            index,
+            emb_dir=emb_dir,
+            model_id=model_id,
+            generation=generation,
+        )),
+    )
     logger.info("Built hubness penalty from %d bank captions", len(rows))
     return penalty
 
 
-def load(index: Optional[EmbeddingIndex] = None) -> Optional[np.ndarray]:
+def load(
+    index: Optional[EmbeddingIndex] = None,
+    *,
+    emb_dir: Path | None = None,
+    model_id: str | None = None,
+    generation: str | None = None,
+) -> Optional[np.ndarray]:
     """The cached penalty, or None when it is absent or stale."""
     index = index if index is not None else get_index()
-    if index is None or not _path().exists():
+    artifact_path = _bound_path(emb_dir)
+    if index is None or not artifact_path.exists():
         return None
     try:
-        blob = np.load(_path(), allow_pickle=False)
-        if str(blob["fingerprint"]) != _fingerprint(index):
+        blob = np.load(artifact_path, allow_pickle=False)
+        fingerprint = _fingerprint(
+            index,
+            emb_dir=emb_dir,
+            model_id=model_id,
+            generation=generation,
+        )
+        if str(blob["fingerprint"]) != fingerprint:
             logger.info("Hubness artifact is stale; ignoring it.")
             return None
         penalty = blob["penalty"]
@@ -232,10 +281,15 @@ def load(index: Optional[EmbeddingIndex] = None) -> Optional[np.ndarray]:
 
 _lock = threading.Lock()
 _cache: dict[str, Optional[np.ndarray]] = {}
-_build_failed = False
+_build_failed: set[str] = set()
 
 
-def get_penalty(conn, encode: Optional[Encoder] = None) -> Optional[np.ndarray]:
+def get_penalty(
+    conn,
+    encode: Optional[Encoder] = None,
+    *,
+    runtime=None,
+) -> Optional[np.ndarray]:
     """The vector to subtract from a semantic score vector, or None.
 
     Already scaled by `HUBNESS_BETA`, so a caller subtracts it directly and
@@ -251,42 +305,74 @@ def get_penalty(conn, encode: Optional[Encoder] = None) -> Optional[np.ndarray]:
     treat None as "rank exactly as before", which is what keeps the app working
     with no model and no artifact on disk.
     """
-    global _build_failed
     if config.HUBNESS_BETA == 0:
         return None
-    index = get_index()
+    if runtime is None:
+        index = get_index()
+        emb_dir = model_id = generation = None
+    else:
+        index = runtime.image_index
+        emb_dir = runtime.emb_dir
+        model_id = runtime.model_id
+        generation = runtime.generation
     if index is None:
         return None
-    if "penalty" in _cache:
-        return _cache["penalty"]
+    fingerprint = _fingerprint(
+        index,
+        emb_dir=emb_dir,
+        model_id=model_id,
+        generation=generation,
+    )
+    cache_key = f"{fingerprint}|beta={config.HUBNESS_BETA}"
+    if cache_key in _cache:
+        return _cache[cache_key]
     with _lock:
-        if "penalty" in _cache:
-            return _cache["penalty"]
-        penalty = load(index)
+        if cache_key in _cache:
+            return _cache[cache_key]
+        if runtime is None:
+            penalty = load(index)
+        else:
+            penalty = load(
+                index,
+                emb_dir=emb_dir,
+                model_id=model_id,
+                generation=generation,
+            )
         if penalty is None and encode is not None and config.HUBNESS_AUTOBUILD \
-                and not _build_failed:
+                and cache_key not in _build_failed:
             try:
-                penalty = build(conn, encode, index)
+                if runtime is None:
+                    penalty = build(conn, encode, index)
+                else:
+                    penalty = build(
+                        conn,
+                        encode,
+                        index,
+                        emb_dir=emb_dir,
+                        model_id=model_id,
+                        generation=generation,
+                    )
             except Exception as exc:
                 # Never let a failed build break search; degrade to uncorrected
                 # ranking and stop retrying the build on every request.
                 logger.warning("Hubness build failed: %s", exc)
-                _build_failed = True
+                _build_failed.add(cache_key)
         # The outcome is cached even when it is None — a corpus too small for a
         # bank would otherwise re-scan the captions table on every single query.
         # `invalidate()` is what re-opens the question, and /api/admin/reload
         # calls it.
-        _cache["penalty"] = (None if penalty is None
-                             else (config.HUBNESS_BETA * penalty).astype(np.float32))
-    return _cache["penalty"]
+        _cache[cache_key] = (
+            None if penalty is None
+            else (config.HUBNESS_BETA * penalty).astype(np.float32)
+        )
+    return _cache[cache_key]
 
 
 def invalidate() -> None:
     """Drop the cached penalty (called when the indexes are reloaded)."""
-    global _build_failed
     with _lock:
         _cache.clear()
-        _build_failed = False
+        _build_failed.clear()
 
 
 def main() -> None:
@@ -297,12 +383,11 @@ def main() -> None:
     from ..api import search as search_api
 
     _logging.basicConfig(level=_logging.INFO)
-    embedder = search_api.get_embedder()
-    if embedder is None:
+    runtime = search_api.get_retrieval_bundle()
+    if runtime is None:
         raise SystemExit("Embedding model unavailable — cannot build the bank.")
-    index = get_index()
-    if index is None:
-        raise SystemExit("No image index — run `python -m app.ingest` first.")
+    embedder = runtime.encoder
+    index = runtime.image_index
 
     def encode(texts: list[str]) -> np.ndarray:
         prompts = [search_api.normalize_query_text(t) for t in texts]
@@ -312,12 +397,19 @@ def main() -> None:
 
     conn = db.connect()
     try:
-        penalty = build(conn, encode, index)
+        penalty = build(
+            conn,
+            encode,
+            index,
+            emb_dir=runtime.emb_dir,
+            model_id=runtime.model_id,
+            generation=runtime.generation,
+        )
     finally:
         conn.close()
     if penalty is None:
         raise SystemExit("Nothing to build from.")
-    print(f"Wrote {_path()} — {penalty.nbytes / 1024:.0f} kB, "
+    print(f"Wrote {_path(runtime.emb_dir)} — {penalty.nbytes / 1024:.0f} kB, "
           f"penalty range [{penalty.min():.4f}, {penalty.max():.4f}]")
 
 

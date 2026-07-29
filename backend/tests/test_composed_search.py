@@ -7,6 +7,8 @@ real cluster structure to find.
 
     cd backend && pytest tests/test_composed_search.py
 """
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
@@ -69,13 +71,18 @@ def ctx():
     conn.commit()
     EmbeddingIndex.save(np.array(ids), np.stack(vecs), kind="image")
     invalidate_index()
-    real_get_embedder = search_module.get_embedder
-    search_module.get_embedder = lambda: FakeEmbedder()
+    image_index = EmbeddingIndex.load("image")
+    real_get_runtime = search_module.get_retrieval_bundle
+    search_module.get_retrieval_bundle = lambda: SimpleNamespace(
+        encoder=FakeEmbedder(),
+        image_index=image_index,
+        caption_index=None,
+    )
     try:
         with TestClient(app) as c:
             yield c, by_concept
     finally:
-        search_module.get_embedder = real_get_embedder
+        search_module.get_retrieval_bundle = real_get_runtime
         from app import config
         for f in config.EMB_DIR.glob("*.npy"):
             f.unlink(missing_ok=True)

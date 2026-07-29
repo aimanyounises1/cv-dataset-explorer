@@ -113,7 +113,7 @@ def _weights_cached(model: str) -> bool:
 def sam2_ready(model: str) -> tuple[bool, str | None]:
     """Cheap probe, same contract as `detect.detect_ready`: no model load."""
     try:
-        import torch            # noqa: F401
+        import torch  # noqa: F401
         import transformers
     except ImportError:
         return False, "torch/transformers not installed — the base requirements provide them"
@@ -299,10 +299,11 @@ def child(args) -> int:                                   # noqa: C901
     # ---- The product question, in numbers -------------------------------
     # Does a mask change what retrieval returns? Same embedder, same index,
     # same crop geometry as POST /api/search/by-region.
-    from app.ml.index import get_index
-    from app.ml.providers import get_encoder
+    from app.ml.providers import get_retrieval_bundle
 
-    index, embedder = (None, None) if args.isolate else (get_index(), get_encoder())
+    runtime = None if args.isolate else get_retrieval_bundle()
+    index = runtime.image_index if runtime is not None else None
+    embedder = runtime.encoder if runtime is not None else None
     if args.isolate:
         out["retrieval_note"] = "--isolate: SAM2 measured alone, ranking effect skipped"
     elif index is None or embedder is None:

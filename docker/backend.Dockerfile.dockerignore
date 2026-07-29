@@ -9,6 +9,7 @@
 *
 
 !backend/requirements.txt
+!backend/requirements-agent.txt
 !backend/pyproject.toml
 !backend/app/
 !backend/tests/

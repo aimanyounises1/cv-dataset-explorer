@@ -118,8 +118,8 @@ def render() -> str:
                         "a promptable object-mask editor with annotation search.",
         "/map": "UMAP projection of all embeddings. Lasso a region to hand that "
                 "exact set to the gallery.",
-        "/stats": "Splits, caption lengths, vocabulary, image sizes, zero-shot "
-                  "attribute coverage. Bars open their slice.",
+        "/stats": "Splits, caption lengths, vocabulary, image sizes, and "
+                  "abstaining prompt-slice review hypotheses. Bars open their slice.",
         "/quality": "Caption agreement distribution with a review threshold; the "
                     "selection can leave as a gallery filter or an export.",
         "/eval": "The tool measuring its own retrieval accuracy — R@1/5/10 for all "

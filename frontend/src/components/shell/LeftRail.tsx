@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
@@ -85,7 +85,7 @@ const GROUPS: Group[] = [
         views: [
           { to: "/stats", label: "Overview", end: true },
           { to: "/stats?view=integrity", label: "Split integrity" },
-          { to: "/stats?view=coverage", label: "Coverage" },
+          { to: "/stats?view=coverage", label: "Prompt slices" },
           { to: "/stats?view=captions", label: "Caption health" },
           { to: "/stats?view=provenance", label: "Provenance" },
         ] },
@@ -143,11 +143,22 @@ function retrievalActive(ov: StatsOverview | null): boolean {
 }
 
 const RAIL_KEY = "cvde-rail";
+const COMPACT_RAIL_QUERY = "(max-width: 1100px)";
+
+function compactRailMatches(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(COMPACT_RAIL_QUERY).matches;
+}
 
 export default function LeftRail() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);
   const [chat, setChat] = useState<ChatStatus | null>(null);
   const [histOpen, setHistOpen] = useState(false);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [compactRail, setCompactRail] = useState(compactRailMatches);
+  const toolsTriggerRef = useRef<HTMLButtonElement>(null);
+  const toolsDialogRef = useRef<HTMLElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
   // Read-only: the chip count on the collapsed strip's filter key, so
@@ -173,6 +184,103 @@ export default function LeftRail() {
     return () => { live = false; };
   }, []);
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return undefined;
+    const media = window.matchMedia(COMPACT_RAIL_QUERY);
+    const onChange = (event: MediaQueryListEvent) => {
+      setCompactRail(event.matches);
+      if (!event.matches) {
+        setMobileToolsOpen(false);
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(".rail-link.active")?.focus();
+        });
+      }
+    };
+    setCompactRail(media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  const closeMobileTools = (restoreFocus = true) => {
+    setMobileToolsOpen(false);
+    if (restoreFocus) {
+      requestAnimationFrame(() => toolsTriggerRef.current?.focus());
+    }
+  };
+
+  useEffect(() => {
+    if (!compactRail || !mobileToolsOpen) return undefined;
+    const dialog = toolsDialogRef.current;
+    if (!dialog) return undefined;
+
+    const focusableSelector = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "[tabindex]:not([tabindex='-1'])",
+    ].join(",");
+    const focusable = () => Array.from(
+      dialog.querySelectorAll<HTMLElement>(focusableSelector),
+    ).filter((element) => element.getClientRects().length > 0);
+
+    const background = Array.from(document.querySelectorAll<HTMLElement>([
+      ".pane",
+      ".rail-r",
+      ".rail-brand",
+      ".rail-mobile-tools-btn",
+      ".rail-groups",
+      ".rail-foot",
+    ].join(","))).filter((element) => !dialog.contains(element));
+    const priorInert = background.map((element) => element.hasAttribute("inert"));
+    background.forEach((element) => element.setAttribute("inert", ""));
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = requestAnimationFrame(() => focusable()[0]?.focus());
+
+    const containFocus = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMobileTools();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", containFocus);
+
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", containFocus);
+      background.forEach((element, index) => {
+        if (!priorInert[index]) element.removeAttribute("inert");
+      });
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [compactRail, mobileToolsOpen]);
+
+  const restoreView = (query: string) => {
+    navigate(query ? `/?${query}` : "/");
+  };
+
   return (
     <nav className={`rail-l${collapsed ? " collapsed" : ""}`} aria-label="Sections">
       <div className="rail-brand">
@@ -185,95 +293,129 @@ export default function LeftRail() {
         </button>
       </div>
 
-      <div className="rail-groups">
-        {GROUPS.map((g) => (
-          <div className="rail-group" key={g.title}>
-            <div className="eyebrow rail-group-title">{g.title}</div>
-            {g.items.map((it) => (
-              <Fragment key={it.to}>
-                <NavLink to={railTo(it.to, location.pathname, location.search)}
-                         end={it.end}
-                         title={collapsed ? `${it.label} — ${it.hint}` : it.hint}
-                         className={({ isActive }) =>
-                           `rail-link${isActive ? " active" : ""}`}>
-                  {/* Both spans always render; CSS swaps them, so collapsing
-                      never remounts the nav or loses keyboard focus. */}
-                  <span className="rail-link-label">{it.label}</span>
-                  <span className="rail-link-min" aria-hidden="true">{it.label[0]}</span>
-                </NavLink>
-                {/* A destination's own views, shown only while you are there —
-                    and never in the collapsed strip, which has room for one
-                    letter per row. */}
-                {it.views && !collapsed && location.pathname === it.to && (
-                  <div className="rail-views">
-                    {it.views.map((v) => {
-                      const active = location.pathname + location.search === v.to
-                        || (v.end && location.pathname === it.to && !location.search);
-                      return (
-                        <Link key={v.to} to={v.to}
-                              aria-current={active ? "page" : undefined}
-                              className={`rail-view${active ? " active" : ""}`}>
-                          {v.label}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </Fragment>
-            ))}
-          </div>
-        ))}
+      <button
+        className="rail-mobile-tools-btn"
+        type="button"
+        ref={toolsTriggerRef}
+        aria-expanded={mobileToolsOpen}
+        aria-controls="rail-mobile-tools"
+        onClick={() => setMobileToolsOpen(true)}
+      >
+        Filters{sel.chips.length > 0 ? ` · ${sel.chips.length}` : ""}
+      </button>
 
-        {/* The library lives with navigation, not with the selection: a saved
-            view is how you COME BACK, so it must be reachable when nothing is
-            selected yet — which is exactly when the selection rail is absent.
-            Saving captures the gallery's query string (the only route whose
-            search params are a filter set); restoring navigates there. */}
-        <div className="rail-group rail-library">
-          <div className="eyebrow rail-group-title">Library</div>
-          {/* Albums before saved views: an album is a destination you return
-              to daily; a saved view is a filter recipe. Both are the library —
-              where you come back to — so both live with navigation. */}
-          <AlbumShelf />
-          <SavedViews
-            current={location.pathname === "/" ? location.search : ""}
-            onRestore={(qs) => navigate(qs ? `/?${qs}` : "/")}
-          />
+      <div className="rail-scroll">
+        <div className="rail-groups">
+          {GROUPS.map((g) => (
+            <div className="rail-group" key={g.title}>
+              <div className="eyebrow rail-group-title">{g.title}</div>
+              {g.items.map((it) => (
+                <Fragment key={it.to}>
+                  <NavLink to={railTo(it.to, location.pathname, location.search)}
+                           end={it.end}
+                           title={collapsed ? `${it.label} — ${it.hint}` : it.hint}
+                           className={({ isActive }) =>
+                             `rail-link${isActive ? " active" : ""}`}>
+                    {/* Both spans always render; CSS swaps them, so collapsing
+                        never remounts the nav or loses keyboard focus. */}
+                    <span className="rail-link-label">{it.label}</span>
+                    <span className="rail-link-min" aria-hidden="true">{it.label[0]}</span>
+                  </NavLink>
+                  {/* A destination's own views, shown only while you are there —
+                      and never in the collapsed strip, which has room for one
+                      letter per row. */}
+                  {it.views && !collapsed && location.pathname === it.to && (
+                    <div className="rail-views">
+                      {it.views.map((v) => {
+                        const active = location.pathname + location.search === v.to
+                          || (v.end && location.pathname === it.to && !location.search);
+                        return (
+                          <Link key={v.to} to={v.to}
+                                aria-current={active ? "page" : undefined}
+                                className={`rail-view${active ? " active" : ""}`}>
+                            {v.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </Fragment>
+              ))}
+            </div>
+          ))}
+
+          {/* The collapsed strip keeps one way back into filters and the
+              library. The count is the active-chip count — an amber badge says
+              "this strip is hiding live constraints", which is exactly the state
+              that must never be silent. */}
+          {collapsed && location.pathname === "/" && (
+            <button className="rail-filter-key" onClick={() => setCollapsed(false)}
+                    title={"Filters and library — expand the rail"
+                           + (sel.chips.length ? ` (${sel.chips.length} active)` : "")}>
+              ≡
+              {sel.chips.length > 0 && (
+                <span className="rail-filter-count">{sel.chips.length}</span>
+              )}
+            </button>
+          )}
+
+          {/* The models card folded to one dot: the collapsed strip hides the
+              whole footer, but "retrieval is degraded" must never be one of the
+              things collapsing hides. Expanding is the way to read the detail. */}
+          {collapsed && (
+            <button className="rail-models-key" onClick={() => setCollapsed(false)}
+                    title={"Models — retrieval "
+                           + (retrievalActive(overview) ? "active" : "keyword only")
+                           + ", assistant "
+                           + (chat?.available ? "ready" : "unavailable")
+                           + ". Expand the rail for detail."}>
+              <span className={"models-dot "
+                               + (retrievalActive(overview) && chat?.available
+                                  ? "ok" : "warn")}
+                    aria-hidden="true" />
+            </button>
+          )}
         </div>
 
-        <FilterPanel />
-
-        {/* The collapsed strip keeps one way back into filters and the
-            library. The count is the active-chip count — an amber badge says
-            "this strip is hiding live constraints", which is exactly the state
-            that must never be silent. */}
-        {collapsed && location.pathname === "/" && (
-          <button className="rail-filter-key" onClick={() => setCollapsed(false)}
-                  title={"Filters and library — expand the rail"
-                         + (sel.chips.length ? ` (${sel.chips.length} active)` : "")}>
-            ≡
-            {sel.chips.length > 0 && (
-              <span className="rail-filter-count">{sel.chips.length}</span>
-            )}
-          </button>
-        )}
-
-        {/* The models card folded to one dot: the collapsed strip hides the
-            whole footer, but "retrieval is degraded" must never be one of the
-            things collapsing hides. Expanding is the way to read the detail. */}
-        {collapsed && (
-          <button className="rail-models-key" onClick={() => setCollapsed(false)}
-                  title={"Models — retrieval "
-                         + (retrievalActive(overview) ? "active" : "keyword only")
-                         + ", assistant "
-                         + (chat?.available ? "ready" : "unavailable")
-                         + ". Expand the rail for detail."}>
-            <span className={"models-dot "
-                             + (retrievalActive(overview) && chat?.available
-                                ? "ok" : "warn")}
-                  aria-hidden="true" />
-          </button>
-        )}
+        {/* One mounted copy serves both layouts. At compact widths this same
+            stateful tree becomes a modal surface; it is never duplicated behind
+            the drawer, so saved views and API-backed filters cannot diverge. */}
+        <section
+          id="rail-mobile-tools"
+          ref={toolsDialogRef}
+          className={`rail-tools-surface${mobileToolsOpen ? " open" : ""}`}
+          role={compactRail && mobileToolsOpen ? "dialog" : undefined}
+          aria-modal={compactRail && mobileToolsOpen ? "true" : undefined}
+          aria-label={compactRail && mobileToolsOpen ? "Filters and library" : undefined}
+          tabIndex={compactRail && mobileToolsOpen ? -1 : undefined}
+        >
+          <header className="rail-tools-head">
+            <div>
+              <div className="eyebrow">Browse tools</div>
+              <strong>Filters and library</strong>
+            </div>
+            <button
+              className="hist-close"
+              type="button"
+              aria-label="Close filters and library"
+              onClick={() => closeMobileTools()}
+            >
+              ×
+            </button>
+          </header>
+          <div className="rail-tools-body">
+            {/* The library lives with navigation, not with the selection: a
+                saved view is how you come back. Restoring from the compact
+                surface also closes it; desktop restoration keeps the rail. */}
+            <LibraryAndFilters
+              current={location.pathname === "/" ? location.search : ""}
+              onRestore={(query) => {
+                restoreView(query);
+                if (compactRail) closeMobileTools();
+              }}
+            />
+          </div>
+        </section>
       </div>
 
       <div className="rail-foot">
@@ -297,7 +439,36 @@ export default function LeftRail() {
           painted over it and the backdrop never dimmed anything. */}
       {histOpen && createPortal(
         <HistoryDrawer onClose={() => setHistOpen(false)} />, document.body)}
+      {compactRail && mobileToolsOpen && createPortal(
+        <div
+          className="rail-tools-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeMobileTools();
+          }}
+          aria-hidden="true"
+        />,
+        document.body,
+      )}
     </nav>
+  );
+}
+
+function LibraryAndFilters({
+  current,
+  onRestore,
+}: {
+  current: string;
+  onRestore: (query: string) => void;
+}) {
+  return (
+    <>
+      <div className="rail-group rail-library">
+        <div className="eyebrow rail-group-title">Library</div>
+        <AlbumShelf />
+        <SavedViews current={current} onRestore={onRestore} />
+      </div>
+      <FilterPanel />
+    </>
   );
 }
 

@@ -186,8 +186,15 @@ def test_search_by_annotation_blends_leaf_label_and_excludes_source(ctx, monkeyp
         encoder.encode_images(images))
     import app.api.search as search_api
 
-    monkeypatch.setattr(search_api, "get_index", lambda: index)
-    monkeypatch.setattr(search_api, "get_embedder", lambda: encoder)
+    monkeypatch.setattr(
+        search_api,
+        "get_retrieval_bundle",
+        lambda: SimpleNamespace(
+            encoder=encoder,
+            image_index=index,
+            caption_index=None,
+        ),
+    )
     response = client.post(
         "/api/search/by-annotation",
         json={"annotation_id": annotation["id"], "top_k": 3})

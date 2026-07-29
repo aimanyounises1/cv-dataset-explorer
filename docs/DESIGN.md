@@ -61,13 +61,14 @@ data-centric tooling (FiftyOne mistakenness, cleanlab), and it maps directly
 onto edge-case-mining workflows: find where annotations and sensor data
 disagree.
 
-### Zero-shot attribute coverage: the long-tail lens
-A small label bank (setting, time of day, environment, main subject) is
-classified zero-shot via text-embedding dot products against existing image
-embeddings — zero extra inference cost. The coverage dashboard makes class
-imbalance and rare slices ("night": <2%) visible and clickable, which is
-precisely the long-tail framing an AV data platform cares about. Adding a
-label group is editing one dict.
+### Zero-shot prompt slices: a long-tail review aid
+A small prompt bank (setting, time of day, environment, main subject) is scored
+via text-embedding dot products against existing image embeddings — zero extra
+request-time inference. A margin gate abstains when the top two prompts are too
+close. The dashboard makes the resulting distributions and small candidate
+slices visible and clickable, but presents them as hypotheses to inspect, not
+ground-truth classes or calibrated accuracy estimates. Adding a prompt group is
+editing one dict and re-running the analysis.
 
 ### The tool benchmarks its own search
 Flickr8k's captions are retrieval ground truth: querying with a caption should
@@ -81,17 +82,20 @@ flattered by self-retrieval. Semantic recall is the generalization signal.
 
 ### The assistant: Fugu-style orchestration as a *layer*, not the engine
 The optional Assistant runs a LangGraph multi-agent graph inspired by Sakana's
-Fugu (a multi-agent system behind a single interface): an **orchestrator**
-classifies the request and dispatches a **retrieval specialist** (search,
-similar, inspect, tag) or an **insights specialist** (stats, coverage, caption
-QA); a **synthesizer** verifies the result against the request and either
-finalizes it or sends it back for one corrective round. Two design rules keep
-it honest: (1) agents call the *same service functions as the REST API* — the
-deterministic search stack stays the platform's engine, agents are a
-conversational client of it; (2) the whole stack is optional (separate
-requirements file, availability probe, setup instructions in the UI) because a
-review machine without Ollama must still experience a complete product. The
-per-answer agent/tool trace is shown in the UI — transparency over magic.
+Fugu (a multi-agent system behind a single interface). Its registry currently
+declares four lanes: **retrieval** (search, similar, inspect, tag proposals),
+**insights** (statistics, coverage, caption QA), **visualization** (charts and
+reports), and an expensive **QA** lane (the real-browser sweep). A
+schema-constrained orchestrator selects from that registry, LangGraph fans out
+to at most two cheap lanes, and a typed synthesizer either finalizes the result
+or returns one bounded corrective instruction. Two design rules keep it honest:
+(1) retrieval calls the same `run_search` service as the REST API, while
+inspection tools are read-only SQL over the same store — the deterministic
+search stack stays the platform's engine, and dataset writes remain behind the
+human-operated REST UI; (2) the whole stack is optional (separate requirements
+file, availability probe, setup instructions in the UI) because a review
+machine without Ollama must still experience a complete product. The per-answer
+agent/tool trace is shown in the UI — transparency over magic.
 
 ### Graceful degradation as a design principle
 Every ML-dependent feature detects its own availability: no embeddings →
@@ -99,11 +103,17 @@ keyword search with an explanatory banner, similarity/map/duplicates report
 what to run to enable them. Reviewers can go from `git clone` to a working app
 with `--skip-embeddings` in minutes, then opt into the heavier stages.
 
-### Generic core, dataset-specific edges
-The only Flickr8k-specific code is one adapter (`app/datasets/flickr8k.py`)
-that yields `(image, split, captions)` samples. Ingestion, storage, search,
-stats, and the entire frontend are dataset-agnostic; a new dataset means one
-new adapter class registered in `app/datasets/__init__.py`.
+### Reusable ingestion core, explicit dataset-specific analysis
+`app/datasets/flickr8k.py` is the boundary that turns Flickr8k into
+`(image, split, captions)` samples, and ingestion, storage, thumbnails and the
+basic retrieval path reuse that contract. The finished product is intentionally
+specialized beyond that boundary: the benchmark assumes image-caption
+retrieval, several analyses assume caption sets and canonical splits, the
+zero-shot prompt bank is chosen for this corpus, and the UI names Flickr8k.
+Supporting a different image-caption dataset therefore starts with one adapter
+but also requires validating its split semantics, prompt bank, analysis
+calibration, benchmark protocol and dataset-facing copy. That work is explicit;
+the repository does not claim a one-file port of the whole application.
 
 ### SQLite + files, no services
 Images and thumbnails on disk, metadata/captions/tags in SQLite (WAL mode),
@@ -129,13 +139,17 @@ forward pass per semantic query, keeping the UI responsive.
 - **No client state library (Redux/Zustand)** — all state is either server
   state (fetched per view) or view state (in the URL). Adding a store would
   duplicate the URL as a second source of truth.
-- **Sync (`def`) endpoints, not `async`** — model inference and numpy are
-  blocking; sync handlers run on Starlette's threadpool and numpy/torch
-  release the GIL. `async def` here would stall the event loop — the classic
-  FastAPI trap. At real scale `async` is still not the fix; embedding leaves
-  the API process entirely, which is where the scale path below starts.
-- **No microservices/Docker split** — one backend, one frontend, one README;
-  reviewers should be running it in minutes, not composing containers.
+- **Sync handlers for blocking work; async only at I/O edges** — model
+  inference, NumPy and SQLite handlers run on Starlette's threadpool, while
+  streaming responses, uploads and protocol adapters use `async def` where
+  they await I/O. Putting blocking inference in an async handler would stall
+  the event loop. At real scale `async` is still not the inference fix;
+  embedding leaves the API process entirely, which is where the scale path
+  below starts.
+- **No microservice topology** — the optional Compose path packages the same
+  FastAPI process and built React frontend; it does not introduce queues,
+  service-owned databases or another retrieval implementation. The direct host
+  workflow remains the shortest evaluation path.
 
 ## Trade-offs accepted
 
@@ -175,10 +189,12 @@ from one click. What remains, in order:
    Agents remain read-only: they can inspect masks and search from an accepted
    annotation, but a human owns every curation write.
 5. **Scale path**: benchmark FAISS behind `EmbeddingIndex` once the corpus is
-   near 100k vectors and adopt it around the measured ~400k crossover, move
-   ingestion/analysis to a job queue, virtualized grid rendering, multi-worker
-   index sharing. pgvector only if the deployment becomes multi-user and
-   server-side, which is a different product.
+   near 100k vectors, and adopt it only when the measured recall/latency trade
+   beats exact search for the intended workload. The extrapolated ~400k
+   crossover is where that measurement becomes urgent, not a predetermined
+   cutover. Then move ingestion/analysis to a job queue, virtualize grid
+   rendering and share indexes across workers. pgvector enters only if the
+   deployment becomes multi-user and server-side, which is a different product.
 
 ## Scale path
 

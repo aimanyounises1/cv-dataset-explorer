@@ -80,8 +80,9 @@ similarities, and mean nothing about whether a caption fits its image.""",
 
 INSIGHTS = Specialist(
     name="insights",
-    summary="dataset statistics, attribute coverage, rare or long-tail slices, "
-            "caption quality and annotation errors, stated in numbers",
+    summary="dataset statistics, abstaining prompt-slice review hypotheses and "
+            "coverage, rare or long-tail slices, caption quality and annotation "
+            "errors, stated in numbers",
     prompt="""You are the dataset-insights specialist for a CV dataset platform.
 Use your tools to report statistics, attribute coverage, rare slices, and
 caption-quality findings. Ground every number in a tool result — never estimate.

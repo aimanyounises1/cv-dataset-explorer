@@ -7,11 +7,13 @@ produces), swaps the embedder behind the API's seam, and fully restores the
 world on teardown so the degradation tests in test_smoke.py stay valid
 regardless of execution order.
 """
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db
+from app import config, db
 from app.analyze import compute_caption_scores
 from app.api import search as search_module
 from app.api.search import normalize_query_text
@@ -94,16 +96,35 @@ def client():
     invalidate_index()
     compute_caption_scores(conn)
 
+    fake_embedder = FakeEmbedder()
     real_get_embedder = search_module.get_embedder
-    search_module.get_embedder = lambda: FakeEmbedder()  # inject behind the seam
+    real_get_runtime = search_module.get_retrieval_bundle
+    real_get_indexes = search_module.get_retrieval_index_bundle
+    real_bind_runtime = search_module.bind_retrieval_bundle
+    indexes = SimpleNamespace(
+        provider="test",
+        model_id="test/fake-embedder",
+        emb_dir=config.EMB_DIR,
+        generation="with-embeddings-fixture",
+        image_index=EmbeddingIndex.load("image"),
+        caption_index=EmbeddingIndex.load("caption"),
+        manifest={"dim": 8},
+    )
+    runtime = SimpleNamespace(**vars(indexes), encoder=fake_embedder)
+    search_module.get_embedder = lambda: fake_embedder
+    search_module.get_retrieval_bundle = lambda: runtime
+    search_module.get_retrieval_index_bundle = lambda: indexes
+    search_module.bind_retrieval_bundle = lambda bound: runtime
     try:
         with TestClient(app) as c:
             yield c
     finally:
         # Restore the world so order-independent degradation tests stay valid.
         search_module.get_embedder = real_get_embedder
+        search_module.get_retrieval_bundle = real_get_runtime
+        search_module.get_retrieval_index_bundle = real_get_indexes
+        search_module.bind_retrieval_bundle = real_bind_runtime
         FakeEmbedder.EXACT.clear()
-        from app import config
         for f in config.EMB_DIR.glob("*.npy"):
             f.unlink(missing_ok=True)
         for f in config.CACHE_DIR.glob("*.json"):
@@ -281,11 +302,20 @@ class _Recorder:
 def _with_recorder(client, call):
     rec = _Recorder()
     previous = search_module.get_embedder
+    previous_runtime = search_module.get_retrieval_bundle
+    previous_bind = search_module.bind_retrieval_bundle
+    runtime = previous_runtime()
     search_module.get_embedder = lambda: rec
+    recorded_runtime = SimpleNamespace(**vars(runtime))
+    recorded_runtime.encoder = rec
+    search_module.get_retrieval_bundle = lambda: recorded_runtime
+    search_module.bind_retrieval_bundle = lambda indexes: recorded_runtime
     try:
         call()
     finally:
         search_module.get_embedder = previous
+        search_module.get_retrieval_bundle = previous_runtime
+        search_module.bind_retrieval_bundle = previous_bind
     return rec
 
 
@@ -325,12 +355,16 @@ def test_benchmark_says_so_when_it_could_not_encode_the_queries(client):
 
     for f in config.CACHE_DIR.glob("eval_*.json"):
         f.unlink(missing_ok=True)
-    previous = search_module.get_embedder
-    search_module.get_embedder = lambda: None
+    previous = search_module.bind_retrieval_bundle
+
+    def fail_encoder(indexes):
+        raise RuntimeError("synthetic encoder construction failure")
+
+    search_module.bind_retrieval_bundle = fail_encoder
     try:
         body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
     finally:
-        search_module.get_embedder = previous
+        search_module.bind_retrieval_bundle = previous
         for f in config.CACHE_DIR.glob("eval_*.json"):
             f.unlink(missing_ok=True)
     assert body["available"] is True

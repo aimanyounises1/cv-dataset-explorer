@@ -1,9 +1,11 @@
-"""Zero-shot label bank for attribute enrichment.
+"""Zero-shot prompt bank for exploratory review slices.
 
-Each group is a mutually exclusive set of labels; each label maps to the text
-prompt embedded by SigLIP. Classification is a dot product against image
-embeddings that already exist, so adding a group costs nothing at inference
-time — edit this file and re-run `python -m app.analyze --only attributes`.
+Each image is assigned at most one prompt within a group, but the concepts are
+not a ground-truth taxonomy and the winning margin is not an accuracy estimate.
+Each entry maps a review label to text embedded by SigLIP. Classification is a
+dot product against image embeddings that already exist, so adding a group
+costs nothing at request time — edit this file and re-run
+`python -m app.analyze --only attributes`.
 """
 
 LABEL_BANK: dict[str, dict[str, str]] = {

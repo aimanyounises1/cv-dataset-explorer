@@ -7,6 +7,7 @@ the cosine the UI labels it.
 """
 import os
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -179,6 +180,44 @@ def test_get_penalty_applies_beta_itself(index, monkeypatch):
     monkeypatch.setattr(config, "HUBNESS_BETA", 0.25)
     try:
         assert np.allclose(hubness.get_penalty(conn=None), raw * 0.25)
+    finally:
+        hubness.invalidate()
+
+
+def test_penalty_cache_isolated_by_runtime_generation(
+    index, monkeypatch, tmp_path,
+):
+    """A preferred-provider flip cannot reuse an equal-length old penalty."""
+    qwen_raw = np.array([4.0, 3.0, 2.0, 1.0], dtype=np.float32)
+    siglip_raw = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    loaded: list[str] = []
+
+    def fake_load(_index, **bound):
+        loaded.append(bound["generation"])
+        return qwen_raw if bound["generation"] == "qwen-generation" else siglip_raw
+
+    monkeypatch.setattr(hubness, "load", fake_load)
+    monkeypatch.setattr(config, "HUBNESS_BETA", 0.25)
+    monkeypatch.setattr(config, "HUBNESS_AUTOBUILD", False)
+    qwen = SimpleNamespace(
+        image_index=index,
+        emb_dir=tmp_path / "qwen",
+        model_id="Qwen/Qwen3-VL-Embedding-2B",
+        generation="qwen-generation",
+    )
+    siglip = SimpleNamespace(
+        image_index=index,
+        emb_dir=tmp_path / "siglip",
+        model_id="google/siglip2",
+        generation="siglip-generation",
+    )
+    hubness.invalidate()
+    try:
+        assert np.allclose(
+            hubness.get_penalty(None, runtime=qwen), qwen_raw * 0.25)
+        assert np.allclose(
+            hubness.get_penalty(None, runtime=siglip), siglip_raw * 0.25)
+        assert loaded == ["qwen-generation", "siglip-generation"]
     finally:
         hubness.invalidate()
 

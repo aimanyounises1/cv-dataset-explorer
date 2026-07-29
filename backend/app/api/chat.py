@@ -362,23 +362,15 @@ def _build_response(conn, lc_messages, result, elapsed) -> ChatResponse:
             for block in payload.get("blocks", []) or []:
                 raw_blocks.append(block)
 
-    # Stripped again here, not only in the graph: a reply can also come from a
-    # specialist's own last message when the synthesizer had nothing to add, and
-    # that path never passed through the graph's cleanup.
-    from ..agent.graph import _split_retry, strip_reasoning
-
     reply = ""
     for msg in reversed(new_messages):
         if isinstance(msg, AIMessage) and msg.content and not getattr(msg, "tool_calls", None):
             raw = msg.content if isinstance(msg.content, str) else str(msg.content)
-            # The graph strips its own control token, but THIS is the fallback
-            # that runs when the graph produced no usable final message — which
-            # is exactly the case where the last thing said was a bare
-            # `RETRY: …`. Measured leaking to the reader in 2 of 5 turns. Strip
-            # it here too, and keep looking: a message that was ONLY the token
-            # has no answer in it, so the specialist's own last word is a better
-            # reply than the agent's note to itself.
-            _, cleaned = _split_retry(strip_reasoning(raw))
+            # Retry feedback is a typed SynthesisDecision field and therefore
+            # never enters message content. ChatOllama is configured with its
+            # documented `reasoning=False` mode, so content is already the
+            # user-facing answer rather than a reasoning-tag transport.
+            cleaned = raw.strip()
             # Internal notes are addressed to the graph, not to the reader:
             # `[orchestrator → retrieval] …`, `[retrieval ran out of time …]`,
             # `[quality gate] …`. They are AIMessages with content and no tool

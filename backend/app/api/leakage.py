@@ -12,16 +12,15 @@ thumbnails and never says which split either side came from, so the question
 "how much of my held-out set is contaminated?" could not be asked.
 
 **Why this endpoint returns a curve and not a number.** The answer depends
-entirely on where the threshold is put, and on this corpus that dependence is
-violent — measured here: at cosine 0.95 exactly 16 held-out images (0.80%) have a
-train near-duplicate, at 0.90 it is 241 (12.05%). A single headline figure at a
-hard-coded threshold would be an arbitrary choice presented as a measurement, so
-every response carries the whole ladder and the caller picks. The pair thumbnails
-are the point of appeal: 0.90-cosine "duplicates" must be looked at before they
-are believed.
+entirely on the threshold and the active embedding generation. A single
+headline figure at a fixed threshold would present an arbitrary choice as a
+measurement, so every response carries the whole ladder and the caller picks.
+The pair thumbnails are the point of appeal: candidate near-duplicates must be
+looked at before they are believed.
 """
 import sqlite3
-from typing import Optional
+import threading
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -42,39 +41,39 @@ router = APIRouter()
 # duplicate" stops meaning anything on SigLIP cosines.
 LADDER = (0.85, 0.90, 0.92, 0.95, 0.97, 0.99)
 FLOOR = LADDER[0]
+HeldOutSplit = Literal["test", "validation"]
 
-# Cached on the pair list, which is the expensive part; every threshold in the
-# ladder is then a filter over it.
-#
-# Keyed on the index *contents*, not `id(index)`. CPython reuses addresses: drop
-# an index and allocate the next one and the new object can land at the address
-# the old one just freed, so `id()` collides and this returns the previous
-# corpus's pairs for the current corpus — a wrong leakage report, silently, and
-# only after a reload. Hashing the id array costs microseconds against the
-# ~0.2 s scan it guards.
-_cache: dict[int, list[tuple[int, int, float]]] = {}
-
-
-def _cache_key(index) -> int:
-    return hash(index.ids.tobytes())
+# The O(n²) scan is cached for exactly one live index object. A strong reference
+# matters here: two providers deliberately have the same ordered sample IDs but
+# different vectors, so an ID-derived key would mix their leakage results. It
+# also prevents CPython from reusing the cached object's address. The lock keeps
+# the report and contaminated-id requests from launching the cold scan twice.
+_cache_lock = threading.Lock()
+_cached_index = None
+_cached_pairs: list[tuple[int, int, float]] | None = None
 
 
 def _pairs(index) -> list[tuple[int, int, float]]:
-    key = _cache_key(index)
-    if key not in _cache:
-        _cache.clear()                    # only ever one index generation is live
-        _cache[key] = index.all_pairs_above(FLOOR)
-    return _cache[key]
+    global _cached_index, _cached_pairs
+    with _cache_lock:
+        if _cached_index is not index:
+            pairs = index.all_pairs_above(FLOOR)
+            _cached_index = index
+            _cached_pairs = pairs
+        assert _cached_pairs is not None
+        return _cached_pairs
 
 
 def clear_cache() -> None:
     """Drop the cached pair list. Called by /api/admin/reload.
 
-    Content keying alone would already return the right answer after a reload,
-    but it would keep the superseded corpus's pairs resident — tens of thousands
-    of tuples — for the life of the process.
+    Clearing both references releases the superseded index and its potentially
+    large pair list together.
     """
-    _cache.clear()
+    global _cached_index, _cached_pairs
+    with _cache_lock:
+        _cached_index = None
+        _cached_pairs = None
 
 
 def _contaminated_ids(pairs: list[tuple[int, int, float]],
@@ -101,7 +100,9 @@ def _contaminated_ids(pairs: list[tuple[int, int, float]],
 @router.get("/stats/leakage/contaminated", response_model=LeakageContamination)
 def contaminated_ids(
     threshold: float = Query(0.90, ge=FLOOR, le=1.0),
-    split: Optional[str] = Query(None, description="Restrict the held-out side"),
+    split: Optional[HeldOutSplit] = Query(
+        None, description="Restrict the held-out side"
+    ),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     """The contaminated held-out ids themselves, as a set you can act on.
@@ -137,7 +138,9 @@ def contaminated_ids(
 def leakage_report(
     threshold: float = Query(0.90, ge=FLOOR, le=1.0),
     limit: int = Query(40, ge=0, le=200),
-    split: Optional[str] = Query(None, description="Restrict the held-out side"),
+    split: Optional[HeldOutSplit] = Query(
+        None, description="Restrict the held-out side"
+    ),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
     index = get_index()

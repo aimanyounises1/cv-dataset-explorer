@@ -14,7 +14,7 @@ flowchart TB
     UI["Gallery · Sample · Compare · Map · Stats · Quality · Benchmark · Assistant<br/>search and filter state lives in the URL query string"]
   end
 
-  subgraph be["Backend — FastAPI, one process, sync endpoints on the threadpool"]
+  subgraph be["Backend — FastAPI, one process; blocking handlers on the threadpool, async streaming/protocol edges"]
     RT["Routers: samples · search · segment · detect · stats · map · tags · views · describe · attributes<br/>qa · qa_run · eval · leakage · admin · chat · albums · activity · annotations"]
     SV["Service layer: run_search · build_filters · filtered_id_set<br/>one implementation, shared by REST, export and the agent tools"]
   end
@@ -53,7 +53,8 @@ flowchart TB
   RT -.->|"optional mask preview/accept"| SG
   IX --> NP
   IX -.->|"positionally aligned, invalidated together"| HB
-  AG -->|"calls the same service functions, never the DB"| SV
+  AG -->|"retrieval calls the same service functions"| SV
+  AG -.->|"read-only inspection queries"| DB
   QA -.->|"drives the real UI in a browser"| UI
   IG --> DB
   IG --> NP
@@ -70,8 +71,9 @@ The workspace surfaces added in the 2026-07-28 wave — albums (ordered
 collections with provenance), region annotations (rows over immutable images),
 the activity log (rides the caller's transaction), composed retrieval with
 scenario grouping, and the compare canvas — are all additive tables and routers
-over the same service layer: no new processes, no schema migrations, and the
-degradation rule below applies to each of them.
+over the same service layer: no new processes or external migration framework.
+Startup runs an idempotent schema migration before serving, and the degradation
+rule below applies to each surface.
 
 **Retrieval providers.** One active provider supplies both the query encoder
 and the vector index: `siglip2` is the default because it measures better on
@@ -80,14 +82,14 @@ parameter count is not quality), and `qwen3_vl` (Qwen3-VL-Embedding-2B,
 in-process through sentence-transformers — Ollama serves language models only
 and cannot host it) is the explicit opt-in alternative behind the same seam.
 Every step down the resolution chain carries a named reason that the status
-API and the rail surface. Each
-provider owns its index directory with a manifest (model id, measured
-dimension, prompt version, similarity floor), so two embedding spaces can
-never mix; fingerprints, saved-view provenance, the hubness penalty and the
-benchmark cache are all provider-scoped. The UMAP map, clusters, caption
-agreement and difficulty axes are computed in the SigLIP space at ingest time
-and are deliberately not re-derived by a provider switch — they are stored,
-SigLIP-derived signals and the docs say so.
+API and the rail surface. Each provider owns its index directory and a
+schema-v2 commit marker binding provider/model, the full cached Hugging Face
+commit, preprocessing fingerprint, vector contract, corpus/caption counts and
+ordered-ID hashes. Qwen also binds its prompt version. Fingerprints, saved-view
+provenance, the hubness penalty and the benchmark cache are provider-scoped.
+The UMAP map, clusters, caption agreement and difficulty axes are computed in
+the SigLIP space at ingest time and are deliberately not re-derived by a
+provider switch — they are stored, SigLIP-derived signals and the docs say so.
 
 ## What the request path is allowed to do
 
@@ -99,13 +101,14 @@ embeddings, the UMAP projection, clusters, thumbnails, agreement scores,
 attributes and difficulty axes -- is precomputed by a batch CLI and read as an
 artifact.
 
-Endpoints are deliberately sync `def`. FastAPI runs them on a threadpool and
-NumPy and torch release the GIL, while an `async def` endpoint calling blocking
-model inference would stall the event loop. The cost of that choice is that
-inference must be serialized explicitly: two threads through one SigLIP module
-on Metal either segfault or deadlock, so `Embedder` holds a lock per batch. At
-real scale the honest fix is different -- embedding moves out of the API process
-entirely, which is the first row of the seam map below.
+Handlers that perform blocking SQLite, NumPy or model work are deliberately
+sync `def`, so FastAPI runs them on a threadpool and NumPy and torch can release
+the GIL. Streaming responses, uploads and protocol adapters use `async def`
+where they actually await I/O; they do not move blocking inference onto the
+event loop. Inference is still serialized explicitly: two threads through one
+SigLIP module on Metal either segfault or deadlock, so `Embedder` holds a lock
+per batch. At real scale the honest fix is different -- embedding moves out of
+the API process entirely, which is the first row of the seam map below.
 
 ## Exact search, and the point where it stops being right
 
@@ -164,13 +167,15 @@ rather than rediscovered:
 
 ## Degradation boundaries
 
-The rule, stated once: a missing capability returns 200 with the degradation
-named in the response. It never 500s, and it never produces a different number
-under the same label.
+The rule, stated once: browse and retrieval endpoints return a named degraded
+result when a useful fallback exists. An explicit invocation that cannot run
+(for example assistant or self-QA without its optional stack) returns a
+setup-bearing 503. Missing optional capability never becomes an accidental 500
+or a different number under the same label.
 
 | Layer | Probe | Behaviour when absent |
 | --- | --- | --- |
-| Opt-in retrieval provider (qwen3_vl) | provider probe: stack imports, cached weights, index manifest | falls back to SigLIP 2 with the named reason and the rerun command; the flat SigLIP index is never touched |
+| Retrieval provider | stack imports, exact local model revision, schema-v2 commit marker and all four aligned arrays | a failed opt-in provider falls back only to a separately validated SigLIP index; with no valid provider, retrieval becomes keyword-only and names the exact rebuild command |
 | Semantic and hybrid search | `get_index()` and `get_embedder()` | ranks by BM25 instead, sets `degraded`, `mode_used: keyword`, and a message naming the command to run |
 | Composed search (`?like=`/`?unlike=`) | index + encoder presence | ranks the steering text by keyword instead, says so, and reports the references as ignored |
 | Region proposals | Grounding DINO imports + cached weights | the editor keeps manual point/box prompting and names the weight-fetch command |
@@ -190,6 +195,16 @@ produced it, so each consumer validates rather than assumes.
 
 - Vectors are L2-normalised at write time, so cosine similarity *is* the dot
   product and no query-time normalisation can be forgotten.
+- Before any image or caption array changes, ingestion removes the previous
+  commit marker. Arrays are replaced atomically; only after their dimensions,
+  float32 dtype, row counts and ordered IDs agree with SQLite does the manifest
+  become the final atomic write. An interrupted build is therefore unservable,
+  not half-old and half-new.
+- The probe resolves the manifest's full 40-character revision through
+  Hugging Face's supported cache APIs with `local_files_only=True`, verifies a
+  SHA-256 fingerprint of the processor/configuration files, and checks both ID
+  hashes and both embedding arrays. Query encoders load that exact local
+  snapshot. A request cannot download a newer model behind the index's back.
 - The hubness penalty is positionally aligned to the image index, so it cannot
   outlive it: `invalidate_index()` invalidates the penalty in the same call, and
   `EmbeddingIndex.search` raises if a penalty vector does not match the score
@@ -198,10 +213,10 @@ produced it, so each consumer validates rather than assumes.
   `RRF_K`, `SEARCH_DEPTH`, the hubness constants and
   the mtimes of the embeddings and the database -- so a cached row computed under
   a different definition can never be served as if it were current.
-- `CVDE_EMBED_MODEL` must be identical for indexing and for serving, because the
-  server encodes queries live. [../scripts/swap_backbone_so400m.sh](../scripts/swap_backbone_so400m.sh)
-  exists to do that consistently, and the guards above turn a mistake into a
-  fallback rather than a silently wrong ranking.
+- Changing `CVDE_EMBED_MODEL` or `CVDE_QWEN_EMBED_MODEL` makes the existing
+  marker fail validation. Re-run `python3 -m app.ingest --provider siglip2` (or
+  `--provider qwen3_vl`) from `backend/`; until then, the server falls back or
+  runs keyword-only rather than serving a silently wrong ranking.
 
 ## How train, validation and test stay apart
 

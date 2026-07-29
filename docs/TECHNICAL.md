@@ -42,9 +42,9 @@ that has not spent 20 minutes computing embeddings.
    `(where_sql, params)` — never a string with values interpolated.
 2. **`filtered_id_set`** runs that clause once and returns a Python `set[int]`.
    This is the candidate mask.
-3. **Semantic path** encodes the query text with SigLIP, then scores it against
-   the embedding matrix *restricted to the mask* — the filter is applied before
-   top-k, never after.
+3. **Semantic path** asks the active retrieval provider to encode the query,
+   then scores it against that provider bundle's matching embedding matrix
+   *restricted to the mask* — the filter is applied before top-k, never after.
 4. **Keyword path** runs FTS5 BM25 with the same `WHERE` clause spliced in as
    `AND`, again before `LIMIT`.
 5. **Fusion** combines the two by reciprocal rank.
@@ -400,15 +400,15 @@ peeling `night` off `night + indoor` widens 223 → 1,483 instead of clearing bo
 the failure mode with the largest documented effect on reported accuracy that
 embeddings alone can detect. The full 8,000² scan costs **0.2 s**.
 
-It returns a *ladder*, not a number, because the answer moves violently with the
-cut:
+It returns a *ladder*, not a number, because the answer moves materially with
+the cut. The committed SigLIP generation currently measures:
 
 | cosine | pairs | cross-split | contaminated held-out |
 |---|---|---|---|
-| 0.90 | 2,458 | 1,054 | **241 (12.05%)** |
-| 0.92 | 774 | 344 | 118 (5.90%) |
+| 0.90 | 2,452 | 1,052 | **240 (12.00%)** |
+| 0.92 | 768 | 344 | 119 (5.95%) |
 | 0.95 | 46 | 22 | 16 (0.80%) |
-| 0.97 | 4 | 0 | 0 |
+| 0.97 | 3 | 0 | 0 |
 
 A headline figure at a hard-coded threshold would be an arbitrary choice wearing
 the costume of a measurement. Inspecting the pairs at 0.90 shows they are
@@ -416,7 +416,7 @@ near-identical frames from single photo shoots — the same frozen waterfall, th
 same abseiler, the same egret — split across train and test.
 
 This also forced a correction elsewhere: `duplicate_pairs` capped at 200, which
-is right for a gallery and false for a count. "200 pairs" when there are 2,458 is
+is right for a gallery and false for a count. "200 pairs" when there are 2,452 is
 not a smaller answer. Counting and listing are now different methods.
 
 ### Avoiding N+1
@@ -463,8 +463,9 @@ matches nothing.
 
 ### Semantic
 
-Query text → SigLIP 2 text encoder → 768-d unit vector → dot product against the
-whole matrix, masked to the allowed set:
+Query text → active-provider text encoder → unit vector → matching
+provider-owned matrix, masked to the allowed set. For the default SigLIP 2
+provider that is a 768-dimensional vector:
 
 ```python
 scores = embeddings @ qvec          # (8000, 768) @ (768,) -> (8000,)
@@ -472,13 +473,13 @@ scores[~mask] = -inf
 top = np.argpartition(-scores, k)[:k]
 ```
 
-**Exact brute force, no ANN index.** Measured: the matrix is 8,000 × 768
-float32 = **24.6 MB**, a full scan takes **0.18 ms**, and the SigLIP text encode
-that must happen first takes **7-8 ms** on MPS. The search is therefore ~2% of
-the work of the query it belongs to, and an ANN index would add a dependency, a
-build step and approximate recall to remove it. `docs/DESIGN.md` states where
-that stops being true — **~400k vectors**, measured by extrapolating the scan
-against the encode, not guessed.
+**Exact brute force, no ANN index.** On the default SigLIP 2 provider, the
+matrix is 8,000 × 768 float32 = **24.6 MB**, a full scan measures **0.18 ms**,
+and the text encode that must happen first takes **7-8 ms** on MPS. The search
+is therefore ~2% of the work of that query, and an ANN index would add a
+dependency, a build step and approximate recall to remove it.
+`docs/DESIGN.md` states where that stops being true — **~400k SigLIP-sized
+vectors** is an extrapolated crossover, not an adoption threshold.
 
 Vectors are L2-normalised at write time, so cosine similarity *is* the dot
 product and no per-query normalisation is needed.
@@ -672,9 +673,9 @@ here is not a 7 on COCO.
 
 ## 6. API layer
 
-FastAPI, Pydantic 2 response models on every route, 35 endpoints (the count comes from
-`docs/CAPABILITIES.md`, which is generated from the live schema). Full schema at
-`/docs`; the grouped inventory is in `docs/CAPABILITIES.md`.
+FastAPI with Pydantic 2 response models. The current endpoint count and grouped
+inventory come from the live schema and are generated into
+`docs/CAPABILITIES.md`; the full OpenAPI schema is available at `/docs`.
 
 Three conventions:
 
@@ -774,15 +775,16 @@ backend fails `tsc` in the frontend until a renderer exists. See
 
 ## 8. Testing
 
-| Tier | What | Count |
+| Tier | What | Evidence |
 |---|---|---|
-| `backend/tests/` | API contracts, degraded modes, id-list limits, provider resolution/fallback, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | **383 passed** locally (2026-07-29); CI's light install skips the torch/langgraph modules |
-| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | **17 workflows registered**; the last full sweep passed 108/108 checks (run 20260729-013852-1df3) |
+| `backend/tests/` | API contracts, degraded modes, id-list limits, provider resolution/fallback, agent graph (parallelism, lane isolation, timeouts), embedder concurrency, block validation | Run `pytest` in `backend/`; optional-stack modules skip when their documented dependencies are absent |
+| `scripts/ui_smoke.py` | Real Chrome over every workflow, screenshots, console errors, 4xx/5xx | The current run writes its own check/workflow totals under `backend/data/qa/` |
 | `python scripts/capabilities.py --check` | Fails when the docs drift from the running system | — |
 
-The backend figure is what GitHub Actions reports on the light install described
-in `docs/TESTING.md`: the modules needing `torch` or `langgraph` skip there, so a
-local run with the optional stacks installed executes more than this.
+GitHub Actions uses the light install described in `docs/TESTING.md`; modules
+needing `torch` or `langgraph` skip there, so a local run with the optional
+stacks installed executes more tests. No total is cached in this document:
+the suite and browser-flow registry are intentionally allowed to grow.
 
 The frontend has no unit tier. That is a deliberate trade: for a UI this size,
 the failures that matter are "the view rendered empty", "the control stopped

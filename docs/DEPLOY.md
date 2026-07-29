@@ -3,8 +3,9 @@
 The README's direct workflow — `uvicorn` on the host, `vite` beside it — is the
 reference way to run this project and is unchanged. This document covers the
 containerised alternative: the same application with its Python and Node
-dependencies pinned into images, for a machine where installing them directly
-is not wanted.
+dependencies installed into images, for a machine where installing them
+directly is not wanted. The requirement ranges and base-image tags are not a
+lockfile or digest pin; rebuilds can resolve newer compatible packages.
 
 Nothing here is required to evaluate the project. The two paths share the same
 `backend/data` directory and the same ports, so they are alternatives rather
@@ -23,9 +24,8 @@ than parallel installs.
 Both images build from the repository root as their context. BuildKit reads the
 ignore file named after the Dockerfile in preference to the context root's,
 which is what lets two images share one context and still exclude different
-things — without it the context would include the 2.0 GB of gitignored data
-under `backend/data`. Measured contexts are 692 kB (backend) and 631 kB
-(frontend).
+things — without it the context would include the multi-gigabyte gitignored
+data under `backend/data`. Both measured submission contexts are below 0.9 MB.
 
 ## Running it
 
@@ -38,6 +38,8 @@ The UI is then on <http://localhost:5173> and the API on
 purpose: every URL in the README and in `docs/` addresses the containerised
 stack without modification, and so does the host QA sweep, whose
 `CVDE_QA_BASE_URL` and `CVDE_QA_API_URL` defaults already point at them.
+Compose binds every published port to `127.0.0.1`; this unauthenticated local
+tool is not exposed on the host's LAN interfaces.
 
 `frontend` waits for `backend` to report healthy before it starts, so the first
 page load never races the API's schema initialisation.
@@ -61,11 +63,27 @@ idempotent in the sense that matters: rerunning never duplicates a sample.
 Expect tens of minutes on CPU; `--limit 200` gives a working subset quickly,
 and `--skip-embeddings` gives browse and keyword search without the encode pass.
 
-If `backend/data` is already populated from a host run, skip this entirely. The
-container reads the corpus the host workflow built, and the environment
-fingerprint the app records hashes the embedding files, so a mismatch between
-what was ingested and what is being served is visible in the UI rather than
-silent.
+If `backend/data` is already populated from a current host run, the container
+reuses it. Retrieval still validates its schema-v2 commit marker against the
+exact cached model revision, preprocessing fingerprint, array shapes/counts and
+ordered IDs. The container's `hf-cache` volume must also hold the revision named
+by that marker. On a new volume, fetch that exact revision without recomputing
+the host-built arrays, then reload the provider:
+
+```bash
+docker compose exec backend python -c 'import json; from huggingface_hub import snapshot_download; m=json.load(open("/data/embeddings/manifest.json")); snapshot_download(m["model_id"], revision=m["revision"])'
+curl -X POST http://localhost:8000/api/admin/reload
+```
+
+An older index without a schema-v2 marker is intentionally not adopted: run the
+ingest command above once to rebuild it. Until then the UI names the problem and
+serves keyword search rather than mixing incompatible vector spaces.
+
+If the host index was built with a non-default model, pass the same selector to
+Compose, for example
+`CVDE_EMBED_MODEL=google/siglip2-so400m-patch14-384 docker compose up`.
+Compose forwards both `CVDE_EMBED_MODEL` and `CVDE_QWEN_EMBED_MODEL`; a mismatch
+is refused rather than silently pairing the mounted index with another encoder.
 
 ### With Ollama
 
@@ -85,7 +103,7 @@ Linux, where Docker does not provide it by default.
 **Containerised Ollama** (nothing installed on the host):
 
 ```bash
-CVDE_OLLAMA_URL=http://ollama:11434 docker compose --profile ollama up --build
+CVDE_OLLAMA_URL=http://ollama:11434 docker compose --profile ollama up -d --build
 docker compose exec ollama ollama pull qwen3:8b       # assistant, needs tool calling
 docker compose exec ollama ollama pull qwen2.5vl:7b   # optional VLM enrichment
 ```
@@ -140,8 +158,8 @@ measurements are `linux/arm64` on Apple Silicon.
 
 | Image | Size |
 | --- | --- |
-| `cvde-backend` | 2.52 GB measured (torch and transformers dominate) |
-| `cvde-frontend` | 102 MB measured |
+| `cvde-backend` | 555 MB measured (`docker image inspect`, decimal bytes) |
+| `cvde-frontend` | 29 MB measured (`docker image inspect`, decimal bytes) |
 
 **Memory**
 
@@ -200,7 +218,7 @@ against a throwaway data directory so the corpus and the host's dev servers
 were untouched:
 
 - `docker compose config -q` passes.
-- Both images build from a cold cache; contexts transfer at 692 kB and 631 kB.
+- Both images build; each filtered context transfers under 0.9 MB.
 - `docker compose up` brings both containers to `(healthy)`, and the frontend
   starts only after the backend is healthy — the `depends_on` gate works.
   Both probes address `127.0.0.1` explicitly. An earlier revision used
@@ -217,23 +235,14 @@ were untouched:
   `GET /api/search?q=dog&mode=semantic` returns `degraded: true`,
   `mode_used: "keyword"`, and a message naming what is missing.
 
-**The test suite is not green inside this image**, and the reason is worth
-stating rather than hiding: `docker compose exec backend python -m pytest -q`
-gave **290 passed, 8 failed, 2 skipped** when this was measured — a 300-test
-collection, against 383 on the host today, so re-run the command rather than
-quote the tally. All 8 failures were in `tests/test_providers.py`, and all 8
-passed on the host.
-
-The application is correct here; the tests carry an environment assumption.
-The image deliberately omits `requirements-qwen.txt`, so `providers.resolve()`
-short-circuits at its outermost check and reports
-`qwen3_vl: provider stack not installed — <install command>`. That is exactly
-the documented degradation contract. Each failing test monkeypatches a *deeper*
-failure — missing weights, an unbuilt index, a model mismatch — and asserts the
-reason names that specific cause, which is only reachable when
-`sentence-transformers` is importable. The host has it (5.6.1), so the
-assumption is invisible there. Making these tests pin their own outer condition
-would close the gap; that is a change to `tests/`, not to the deployment.
+The image copies the backend tests and installs both the base application and
+assistant requirements, so `docker compose exec backend python -m pytest -q`
+is a useful contract gate against the deployed environment. Tests that genuinely
+construct the optional Qwen retrieval model or drive Chrome skip because
+`requirements-qwen.txt` and `requirements-qa.txt` are deliberately absent.
+Run those model/browser gates on a host with the corresponding optional
+requirements; container evidence is the build, deployed contract suite and live
+HTTP smoke list, not a claim that optional model quality was re-measured.
 
 ## What is not containerised
 
