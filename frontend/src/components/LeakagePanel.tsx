@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { LeakageReport } from "../api/types";
+import type { LeakageContamination, LeakageReport } from "../api/types";
 
 /**
  * Held-out images that have a near-duplicate in training.
@@ -22,6 +22,7 @@ import type { LeakageReport } from "../api/types";
 export default function LeakagePanel() {
   const [threshold, setThreshold] = useState(0.9);
   const [data, setData] = useState<LeakageReport | null>(null);
+  const [hit, setHit] = useState<LeakageContamination | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,6 +34,16 @@ export default function LeakagePanel() {
           if (e instanceof DOMException && e.name === "AbortError") return;
           setError(e instanceof Error ? e.message : String(e));
         });
+      /* The ids ride alongside the counts, on the same cut. Fetching them only
+         when someone reaches for the button would let the set drift from the
+         figure above it whenever the slider moved in between — and a leakage
+         set that disagrees with its own headline is worse than none. A failure
+         here costs the hand-off, not the report, so it clears the ids and
+         leaves the measurement standing. */
+      setHit(null);
+      api.leakageContaminated(threshold, ctrl.signal)
+        .then(setHit)
+        .catch(() => { /* the panel simply offers no hand-off */ });
     }, 180);
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [threshold]);
@@ -65,6 +76,41 @@ export default function LeakagePanel() {
           ))}
         </div>
       </div>
+
+      {/* The measurement was the expensive half; handing the set over is the
+          cheap half that makes it worth having. Without this the panel reports
+          that 12% of the held-out split is contaminated and leaves the reader
+          to re-derive *which* 240 images in numpy — at which point they did not
+          need the tool. The ids are the gallery's own `?ids=` vocabulary, so
+          the slice opens, exports, tags and excludes like any other.
+
+          `dist-actions`, not a class of its own: this is the same hand-off the
+          caption-quality panel makes — a primary link into the gallery beside
+          the export formats — and it should not look like a different idea
+          because it sits on a different page. */}
+      {hit && hit.total > 0 && (
+        <div className="dist-actions">
+          <Link className="primary button-link"
+                to={`/?ids=${hit.ids.join(",")}`}
+                title="Open the contaminated held-out images in the gallery, where they behave like any other selection">
+            Open {hit.total.toLocaleString()} contaminated images
+          </Link>
+          <span className="export-label">Export the set</span>
+          {(["csv", "jsonl", "json"] as const).map((f) => (
+            <a key={f} className="pill export-pill"
+               href={`/api/export?ids=${hit.ids.join(",")}&format=${f}`}
+               title={`Download the ${hit.total} contaminated held-out images as ${f.toUpperCase()}`}>
+              {f}
+            </a>
+          ))}
+          {hit.truncated && (
+            <span className="meta-line" style={{ marginBottom: 0 }}>
+              showing the first {hit.ids.length.toLocaleString()} — narrow the
+              threshold for a set this hand-off can carry whole
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="leak-control">
         <label className="eyebrow" htmlFor="leak-th">Similarity threshold</label>

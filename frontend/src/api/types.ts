@@ -413,6 +413,15 @@ export interface LeakageReport {
   caveat: string;
 }
 
+/** The contaminated ids themselves — the report says how many, this says which. */
+export interface LeakageContamination {
+  threshold: number;
+  held_out_split: string | null;
+  total: number;
+  ids: number[];
+  truncated: boolean;
+}
+
 export interface AttributeLabel {
   label: string;
   count: number;

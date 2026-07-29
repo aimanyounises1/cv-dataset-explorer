@@ -2,7 +2,7 @@ import type {
   ActivityEvent, AlbumAnalysis,
   AttributeGroup, CaptionStats, ChatMessage, ChatResponse, ChatStatus,
   AlbumDetail, AlbumSummary, ComposedQuery, ScenarioResponse,
-  DescribeResponse, LeakageReport,
+  DescribeResponse, LeakageContamination, LeakageReport,
   DuplicatePair, EvalResponse, MapPoint, QASelection, QASummary, SampleCard,
   DetectResponse, DetectStatus, ObjectLabel, RegionSearchRequest,
   SegmentAnnotation, SegmentAnnotationCreate, SegmentResult,
@@ -160,6 +160,8 @@ export const api = {
   /** Held-out images that have a near-duplicate in training. */
   leakage: (threshold: number, signal?: AbortSignal) =>
     get<LeakageReport>("/stats/leakage", { threshold }, signal),
+  leakageContaminated: (threshold: number, signal?: AbortSignal) =>
+    get<LeakageContamination>("/stats/leakage/contaminated", { threshold }, signal),
 
   qaSummary: () => get<QASummary>("/qa/summary"),
   qaSelection: (maxAgreement: number, signal?: AbortSignal) =>
