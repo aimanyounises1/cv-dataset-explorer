@@ -577,7 +577,6 @@ button.vstat-card:hover .vstat-go { color: var(--accent); }
   line-height: 1;
 }
 .tag-proposal .tp-note { margin: 8px 0 0; color: var(--text-faint); font-size: 12px; }
-.tag-proposal .tp-more { color: var(--text-faint); font-size: 12px; }
 .tag-proposal .tp-missing { margin: 8px 0 0; color: var(--amber); font-size: 12px; }
 .tag-proposal .tp-actions { display: flex; gap: 8px; margin-top: 12px; }
 .tag-proposal .tp-done { margin: 12px 0 0; color: var(--accent-deep); font-size: 13px; }
