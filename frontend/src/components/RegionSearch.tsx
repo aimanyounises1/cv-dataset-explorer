@@ -207,10 +207,6 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
       <header className="rs-head">
         <div>
           <h2 id={`${instructionsId}-title`}>Segment and annotate</h2>
-          <p className="rs-note">
-            Guide the local model with keep/remove points or a box. Saved masks
-            remain separate from the source image.
-          </p>
         </div>
         <span className={`rs-status${editor.segmentStatus?.ready ? " ready" : ""}`}>
           {editor.segmentStatus === null
@@ -227,6 +223,20 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
             ?? "Promptable segmentation is unavailable. Draw a box to search by region."}
         </div>
       )}
+
+      {/* The tools wait; the photograph does not.
+          Measured, this panel put 316px of chrome above the subject at 1440 and
+          535px at 390 — a full phone viewport of controls before the image they
+          act on. Nothing here is needed until someone has decided to annotate,
+          and most visits to a sample page are to look at it. Folded, not cut:
+          one click reaches the whole toolset, and the disclosure keeps the
+          reading order it draws in. */}
+      <details className="caveat rs-tools">
+        <summary>Annotation tools — points, box, and detector</summary>
+        <p className="rs-note">
+          Guide the local model with keep/remove points or a box. Saved masks
+          remain separate from the source image.
+        </p>
 
       <div className="rs-toolbar" role="toolbar" aria-label="Segmentation tools">
         <Segmented
@@ -269,6 +279,7 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
           </button>
         </div>
       )}
+      </details>
 
       <p className="sr-only" id={instructionsId}>
         The image editor is keyboard accessible. Arrow keys move the prompt
