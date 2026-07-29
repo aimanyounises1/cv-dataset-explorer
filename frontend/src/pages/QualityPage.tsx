@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { QASelection, QASummary, SuspectCaption } from "../api/types";
 import { Segmented } from "../components/controls";
 import { SURFACE, sequential } from "../lib/viz";
+import { VERDICTS, VERDICT_PREFIX } from "../lib/verdicts";
 
 /** Where to put the review threshold before the user touches it.
  *
@@ -410,10 +411,15 @@ export default function QualityPage() {
             <p>
               Lowest image-caption agreement first. Low score + high sibling mean ⇒
               the caption is likely wrong; all-low ⇒ the image itself is unusual.
-              Record your call as a tag on the sample page —{" "}
-              <span className="mono">verdict:caption-error · scorer-error · ambiguous ·
-              duplicate · ok</span> — and the review session becomes a filterable,
-              exportable slice.
+              Record your call with the buttons in the gallery’s inspector, or as a
+              tag on the sample page —{" "}
+              {/* Named from the same constant the inspector's buttons are built
+                  from, so the guide cannot come to describe a vocabulary the
+                  controls no longer offer. */}
+              <span className="mono">
+                {VERDICTS.map((v) => VERDICT_PREFIX + v.value).join(" · ")}
+              </span>{" "}
+              — and the review session becomes a filterable, exportable slice.
             </p>
           </details>
           {suspects.length === 0 ? (
