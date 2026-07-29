@@ -509,8 +509,12 @@ export default function GalleryPage() {
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<SearchMeta>({ terms: [] });
   const [hasMore, setHasMore] = useState(false);
+  /* S, not M. This is a triage surface: the first question asked of 8,000
+     images is "which of these is worth opening", and that is answered by seeing
+     many at once. M shows 16 frames at 1440x900; S with no caption block shows
+     48, measured. A returning user's own choice still wins. */
   const [density, setDensity] = useState<string>(
-    () => localStorage.getItem(DENSITY_KEY) ?? "M");
+    () => localStorage.getItem(DENSITY_KEY) ?? "S");
   /* An image query cannot live in the URL — the query IS the image — so this
    * is the one result set held in memory instead. The URL stays the boss:
    * any change to it clears the image results, and the shareable artifact is
