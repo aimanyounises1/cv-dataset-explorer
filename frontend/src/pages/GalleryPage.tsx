@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import {
   AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat,
@@ -22,6 +22,14 @@ import { saveResultOrder } from "../hooks/useResultOrder";
 
 interface SearchMeta {
   basis?: string | null;
+  /** The mode the ANSWER was ranked by, as the server named it — not the mode
+   * the URL asked for. The two differ whenever reference chips are set: the
+   * request goes to /search/composed, which has no mode at all and replies
+   * `mode_used: "composed"`. Reading the URL instead let the bar assert
+   * "(keyword)" over a ranking keyword never touched, so a mode comparison
+   * that never ran read as one where the modes agreed. A ranking now names
+   * itself the same way a score never travels without its basis. */
+  modeUsed?: string | null;
   rrfK?: number | null;
   terms: TermStat[];
   idsResolved?: number | null;
@@ -36,8 +44,18 @@ const PER_PAGE = 60;
 const DENSITY: Record<string, string> = { S: "128px", M: "190px", L: "280px" };
 const DENSITY_KEY = "cvde-density";
 
-/** Recent queries, most recent first. Local recency is per-browser scan state
- * (like density), not shareable selection state — the URL owns the latter. */
+/* ---- The picked set ------------------------------------------------------
+ * Three concerns that used to sit loose in the page body — the picked set,
+ * scroll restore, and the search-history dropdown — are hooks, each owning one
+ * thing end to end, beside the two the repo already has (useSelection,
+ * useResultOrder). Nothing about their behaviour changed; what changed is that
+ * each is now readable whole. The page was 1193 lines holding ten unrelated
+ * concerns, which is how a result bar came to read its search mode from the URL
+ * 950 lines away from the branch that made the request.
+ *
+ * These live here rather than in `hooks/` only because this pass may touch one
+ * file; each is a whole unit and moves out as a cut-and-paste. */
+
 /** The hand-picked set, per tab. sessionStorage, not local: a basket is a
  * session's work, and a new window should start empty. */
 const PICKED_KEY = "cvde-picked";
@@ -50,6 +68,151 @@ const PICKED_KEY = "cvde-picked";
  * current ranking already degrades to a plain toggle) while a corrupt set is
  * not. */
 const PICK_ANCHOR_KEY = "cvde-pick-anchor";
+
+/** The picked set plus the two gestures that build it, over whichever ranking
+ * is on screen (the range a shift-extend covers is measured in the order the
+ * ranking gave, so the current items are the hook's one input).
+ *
+ * Kept in sessionStorage, on one tab-wide key rather than one per query.
+ * Hand-picking is the most expensive thing a person does here, and it used
+ * to be the least durable: `picked` was component state, the gallery is its
+ * own route, so opening a card or pressing the tray's own Compare unmounted
+ * it and took the whole set. The QA sweep had encoded that loss as a
+ * workaround — it re-picked two cards after going back, guarded by "if the
+ * tray is gone". Two picks cost two clicks to rebuild; two hundred are
+ * simply gone.
+ *
+ * Tab-wide and not keyed by query, because curating across several searches
+ * into one album is the point — a set that reset on every filter change
+ * would be a set you could not assemble. This is the same class as scroll
+ * position and the benchmark result: ephemeral working state the URL
+ * deliberately does not own, because a pasted link should reproduce the
+ * view, not somebody else's half-finished basket. Nothing is hidden by it:
+ * the tray is visible whenever the set is non-empty. */
+function usePickedSet(items: SampleCard[]) {
+  const [picked, setPicked] = useState<Set<number>>(() => {
+    try {
+      const raw = sessionStorage.getItem(PICKED_KEY);
+      const ids: unknown = raw ? JSON.parse(raw) : null;
+      return Array.isArray(ids)
+        ? new Set(ids.filter((n): n is number => Number.isInteger(n)))
+        : new Set();
+    } catch { return new Set(); }
+  });
+
+  /* Where a shift-extend measures from: the last card whose check was clicked,
+   * not the last member of the set — after a range, extending again continues
+   * from where the hand last was. Rehydrated, because the gallery is its own
+   * route and returning from Compare or a sample page remounts it. */
+  const anchorRef = useRef<number | null>(
+    (() => {
+      const raw = Number(sessionStorage.getItem(PICK_ANCHOR_KEY));
+      return Number.isInteger(raw) && raw > 0 ? raw : null;
+    })());
+
+  // The ranking's own order, read at click time so a range always spans what
+  // is on screen now — never a list captured when the handler was made.
+  const orderRef = useRef<number[]>([]);
+  useEffect(() => { orderRef.current = items.map((s) => s.id); }, [items]);
+
+  useEffect(() => {
+    try {
+      if (picked.size) {
+        sessionStorage.setItem(PICKED_KEY, JSON.stringify([...picked]));
+      } else {
+        // No set, no anchor: an extend measured from a card nobody picked is
+        // a range out of nowhere.
+        sessionStorage.removeItem(PICKED_KEY);
+        sessionStorage.removeItem(PICK_ANCHOR_KEY);
+        anchorRef.current = null;
+      }
+    } catch { /* non-essential */ }
+  }, [picked]);
+
+  const toggle = (id: number, extend = false) => {
+    // Read the anchor BEFORE queueing the update, and move it in the same
+    // breath. A functional updater does not run at call time, so a ref written
+    // straight after `setPicked` is already the card just clicked by the time
+    // the updater reads it — `from === id`, every range collapses to a plain
+    // toggle, and the feature silently does nothing. Measured exactly that:
+    // click #0 then shift-click #20 gave 2 picked instead of 21.
+    const from = anchorRef.current;
+    anchorRef.current = id;
+    try { sessionStorage.setItem(PICK_ANCHOR_KEY, String(id)); }
+    catch { /* non-essential */ }
+    setPicked((prev) => {
+      const next = new Set(prev);
+      const order = orderRef.current;
+      const a = from == null ? -1 : order.indexOf(from);
+      const b = order.indexOf(id);
+      if (extend && a !== -1 && b !== -1 && a !== b) {
+        // A range only ever ADDS. Making it mirror the anchor's state would
+        // mean a stray shift-click could silently drop dozens of picks, and
+        // this set is now durable enough that losing it quietly is the worst
+        // thing the control could do. Un-picking stays one deliberate click.
+        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(order[i]);
+        return next;
+      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /** A drag from a picked card carries the whole picked set — a selection is
+   * one object, and dragging it should feel like moving that object. An
+   * unpicked card drags alone. */
+  const dragIds = (id: number) =>
+    picked.has(id) && picked.size > 0 ? [...picked] : [id];
+
+  return { picked, setPicked, toggle, dragIds };
+}
+
+/* ---- Scroll restore ------------------------------------------------------ */
+
+/** Restore the scroll position for back-nav, keyed by the full query string in
+ * sessionStorage: scan position is ephemeral scan-order state like the result
+ * order, not something a pasted link should reproduce — the URL deliberately
+ * does not own it. Restored once per mount, once `ready` says the first result
+ * set has rendered, because before that the page has no height to scroll into.
+ *
+ * `pageRef` is the page's own root, and it is load-bearing rather than
+ * decorative: see the listener below. */
+function useScrollRestore(
+  pageRef: React.RefObject<HTMLElement | null>, key: string, ready: boolean,
+) {
+  const keyRef = useRef(key);
+  useEffect(() => { keyRef.current = key; }, [key]);
+
+  useEffect(() => {
+    const save = () => {
+      // Navigating away fires one last scroll event: the next page's shorter
+      // document clamps the position to 0 before this listener is removed
+      // (passive-effect cleanup runs after paint). Recording that 0 would
+      // overwrite the very position this key exists to keep, so a scroll only
+      // counts while the gallery's own DOM is still attached. Measured: the
+      // clamp event arrives with the root already disconnected.
+      if (!pageRef.current || !pageRef.current.isConnected) return;
+      try { sessionStorage.setItem(keyRef.current, String(window.scrollY)); }
+      catch { /* non-essential */ }
+    };
+    window.addEventListener("scroll", save, { passive: true });
+    return () => window.removeEventListener("scroll", save);
+  }, [pageRef]);
+
+  const restored = useRef(false);
+  useEffect(() => {
+    if (restored.current || !ready) return;
+    restored.current = true;
+    const saved = Number(sessionStorage.getItem(key) ?? NaN);
+    if (Number.isFinite(saved) && saved > 0) window.scrollTo(0, saved);
+  }, [ready, key]);
+}
+
+/* ---- Search history ------------------------------------------------------ */
+
+/** Recent queries, most recent first. Local recency is per-browser scan state
+ * (like density), not shareable selection state — the URL owns the latter. */
 const HISTORY_KEY = "cvde-search-history";
 const HISTORY_SHOWN = 8;   // merged dropdown cap
 const HISTORY_KEPT = 20;   // stored recency list cap
@@ -75,13 +238,214 @@ const snapshotQuery = (payload: Record<string, unknown>): string | null => {
   }
   return null;
 };
-const SUGGESTIONS = [
-  "a dog jumping into water",
-  "children playing soccer",
-  "climbing a steep rock face",
-  "a crowded street at night",
-  "splashing through snow",
-];
+
+/** The recent-queries dropdown: a local recency list merged with the workspace
+ * trail's search snapshots, narrowed by whatever is typed. Both sources are
+ * reads — the hook never writes the URL. Choosing an entry calls `onPick`,
+ * which is the page's business: this hook does not know what a query does.
+ * Returns a closed interface (no setters) so the only ways the list can move
+ * are the gestures it defines. */
+function useSearchHistory(input: string, onPick: (q: string) => void) {
+  const [localHist, setLocalHist] = useState<string[]>(readLocalHistory);
+  const [serverHist, setServerHist] = useState<string[]>([]);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const fetched = useRef(false);
+
+  /** Local recency first (it is this person's own trail), then the workspace
+   * snapshots; deduplicated case-insensitively; narrowed by whatever is
+   * already typed, minus the exact query already on screen. */
+  const items = useMemo(() => {
+    const needle = input.trim().toLowerCase();
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const s of [...localHist, ...serverHist]) {
+      const t = s.trim();
+      const key = t.toLowerCase();
+      if (!t || seen.has(key) || key === needle) continue;
+      if (needle && !key.includes(needle)) continue;
+      seen.add(key);
+      out.push(t);
+      if (out.length === HISTORY_SHOWN) break;
+    }
+    return out;
+  }, [input, localHist, serverHist]);
+
+  // A shorter list can strand the highlight past the end; a changed list
+  // makes the old position meaningless either way.
+  useEffect(() => { setActiveIndex(-1); }, [items.length]);
+
+  const show = () => setOpen(true);
+  const close = () => { setOpen(false); setActiveIndex(-1); };
+  const highlight = (i: number) => setActiveIndex(i);
+  const pick = (q: string) => { close(); onPick(q); };
+
+  const onFocus = () => {
+    setOpen(true);
+    setActiveIndex(-1);
+    if (fetched.current) return;
+    fetched.current = true;
+    // The workspace trail arrives lazily, on first focus: the dropdown is the
+    // only reader, and most gallery visits never open it.
+    api.listActivity(100).then((events) => {
+      const qs: string[] = [];
+      for (const ev of events) {
+        if (ev.kind === "search_snapshot") {
+          const q = snapshotQuery(ev.payload ?? {});
+          if (q) qs.push(q);
+        }
+      }
+      setServerHist(qs);
+    }).catch(() => {});
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown" && !open && items.length > 0) {
+      e.preventDefault();
+      setOpen(true);
+      setActiveIndex(0);
+      return;
+    }
+    if (!open || items.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveIndex((i) => (i + 1) % items.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveIndex((i) => (i <= 0 ? items.length - 1 : i - 1));
+    } else if (e.key === "Enter" && activeIndex >= 0) {
+      e.preventDefault();
+      pick(items[activeIndex]);
+    } else if (e.key === "Escape") {
+      close();
+    }
+  };
+
+  /** Typing is not a sequence of searches. The box commits every 400 ms, so
+   * "dog on beach" arrives as "dog", "dog on", "dog on beach" — each one a real
+   * ranking, none of them a thing anyone meant to keep. A new entry therefore
+   * absorbs the prefixes it grew out of, and only the phrase the person stopped
+   * on survives in the list. */
+  const remember = (q: string) => {
+    const key = q.toLowerCase();
+    const kept = readLocalHistory()
+      .filter((s) => s.toLowerCase() !== key && !key.startsWith(s.toLowerCase()));
+    const list = [q, ...kept].slice(0, HISTORY_KEPT);
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); }
+    catch { /* non-essential */ }
+    setLocalHist(list);
+  };
+
+  return { items, open, activeIndex, show, close, highlight, pick,
+           onFocus, onKeyDown, remember };
+}
+
+/** The zero-state's job.
+ *
+ * This used to offer five demo queries about dogs. A phrase to type teaches a
+ * researcher nothing about their own corpus — it demonstrates that search
+ * works, which they assumed. What they do not know on arrival is which of
+ * these 8,000 images is worth opening.
+ *
+ * So the door states findings instead, and each one is a set you can open.
+ * Both are already measured and already have endpoints — nothing new is
+ * computed here, it is the same numbers /quality and /stats publish, moved to
+ * where the first click happens.
+ *
+ * Each finding carries its own cut, because none of them is a fact: "suspect"
+ * is a threshold on caption agreement and "contaminated" a threshold on a
+ * cosine. A bare count would be a number whose robustness the reader cannot
+ * check — the same argument LeakagePanel already makes for showing a curve
+ * rather than a figure.
+ */
+const CONTAMINATION_CUT = 0.9;
+
+/** Two measured findings, each opening the set it counts.
+ *
+ * Deliberately two, not four. A board of every signal the app computes would be
+ * a feature list wearing a dashboard's clothes; these two are the ones with
+ * consequences for a reported number — a held-out image that repeats a training
+ * image, and a caption its own image does not support.
+ *
+ * Failure is silent by design: a finding that cannot be measured (no
+ * embeddings, no QA scores) simply does not appear, because the alternative is
+ * a zero that reads as "your dataset is clean".
+ */
+function FindingsRow() {
+  const [leak, setLeak] = useState<{ n: number; of: number } | null>(null);
+  const [ids, setIds] = useState<number[] | null>(null);
+  const [qa, setQa] = useState<{ n: number; cut: number } | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    api.leakage(CONTAMINATION_CUT, ctrl.signal)
+      .then((r) => setLeak({ n: r.contaminated, of: r.held_out_total }))
+      .catch(() => { /* not measurable here — the card stays away */ });
+    api.leakageContaminated(CONTAMINATION_CUT, ctrl.signal)
+      .then((r) => setIds(r.ids))
+      .catch(() => { /* the count can still show; the link is what needs ids */ });
+    api.qaSummary()
+      .then((s) => {
+        if (!s.available) return;
+        // The same cut /quality opens on: the value below which ~1% of captions
+        // fall, read off this corpus rather than hard-coded.
+        const total = s.histogram.reduce((n, b) => n + b.count, 0);
+        let seen = 0;
+        let cut = s.max_agreement ?? 1;
+        for (const b of s.histogram) {
+          seen += b.count;
+          if (seen / total >= 0.01) { cut = b.hi; break; }
+        }
+        return api.qaSelection(cut, ctrl.signal)
+          .then((sel) => setQa({ n: sel.samples, cut }));
+      })
+      .catch(() => { /* same contract as above */ });
+    return () => ctrl.abort();
+  }, []);
+
+  const cards = [
+    leak && ids && ids.length > 0 && {
+      key: "leak",
+      to: `/?ids=${ids.join(",")}`,
+      n: leak.n,
+      unit: `of ${leak.of.toLocaleString()} held-out images`,
+      what: "repeat a training image",
+      cut: `cosine ≥ ${CONTAMINATION_CUT.toFixed(2)}`,
+      why: "Reported accuracy on these is partly memorisation.",
+    },
+    qa && qa.n > 0 && {
+      key: "qa",
+      to: `/?max_agreement=${qa.cut}`,
+      n: qa.n,
+      unit: "images",
+      what: "carry a caption the image does not support",
+      cut: `agreement ≤ ${qa.cut.toFixed(3)}`,
+      why: "Likely annotation errors, worst first.",
+    },
+  ].filter(Boolean) as {
+    key: string; to: string; n: number; unit: string;
+    what: string; cut: string; why: string;
+  }[];
+
+  if (!cards.length) return null;
+
+  return (
+    <section className="findings" aria-label="What this corpus gets wrong">
+      <div className="eyebrow">Start from what is measured</div>
+      <div className="findings-row">
+        {cards.map((c) => (
+          <Link key={c.key} className="finding" to={c.to}>
+            <span className="finding-n">{c.n.toLocaleString()}</span>
+            <span className="finding-unit">{c.unit}</span>
+            <span className="finding-what">{c.what}</span>
+            <span className="finding-cut">{c.cut}</span>
+            <span className="finding-why">{c.why}</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 /** All search/filter state — including pagination depth — lives in the URL:
  * shareable links, working back-button, and "Load more" depth survives
@@ -159,56 +523,14 @@ export default function GalleryPage() {
    * on the card always navigates and a click on the check always picks. The
    * picked set is transient — the album it feeds is the durable thing, a
    * first-class ordered collection with provenance, no longer a tag. Tags
-   * remain labels; converting one into an album is an explicit act elsewhere. */
-  /* Kept in sessionStorage, on one tab-wide key rather than one per query.
-   * Hand-picking is the most expensive thing a person does here, and it used
-   * to be the least durable: `picked` was component state, the gallery is its
-   * own route, so opening a card or pressing the tray's own Compare unmounted
-   * it and took the whole set. The QA sweep had encoded that loss as a
-   * workaround — it re-picked two cards after going back, guarded by "if the
-   * tray is gone". Two picks cost two clicks to rebuild; two hundred are
-   * simply gone.
-   *
-   * Tab-wide and not keyed by query, because curating across several searches
-   * into one album is the point — a set that reset on every filter change
-   * would be a set you could not assemble. This is the same class as scroll
-   * position and the benchmark result: ephemeral working state the URL
-   * deliberately does not own, because a pasted link should reproduce the
-   * view, not somebody else's half-finished basket. Nothing is hidden by it:
-   * the tray is visible whenever the set is non-empty. */
-  const [picked, setPicked] = useState<Set<number>>(() => {
-    try {
-      const raw = sessionStorage.getItem(PICKED_KEY);
-      const ids: unknown = raw ? JSON.parse(raw) : null;
-      return Array.isArray(ids)
-        ? new Set(ids.filter((n): n is number => Number.isInteger(n)))
-        : new Set();
-    } catch { return new Set(); }
-  });
-  useEffect(() => {
-    try {
-      if (picked.size) {
-        sessionStorage.setItem(PICKED_KEY, JSON.stringify([...picked]));
-      } else {
-        // No set, no anchor: an extend measured from a card nobody picked is
-        // a range out of nowhere.
-        sessionStorage.removeItem(PICKED_KEY);
-        sessionStorage.removeItem(PICK_ANCHOR_KEY);
-        lastPickRef.current = null;
-      }
-    } catch { /* non-essential */ }
-  }, [picked]);
+   * remain labels; converting one into an album is an explicit act elsewhere.
+   * Its whole life — durability, the shift-extend anchor, the drag payload —
+   * is `usePickedSet` above; the page only reads it and hands it to the tray. */
+  const { picked, setPicked, toggle: togglePick, dragIds: getDragIds }
+    = usePickedSet(items);
   const [albumName, setAlbumName] = useState("");
   const [albumBusy, setAlbumBusy] = useState(false);
   const [albums, setAlbums] = useState<AlbumSummary[]>([]);
-  /* Search history: a local recency list merged with the workspace trail's
-   * search snapshots. Both are reads — the dropdown never writes the URL
-   * until an entry is chosen. */
-  const [localHist, setLocalHist] = useState<string[]>(readLocalHistory);
-  const [serverHist, setServerHist] = useState<string[]>([]);
-  const [histOpen, setHistOpen] = useState(false);
-  const [histIdx, setHistIdx] = useState(-1);
-  const histFetched = useRef(false);
   /* The corpus's own similarity floor, read once per mount: `undefined` until
    * the answer arrives, `null` when the active index publishes none. No
    * constant stands in for it — a number nobody measured must not be drawn as
@@ -261,52 +583,6 @@ export default function GalleryPage() {
     // keystroke, not a memory test.
     api.listAlbums().then(setAlbums).catch(() => {});
   }, [anyPicked]);
-
-  /** A drag from a picked card carries the whole picked set — a selection is
-   * one object, and dragging it should feel like moving that object. An
-   * unpicked card drags alone. */
-  const getDragIds = (id: number) =>
-    picked.has(id) && picked.size > 0 ? [...picked] : [id];
-
-  /* Where a shift-extend measures from: the last card whose check was clicked,
-   * not the last member of the set — after a range, extending again continues
-   * from where the hand last was. Rehydrated, because the gallery is its own
-   * route and returning from Compare or a sample page remounts it. */
-  const lastPickRef = useRef<number | null>(
-    (() => {
-      const raw = Number(sessionStorage.getItem(PICK_ANCHOR_KEY));
-      return Number.isInteger(raw) && raw > 0 ? raw : null;
-    })());
-
-  const togglePick = (id: number, extend = false) => {
-    // Read the anchor BEFORE queueing the update, and move it in the same
-    // breath. A functional updater does not run at call time, so a ref written
-    // straight after `setPicked` is already the card just clicked by the time
-    // the updater reads it — `from === id`, every range collapses to a plain
-    // toggle, and the feature silently does nothing. Measured exactly that:
-    // click #0 then shift-click #20 gave 2 picked instead of 21.
-    const from = lastPickRef.current;
-    lastPickRef.current = id;
-    try { sessionStorage.setItem(PICK_ANCHOR_KEY, String(id)); }
-    catch { /* non-essential */ }
-    setPicked((prev) => {
-      const next = new Set(prev);
-      const order = items.map((s) => s.id);
-      const a = from == null ? -1 : order.indexOf(from);
-      const b = order.indexOf(id);
-      if (extend && a !== -1 && b !== -1 && a !== b) {
-        // A range only ever ADDS. Making it mirror the anchor's state would
-        // mean a stray shift-click could silently drop dozens of picks, and
-        // this set is now durable enough that losing it quietly is the worst
-        // thing the control could do. Un-picking stays one deliberate click.
-        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(order[i]);
-        return next;
-      }
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
 
   const saveAlbum = () => {
     const name = albumName.trim();
@@ -372,37 +648,12 @@ export default function GalleryPage() {
     try { localStorage.setItem(DENSITY_KEY, density); } catch { /* non-essential */ }
   }, [density]);
 
-  // Scroll restore for back-nav. Position is keyed by the full query string in
-  // sessionStorage: scan position is ephemeral scan-order state like the result
-  // order, not something a pasted link should reproduce — the URL deliberately
-  // does not own it. Restored once per mount, after the first result set
-  // renders, because before that the page has no height to scroll into.
-  const scrollKey = `cvde-scroll:${searchParams.toString()}`;
-  const scrollKeyRef = useRef(scrollKey);
+  // Scroll restore for back-nav, keyed by the full query string. The hook owns
+  // the whole of it, including the `isConnected` guard the repo's known-traps
+  // note depends on.
   const pageRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => { scrollKeyRef.current = scrollKey; }, [scrollKey]);
-  useEffect(() => {
-    const save = () => {
-      // Navigating away fires one last scroll event: the next page's shorter
-      // document clamps the position to 0 before this listener is removed
-      // (passive-effect cleanup runs after paint). Recording that 0 would
-      // overwrite the very position this key exists to keep, so a scroll only
-      // counts while the gallery's own DOM is still attached. Measured: the
-      // clamp event arrives with the root already disconnected.
-      if (!pageRef.current || !pageRef.current.isConnected) return;
-      try { sessionStorage.setItem(scrollKeyRef.current, String(window.scrollY)); }
-      catch { /* non-essential */ }
-    };
-    window.addEventListener("scroll", save, { passive: true });
-    return () => window.removeEventListener("scroll", save);
-  }, []);
-  const restoredScroll = useRef(false);
-  useEffect(() => {
-    if (restoredScroll.current || loading || items.length === 0) return;
-    restoredScroll.current = true;
-    const saved = Number(sessionStorage.getItem(scrollKey) ?? NaN);
-    if (Number.isFinite(saved) && saved > 0) window.scrollTo(0, saved);
-  }, [loading, items.length, scrollKey]);
+  useScrollRestore(pageRef, `cvde-scroll:${searchParams.toString()}`,
+                   !loading && items.length > 0);
 
   // Lets the fetch effect see the current list without depending on it.
   const itemsRef = useRef<SampleCard[]>([]);
@@ -439,92 +690,13 @@ export default function GalleryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInput]);
 
-  /** Typing is not a sequence of searches. The box commits every 400 ms, so
-   * "dog on beach" arrives as "dog", "dog on", "dog on beach" — each one a real
-   * ranking, none of them a thing anyone meant to keep. A new entry therefore
-   * absorbs the prefixes it grew out of, and only the phrase the person stopped
-   * on survives in the list. */
-  const rememberSearch = (q: string) => {
-    const key = q.toLowerCase();
-    const kept = readLocalHistory()
-      .filter((s) => s.toLowerCase() !== key && !key.startsWith(s.toLowerCase()));
-    const list = [q, ...kept].slice(0, HISTORY_KEPT);
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(list)); }
-    catch { /* non-essential */ }
-    setLocalHist(list);
-  };
-
-  /** Local recency first (it is this person's own trail), then the workspace
-   * snapshots; deduplicated case-insensitively; narrowed by whatever is
-   * already typed, minus the exact query already on screen. */
-  const historyItems = useMemo(() => {
-    const needle = input.trim().toLowerCase();
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const s of [...localHist, ...serverHist]) {
-      const t = s.trim();
-      const key = t.toLowerCase();
-      if (!t || seen.has(key) || key === needle) continue;
-      if (needle && !key.includes(needle)) continue;
-      seen.add(key);
-      out.push(t);
-      if (out.length === HISTORY_SHOWN) break;
-    }
-    return out;
-  }, [input, localHist, serverHist]);
-
-  // A shorter list can strand the highlight past the end; a changed list
-  // makes the old position meaningless either way.
-  useEffect(() => { setHistIdx(-1); }, [historyItems.length]);
-
-  const applyHistory = (q: string) => {
+  /* The recent-queries dropdown. Choosing an entry writes the URL immediately —
+   * a chosen entry shouldn't wait out the debounce — which is the one thing the
+   * hook cannot know how to do, so the page passes it in. */
+  const hist = useSearchHistory(input, (q) => {
     setInput(q);
-    setParams({ q, page: "" });   // immediate — a chosen entry shouldn't wait out the debounce
-    setHistOpen(false);
-    setHistIdx(-1);
-  };
-
-  const onSearchFocus = () => {
-    setHistOpen(true);
-    setHistIdx(-1);
-    if (histFetched.current) return;
-    histFetched.current = true;
-    // The workspace trail arrives lazily, on first focus: the dropdown is the
-    // only reader, and most gallery visits never open it.
-    api.listActivity(100).then((events) => {
-      const qs: string[] = [];
-      for (const ev of events) {
-        if (ev.kind === "search_snapshot") {
-          const q = snapshotQuery(ev.payload ?? {});
-          if (q) qs.push(q);
-        }
-      }
-      setServerHist(qs);
-    }).catch(() => {});
-  };
-
-  const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown" && !histOpen && historyItems.length > 0) {
-      e.preventDefault();
-      setHistOpen(true);
-      setHistIdx(0);
-      return;
-    }
-    if (!histOpen || historyItems.length === 0) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHistIdx((i) => (i + 1) % historyItems.length);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHistIdx((i) => (i <= 0 ? historyItems.length - 1 : i - 1));
-    } else if (e.key === "Enter" && histIdx >= 0) {
-      e.preventDefault();
-      applyHistory(historyItems[histIdx]);
-    } else if (e.key === "Escape") {
-      setHistOpen(false);
-      setHistIdx(-1);
-    }
-  };
+    setParams({ q, page: "" });
+  });
 
   /* An album's membership can change while its grid is on screen — the member
    * strip removes an image, a drop adds one — and the grid is a view of that
@@ -609,7 +781,8 @@ export default function GalleryPage() {
               ...(selection.params as object),
             }, ctrl.signal);
             setNotice(res.message ?? null);
-            setMeta({ basis: res.score_basis, rrfK: null, terms: [],
+            setMeta({ basis: res.score_basis, modeUsed: res.mode_used,
+                      rrfK: null, terms: [],
                       depthLimit: res.depth_limit, depthReached: res.depth_reached });
             return { items: res.items, total: null as number | null, more: res.has_more };
           } catch (e) {
@@ -632,7 +805,8 @@ export default function GalleryPage() {
             { ...selection.params, sort: sort || undefined,
               top_k: PER_PAGE, offset: (p - 1) * PER_PAGE }, ctrl.signal);
           setNotice(res.degraded ? res.message ?? null : fallbackMsg);
-          setMeta({ basis: res.score_basis, rrfK: res.rrf_k, terms: res.term_stats ?? [],
+          setMeta({ basis: res.score_basis, modeUsed: res.mode_used,
+                    rrfK: res.rrf_k, terms: res.term_stats ?? [],
                     idsResolved: res.ids_resolved, depthLimit: res.depth_limit,
                     depthReached: res.depth_reached });
           return { items: res.items, total: null as number | null, more: res.has_more };
@@ -670,7 +844,7 @@ export default function GalleryPage() {
         }
         // Only a query that answered joins the history — a search that threw
         // never reaches this line.
-        if (query.trim()) rememberSearch(query.trim());
+        if (query.trim()) hist.remember(query.trim());
         recordSearchActivity();
         setLoading(false);
       } catch (e) {
@@ -813,6 +987,11 @@ export default function GalleryPage() {
       .catch((e) => showToast(e instanceof Error ? e.message : "Could not save album"));
   };
 
+  /** What the bar, and the grouping panel's own caveat, are allowed to call
+   * this ranking: the server's word for the answer it actually gave, falling
+   * back to the requested mode only before the first answer arrives. */
+  const modeUsed = meta.modeUsed ?? mode;
+
   const common = meta.terms.filter((t) => t.common);
   const missing = meta.terms.filter((t) => t.images === 0);
   const hasFilters = selection.active;
@@ -868,16 +1047,17 @@ export default function GalleryPage() {
           <input
             aria-label="Search images"
             role="combobox"
-            aria-expanded={histOpen && historyItems.length > 0}
+            aria-expanded={hist.open && hist.items.length > 0}
             aria-controls="search-history-list"
             aria-autocomplete="list"
-            aria-activedescendant={histIdx >= 0 ? `search-hist-${histIdx}` : undefined}
+            aria-activedescendant={
+              hist.activeIndex >= 0 ? `search-hist-${hist.activeIndex}` : undefined}
             placeholder='Search images… e.g. "dog jumping into water", "crowded market at night"'
             value={input}
-            onChange={(e) => { setInput(e.target.value); setHistOpen(true); }}
-            onFocus={onSearchFocus}
-            onBlur={() => { setHistOpen(false); setHistIdx(-1); }}
-            onKeyDown={onSearchKeyDown}
+            onChange={(e) => { setInput(e.target.value); hist.show(); }}
+            onFocus={hist.onFocus}
+            onBlur={hist.close}
+            onKeyDown={hist.onKeyDown}
           />
           {/* The image affordance lives where the query goes: dropping a
               picture on the results or pasting one is the primary path, and
@@ -904,18 +1084,18 @@ export default function GalleryPage() {
                    if (f) runImageSearch(f);
                    e.target.value = "";   // the same file, picked twice, still fires
                  }} />
-          {histOpen && historyItems.length > 0 && (
+          {hist.open && hist.items.length > 0 && (
             <ul className="search-history" id="search-history-list" role="listbox"
                 aria-label="Recent searches">
-              {historyItems.map((s, i) => (
+              {hist.items.map((s, i) => (
                 <li key={s} id={`search-hist-${i}`} role="option"
-                    aria-selected={i === histIdx}
-                    className={i === histIdx ? "active" : ""}
+                    aria-selected={i === hist.activeIndex}
+                    className={i === hist.activeIndex ? "active" : ""}
                     // preventDefault keeps the input focused through the
                     // press, so blur cannot close the list before click lands.
                     onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => applyHistory(s)}
-                    onMouseEnter={() => setHistIdx(i)}>
+                    onClick={() => hist.pick(s)}
+                    onMouseEnter={() => hist.highlight(i)}>
                   {s}
                 </li>
               ))}
@@ -973,6 +1153,19 @@ export default function GalleryPage() {
           ))}
           <span className="ref-hint">
             {query ? `steered by “${query}”` : "type to steer — “but at night”, “in a village”…"}
+            {/* The mode pills stay clickable while chips are set and the URL
+                still records the click, but the request goes to composed
+                retrieval, which has no mode — so the choice changes nothing.
+                Unsaid, a researcher can read "semantic and keyword agree
+                perfectly" off a comparison that never ran. (Disabling the
+                three buttons belongs in SearchSettings, not here.) */}
+            {" · "}
+            <span title={"Composed retrieval ranks by these reference images "
+                       + "(score basis “composed”). Search settings → Mode applies to "
+                       + "text-only searches; clear the references to compare hybrid, "
+                       + "semantic and keyword on the same query."}>
+              search-mode dial does not apply while references are set
+            </span>
           </span>
           <button className="ghost" onClick={() => setParams({ like: "", unlike: "", page: "" })}>
             Clear references
@@ -988,14 +1181,7 @@ export default function GalleryPage() {
 
       {/* Zero-state only. With a filter applied these are noise between
           the controls and the results the filter just produced. */}
-      {!query && !selection.active && (
-        <div className="chip-row">
-          <span className="chip-label">Try:</span>
-          {SUGGESTIONS.map((s) => (
-            <button key={s} className="chip" onClick={() => setInput(s)}>{s}</button>
-          ))}
-        </div>
-      )}
+      {!query && !selection.active && <FindingsRow />}
 
       {notice && <div className="notice">{notice}</div>}
       {error && <div className="error">{error}</div>}
@@ -1056,7 +1242,7 @@ export default function GalleryPage() {
       <div className="result-bar">
         <div className="meta-line" aria-live="polite" style={{ marginBottom: 0 }}>
           {query
-            ? `${items.length}${hasMore ? "+" : ""} result${items.length === 1 ? "" : "s"} for “${query}” (${mode})`
+            ? `${items.length}${hasMore ? "+" : ""} result${items.length === 1 ? "" : "s"} for “${query}” (${modeUsed})`
             : `${total.toLocaleString()} samples`}
           {query && meta.basis === "rrf" && meta.rrfK != null &&
             ` · fused by reciprocal rank, k=${meta.rrfK}`}
@@ -1104,7 +1290,7 @@ export default function GalleryPage() {
 
       {view === "grouped" && (
         <ScenarioGroups resultCount={items.length} hasMore={hasMore}
-                        mode={mode} answer={scenarios} busy={scenBusy}
+                        mode={modeUsed} answer={scenarios} busy={scenBusy}
                         thumbs={groupThumbs}
                         onBack={() => setView("ranked")}
                         onSaveGroup={saveGroupAsAlbum} />
@@ -1125,11 +1311,20 @@ export default function GalleryPage() {
         {/* Each card links with the query, mode and score that put it here.
             `items` accumulates every page loaded so far, so the array index is
             already the rank within the whole result set: the first card on
-            page 3 is rank 121, not rank 1. */}
+            page 3 is rank 121, not rank 1.
+
+            The mode is passed only when the answer was ranked by the mode the
+            URL asked for. Otherwise it is omitted, and the sample page's
+            provenance banner reads "Surfaced by search “…” — composed 0.765"
+            rather than naming a mode that never ran — the same lie the result
+            bar used to tell, one navigation further on. Omitting is right and
+            substituting is not: ProvenanceBanner voids itself on a mode it
+            does not recognise, and the score's own basis already travels. */}
         {items.map((s, i) => {
           const card = (
             <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
-                       query={query} mode={mode} rank={i + 1}
+                       query={query} mode={modeUsed === mode ? mode : undefined}
+                       rank={i + 1}
                        selected={picked.has(s.id)}
                        onToggleSelect={togglePick} getDragIds={getDragIds}
                        onLike={(id) => editRef(id, "like", true)}
