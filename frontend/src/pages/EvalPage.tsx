@@ -4,12 +4,17 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { EvalResponse } from "../api/types";
-import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../lib/viz";
+import { AXIS_STROKE, GRID_STROKE, SERIES, SURFACE, TOOLTIP_STYLE } from "../lib/viz";
 
+/* The three retrieval modes, in three colours checked as a set rather than
+   picked one at a time. `blue` is not among them on purpose: it is the brand
+   sage, and pairing it with `green` put semantic and hybrid — the two series
+   this whole figure exists to compare — 4.0 ΔE2000 apart, which is below the
+   floor at which full-colour vision can separate a pair. */
 const MODE_COLORS: Record<string, string> = {
-  semantic: SERIES.blue,
+  semantic: SERIES.green,
   keyword: SERIES.amber,
-  hybrid: SERIES.green,
+  hybrid: SERIES.purple,
 };
 
 /** Self-benchmark: each of the dataset's own captions should retrieve its own
@@ -131,7 +136,14 @@ export default function EvalPage() {
                   contentStyle={TOOLTIP_STYLE}
                   formatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
                 />
-                <Legend />
+                {/* The swatch carries the identity; the word is a label and
+                    wears label ink. Recharts paints legend text in the series
+                    colour by default, which makes three mode names three
+                    different colours of text and puts the burden of telling
+                    them apart back on hue. */}
+                <Legend formatter={(value: string) => (
+                  <span style={{ color: SURFACE.textDim }}>{value}</span>
+                )} />
                 {/* Bars only for rows the benchmark actually returned — a
                     legend entry for an absent series would read as a zero. */}
                 {Object.entries(MODE_COLORS)

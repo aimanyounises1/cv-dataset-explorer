@@ -49,13 +49,35 @@ export const TOOLTIP_STYLE = {
   fontSize: 12,
 };
 
-/** Series colours for grouped charts. Distinct in hue *and* lightness, so they
- * survive greyscale printing and deuteranopia. */
+/** Series colours for grouped charts.
+ *
+ * These are NOT the UI tokens. `SURFACE.accent` (#216d50) and `SURFACE.green`
+ * (#1e7a55) are two sages a third of a step apart — correct as interface ink,
+ * useless as two categories: measured ΔE2000 4.0 for normal vision, which is
+ * below the 15 floor at which full-colour readers can still tell a pair apart,
+ * and 3.8 for deuteranopia. On the benchmark chart that put the two series the
+ * figure exists to compare — semantic and hybrid — in one colour to the eye.
+ * The old `purple` was a dark-era value (#c792ea) that also failed contrast
+ * against the warm-white canvas at 2.34:1.
+ *
+ * The three used together (green, amber, purple) were checked as a set, every
+ * pair, against the light canvas: chroma floor, CVD separation, the
+ * normal-vision floor and contrast all pass. Their worst deuteranopic pair sits
+ * in the 6–8 band, which is legal only alongside secondary encoding — every
+ * chart here carries a legend, and the benchmark repeats each figure in a table
+ * below it. `purple` is also held clear of the agent indigo (#5f6bd8, ΔE 16.6)
+ * so a series can never be mistaken for the model's own voice.
+ *
+ * `blue` keeps the brand sage: it only ever paints single-series charts, where
+ * there is no second category to be confused with. Its name is a leftover from
+ * the dark era and wants renaming to `sage` — deferred only because StatsPage
+ * is open in another agent's working tree.
+ */
 export const SERIES = {
   blue: SURFACE.accent,
-  green: SURFACE.green,
-  purple: "#c792ea",
-  amber: SURFACE.amber,
+  green: "#0d7048",
+  purple: "#8c4a7a",
+  amber: "#b0731a",
 } as const;
 
 // ----------------------------------------------------------------- scales ---
