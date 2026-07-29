@@ -62,7 +62,7 @@ export default function EvalPage() {
   return (
     <div>
       <h1 className="section-title" style={{ marginTop: 0 }}>Search quality benchmark</h1>
-      <p className="meta-line" style={{ maxWidth: 720 }}>
+      <p className="meta-line measure">
         Every caption in Flickr8k is ground truth: querying with a caption should
         retrieve its own image. This runs the standard text→image retrieval
         protocol against each search mode. The query caption is excluded
@@ -70,7 +70,7 @@ export default function EvalPage() {
         other four captions rather than matching itself; without that exclusion
         the number would measure nothing but self-retrieval.
       </p>
-      <p className="meta-line" style={{ maxWidth: 720 }}>
+      <p className="meta-line measure">
         <strong>Read the keyword row as a property of the query, not of BM25.</strong>{" "}
         These queries are whole captions, and keyword mode requires every term to
         appear in the same caption — so for most of them no other caption in the
@@ -98,10 +98,12 @@ export default function EvalPage() {
               published Flickr8k baselines rank against 1,000 candidates, so a
               number measured against the full corpus is a harder task and not
               comparable to them. State the pool next to the metric, always. */}
-          {/* One measure for every paragraph on the page: the intro wraps at
-              720px, and prose that suddenly runs ~200 characters wide past the
-              button reads as a different, less finished document. */}
-          <div style={{ maxWidth: 720 }}>
+          {/* One measure for every paragraph on the page, and it is the same
+              one the intro uses — prose that suddenly runs ~200 characters
+              wide past the button reads as a different, less finished
+              document. Stated as the shared prose rung rather than a repeated
+              720, which is how the three copies drifted apart. */}
+          <div className="measure">
           <div className="meta-line" style={{ marginTop: 18 }}>
             {result.sample_size.toLocaleString()} caption queries, averaging{" "}
             {result.mean_query_words} words · higher recall is better
@@ -125,7 +127,7 @@ export default function EvalPage() {
             change what every cached run means.
           </div>
           </div>
-          <div className="panel" style={{ maxWidth: 720 }}>
+          <div className="panel chart-wide">
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={chartData}>
                 <CartesianGrid stroke={GRID_STROKE} vertical={false} />

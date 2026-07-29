@@ -11,11 +11,16 @@ in App.tsx.
     python scripts/capabilities.py            # writes docs/CAPABILITIES.md
     python scripts/capabilities.py --check    # exit 1 if the file is stale
 
+Set ``CVDE_CAPABILITIES_API`` when verifying another isolated server, for
+example ``http://127.0.0.1:8001``. This keeps concurrent development servers
+independent without changing the documented port-8000 default.
+
 `--check` is the point of generating it: it turns "the docs are out of date" into
 a failing command instead of something a reader discovers.
 """
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -24,7 +29,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "CAPABILITIES.md"
-API = "http://127.0.0.1:8000"
+DEFAULT_API = "http://127.0.0.1:8000"
+API = os.environ.get("CVDE_CAPABILITIES_API", DEFAULT_API).rstrip("/")
 
 # Endpoint groups, in the order a reader meets them. The prefix match is
 # deliberate: a new /api/samples/... route lands in the right section by itself.
@@ -33,6 +39,7 @@ GROUPS = [
     # The detector exists only to propose regions for a search to use, so it
     # is documented where its results are consumed.
     ("Search", ("/api/search", "/api/detect", "/api/segment")),
+    ("Local vision inspection", ("/api/vision",)),
     ("Statistics and map", ("/api/stats", "/api/map", "/api/attributes",
                             "/api/describe")),
     ("Annotation QA", ("/api/qa/summary", "/api/qa/captions", "/api/qa/consistency",
@@ -115,7 +122,8 @@ def render() -> str:
     purpose = {
         "/": "Browse and search; every filter and the paging depth live in the URL.",
         "/samples/:id": "One image: captions, attributes, exact neighbours, and "
-                        "a promptable object-mask editor with annotation search.",
+                        "a promptable object-mask editor, masked-object search, "
+                        "and typed local VLM proposals.",
         "/map": "UMAP projection of all embeddings. Lasso a region to hand that "
                 "exact set to the gallery.",
         "/stats": "Splits, caption lengths, vocabulary, image sizes, and "
@@ -124,10 +132,11 @@ def render() -> str:
                     "selection can leave as a gallery filter or an export.",
         "/eval": "The tool measuring its own retrieval accuracy — R@1/5/10 for all "
                  "three search modes.",
-        "/compare": "Two images under one synchronized zoom; deterministic "
-                    "shared/different panel; draw a region to search or save it.",
-        "/chat": "Multi-agent assistant. Answers render as interactive charts, "
-                 "tables and reports, not prose about data.",
+        "/compare": "Two images under one synchronized zoom; typed local semantic "
+                    "difference proposals remain separate from stored metadata, "
+                    "duplicate triage and manual region search.",
+        "/chat": "Experimental local assistant. Its end-to-end claim-verification "
+                 "probe must pass before this route is considered release-qualified.",
     }
     for path, label, group in frontend_routes():
         w(f"| {group or '—'} | `{path}` | {label.strip()} | {purpose.get(path, '')} |")
@@ -141,7 +150,8 @@ def render() -> str:
     # ------------------------------------------------------------ endpoints
     w("## HTTP API")
     w("")
-    w(f"Interactive schema at [`{API}/docs`]({API}/docs) while the server runs.")
+    w(f"Interactive schema at [`{DEFAULT_API}/docs`]({DEFAULT_API}/docs) while "
+      "the server runs.")
     w("")
     seen: set[str] = set()
     for title, prefixes in GROUPS:
@@ -223,6 +233,12 @@ def render() -> str:
       "point/box prompting remains available; the UI names the fetch command. |")
     w("| Promptable masks | cached SAM 2.1 tiny weights | Rectangle search remains "
       "available; the UI names the fetch command and never downloads on request. |")
+    w("| Local vision inspector | Ollama + an explicitly configured, installed "
+      "vision model | The sample inspector remains fully usable; no model is "
+      "pulled or substituted by a request. |")
+    w("| Semantic pair inspector | An explicitly configured Ollama artifact whose "
+      "exact digest passed the ordered-frame contract | The loupe, stored-signal "
+      "comparison and manual region tools remain usable. |")
     w("| Assistant | `requirements-agent.txt` + Ollama | The tab shows exact setup "
       "instructions; nothing else is affected. |")
     w("| Application self-QA | `requirements-qa.txt` (Playwright) | "
@@ -254,7 +270,7 @@ def main() -> int:
 
     try:
         body = render()
-    except Exception as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         print(f"Could not reach the API at {API}: {exc}\n"
               f"Start it with: cd backend && .venv/bin/uvicorn app.main:app --port 8000",
               file=sys.stderr)
@@ -262,7 +278,8 @@ def main() -> int:
 
     # The date line is regenerated every run; comparing it would make --check
     # fail every day for no reason.
-    strip = lambda s: re.sub(r"<!-- generated .*? -->", "", s).strip()  # noqa: E731
+    def strip(value: str) -> str:
+        return re.sub(r"<!-- generated .*? -->", "", value).strip()
 
     if args.check:
         if not OUT.exists():

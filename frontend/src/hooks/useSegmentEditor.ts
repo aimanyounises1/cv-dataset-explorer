@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type {
+  DetectionProposalSource,
   DetectBox,
   DetectStatus,
   ObjectLabel,
@@ -66,21 +67,27 @@ export function useSegmentEditor(sampleId: number) {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [labelName, setLabelName] = useState("");
   const [parentName, setParentName] = useState("");
-  const [detectQuery, setDetectQuery] = useState(
-    "person. dog. cat. horse. bird. bicycle. car. motorcycle. bus. train. "
-    + "boat. sports ball. skateboard. surfboard. kite.",
-  );
+  const [detectQuery, setDetectQuery] = useState("");
   const [proposals, setProposals] = useState<DetectBox[]>([]);
+  const [detectorRun, setDetectorRun] = useState<{
+    model: string;
+    revision: string;
+    queries: string;
+  } | null>(null);
+  const [proposalSource, setProposalSource] =
+    useState<DetectionProposalSource | null>(null);
+  const [proposalToken, setProposalToken] = useState<string | null>(null);
   const [results, setResults] = useState<RegionResults | null>(null);
   const [busy, setBusy] = useState<EditorBusy>(null);
   const [error, setError] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState(
-    "Choose a prompt tool, then work directly on the image.",
+    "Source ready for inspection. Enter annotation mode before adding prompts.",
   );
 
   const loadAbort = useRef<AbortController | null>(null);
   const segmentAbort = useRef<AbortController | null>(null);
   const detectAbort = useRef<AbortController | null>(null);
+  const detectQueryRef = useRef(detectQuery);
   const mutationAbort = useRef<AbortController | null>(null);
   const searchAbort = useRef<AbortController | null>(null);
   const busyKind = useRef<EditorBusy>(null);
@@ -128,6 +135,9 @@ export function useSegmentEditor(sampleId: number) {
     setBox(null);
     setMask(null);
     setProposals([]);
+    setDetectorRun(null);
+    setProposalSource(null);
+    setProposalToken(null);
     setResults(null);
     setAnnotations([]);
     setTaxonomy([]);
@@ -144,7 +154,7 @@ export function useSegmentEditor(sampleId: number) {
       .then((status) => {
         setSegmentStatus(status);
         setAnnouncement(status.ready
-          ? "Segmenter ready. Add a positive point, negative point, or box."
+          ? "Segmenter ready. Enter annotation mode to add a point or box."
           : `Segmenter unavailable. ${status.reason ?? "Rectangle search remains available."}`);
         setTool(status.ready ? "positive" : "box");
       })
@@ -236,6 +246,8 @@ export function useSegmentEditor(sampleId: number) {
     if (busyKind.current !== null) return;
     setBox(next);
     setSelectedId(null);
+    setProposalSource(null);
+    setProposalToken(null);
     void requestSegment(points, next);
   }, [points, requestSegment]);
 
@@ -255,10 +267,38 @@ export function useSegmentEditor(sampleId: number) {
     const path = proposal.label_path?.length ? proposal.label_path : known?.path ?? [];
     const explicitParent = proposal.parent_name?.trim()
       || (path.length > 1 ? path[path.length - 2].trim() : "");
-    setLabelName((current) => current || leaf);
-    if (explicitParent) setParentName((current) => current || explicitParent);
+    // A detector proposal is a new draft identity, not just new geometry.
+    // Retaining the previous draft's taxonomy here can save a valid mask under
+    // the wrong class (for example, choosing a person box after a sidewalk
+    // draft). The proposal label and its resolved parent must travel together.
+    setLabelName(leaf);
+    setParentName(explicitParent);
+    setProposalSource(detectorRun ? {
+      kind: "detector",
+      model_id: detectorRun.model,
+      model_revision: detectorRun.revision,
+      queries: detectorRun.queries,
+      original_label: proposal.label,
+      proposed_label: leaf,
+      score: proposal.score,
+      box: next,
+    } : null);
+    setProposalToken(proposal.proposal_token);
     void requestSegment(points, next);
-  }, [points, requestSegment, taxonomy]);
+  }, [detectorRun, points, requestSegment, taxonomy]);
+
+  const updateDetectQuery = useCallback((value: string) => {
+    detectQueryRef.current = value;
+    setDetectQuery(value);
+    // Proposals are evidence for the exact query that produced them. Once the
+    // query changes, leaving *unselected* boxes selectable would attach stale
+    // evidence to a new user intent. A proposal already selected into the
+    // current draft keeps its immutable token until geometry is changed,
+    // undone, or cleared; changing the input for a future run must not silently
+    // relabel that detector-origin draft as manual.
+    setProposals([]);
+    setDetectorRun(null);
+  }, []);
 
   const suggest = useCallback(async () => {
     const operation = beginBusy("detect");
@@ -267,12 +307,24 @@ export function useSegmentEditor(sampleId: number) {
     const controller = new AbortController();
     detectAbort.current = controller;
     setError(null);
+    setProposals([]);
+    setDetectorRun(null);
     setAnnouncement("Finding candidate boxes.");
+    const requestedQuery = detectQuery.trim();
     try {
       const response = await api.detectRegions(
-        sampleId, detectQuery.trim(), controller.signal,
+        sampleId, requestedQuery, controller.signal,
       );
+      if (detectQueryRef.current.trim() !== requestedQuery) {
+        setAnnouncement("Detector query changed; discarded the stale proposals.");
+        return;
+      }
       setProposals(response.boxes);
+      setDetectorRun({
+        model: response.model,
+        revision: response.revision,
+        queries: response.queries,
+      });
       setAnnouncement(response.boxes.length
         ? `${response.boxes.length} detector proposals ready. Choose one to segment.`
         : "The detector proposed no regions for this query.");
@@ -294,6 +346,9 @@ export function useSegmentEditor(sampleId: number) {
     setMask(null);
     setSelectedId(null);
     setProposals([]);
+    setDetectorRun(null);
+    setProposalSource(null);
+    setProposalToken(null);
     setResults(null);
     setError(null);
     setAnnouncement("Prompts cleared.");
@@ -310,6 +365,8 @@ export function useSegmentEditor(sampleId: number) {
     }
     if (box) {
       setBox(null);
+      setProposalSource(null);
+      setProposalToken(null);
       void requestSegment([], null);
     }
   }, [box, points, requestSegment]);
@@ -324,27 +381,39 @@ export function useSegmentEditor(sampleId: number) {
     const name = annotation.label_name ?? annotation.label ?? "";
     setLabelName(name);
     setParentName(annotation.parent_name ?? "");
+    setProposalSource(annotation.proposal_source ?? null);
+    setProposalToken(null);
     setResults(null);
     setError(null);
-    setAnnouncement(`Selected saved annotation “${name || "unnamed"}”.`);
+    setAnnouncement(`Selected accepted annotation “${name || "unnamed"}”.`);
   }, []);
 
   const save = useCallback(async () => {
     const label = labelName.trim();
-    if (!mask || !label || (points.length === 0 && box === null)) return;
+    const preview = mask && "preview_token" in mask ? mask : null;
+    if (
+      !preview
+      || !preview.preview_token
+      || !preview.mask_data_url
+      || !label
+      || (points.length === 0 && box === null)
+    ) return;
     const operation = beginBusy("save");
     if (operation === null) return;
     mutationAbort.current?.abort();
     const controller = new AbortController();
     mutationAbort.current = controller;
     setError(null);
-    setAnnouncement(`Saving annotation “${label}”.`);
+    setAnnouncement(`Accepting annotation “${label}”.`);
     try {
       const saved = await api.saveSegmentAnnotation(sampleId, {
         points,
         ...(box ? { box } : {}),
         label_name: label,
         parent_name: parentName.trim() || null,
+        preview_token: preview.preview_token,
+        mask_data_url: preview.mask_data_url,
+        ...(proposalToken ? { proposal_token: proposalToken } : {}),
       }, controller.signal);
       setAnnotations((current) => [
         ...current.filter((item) => item.id !== saved.id),
@@ -353,21 +422,24 @@ export function useSegmentEditor(sampleId: number) {
       setAnnotationsReady(true);
       setSelectedId(saved.id);
       setMask(saved);
+      setProposalSource(saved.proposal_source ?? null);
+      setProposalToken(null);
       const savedName = saved.label_name ?? saved.label ?? label;
-      setAnnouncement(`Saved “${savedName}”.`);
+      setAnnouncement(`Accepted “${savedName}”.`);
       void api.objectLabels(controller.signal)
         .then((labels) => setTaxonomy(Array.isArray(labels) ? labels : []))
         .catch(() => {});
     } catch (e: unknown) {
       if (!aborted(e)) {
         setError(problem(e, "Could not save the annotation"));
-        setAnnouncement("Annotation save failed.");
+        setAnnouncement("Annotation acceptance failed.");
       }
     } finally {
       endBusy(operation);
     }
   }, [
-    beginBusy, box, endBusy, labelName, mask, parentName, points, sampleId,
+    beginBusy, box, endBusy, labelName, mask, parentName, points,
+    proposalToken, sampleId,
   ]);
 
   const remove = useCallback(async (annotationId: number) => {
@@ -385,6 +457,8 @@ export function useSegmentEditor(sampleId: number) {
         setMask(null);
         setPoints([]);
         setBox(null);
+        setProposalSource(null);
+        setProposalToken(null);
       }
       setAnnouncement("Annotation deleted.");
     } catch (e: unknown) {
@@ -499,7 +573,7 @@ export function useSegmentEditor(sampleId: number) {
     annotations, selectedId,
     labelName, setLabelName: setResolvedLabelName, parentName, setParentName,
     labelOptions, parentOptions,
-    detectQuery, setDetectQuery, proposals,
+    detectQuery, setDetectQuery: updateDetectQuery, proposals, proposalSource,
     results, busy, error, announcement,
     addPoint, commitBox, useProposal, suggest,
     clearDraft, undoPrompt, selectAnnotation,

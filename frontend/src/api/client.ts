@@ -8,10 +8,84 @@ import type {
   SegmentAnnotation, SegmentAnnotationCreate, SegmentResult,
   SegmentRequest, SegmentStatus,
   SampleDetail, SampleList, SearchMode, SearchResponse, StatsOverview,
-  SuspectCaption, TagInfo,
+  SuspectCaption, TagInfo, VisionInspectRequest, VisionInspectResponse,
+  VisionModelsResponse, VisionPairCompareRequest, VisionPairCompareResponse,
 } from "./types";
 
 type Params = Record<string, string | number | string[] | undefined>;
+
+/** One entry of FastAPI's 422 envelope: `{"detail": [{loc, msg, ...}]}`. */
+type ValidationItem = { loc?: unknown[]; msg?: string };
+
+/** The sentence inside FastAPI's error envelope.
+ *
+ * `detail` is a string for a raised `HTTPException` ("Sample not found") and a
+ * list of per-field objects for a request that failed validation. Both are
+ * turned into one line; anything else falls back to the caller's status text,
+ * because inventing a sentence for a shape we do not recognise would be a
+ * claim the payload does not support.
+ */
+function detailSentence(detail: unknown): string | null {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = (detail as ValidationItem[])
+      .map((d) => {
+        const msg = typeof d?.msg === "string" ? d.msg : null;
+        if (!msg) return null;
+        // `loc` is ["path", "sample_id"] or ["query", "mode"] — the last
+        // element is the field the reader can actually change.
+        const field = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : null;
+        return field ? `${String(field)}: ${msg}` : msg;
+      })
+      .filter((s): s is string => s !== null);
+    if (parts.length > 0) return parts.join("; ");
+  }
+  return null;
+}
+
+/** What went wrong, as something a reader can act on — with the payload kept.
+ *
+ * Every failed request used to reach the screen as `String(e)`, which on a
+ * validation failure is the entire `{"detail":[{"type":"int_parsing",…}]}`
+ * document printed into a red box. The status and the raw body are still the
+ * useful clue when something is genuinely unexpected, so neither is thrown
+ * away: `message` is the sentence, `status` is matchable without parsing text,
+ * and `body` holds the payload for the surfaces that show it behind a
+ * disclosure.
+ *
+ * `toString()` returns the sentence alone rather than `Error`'s
+ * `"<name>: <message>"`, so the call sites that render `String(e)` print the
+ * sentence and not a class name.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: string;
+  readonly detail: unknown;
+
+  constructor(status: number, body: string) {
+    let detail: unknown;
+    try {
+      detail = (JSON.parse(body) as { detail?: unknown }).detail;
+    } catch {
+      /* not JSON — `body` is still the whole truth we have */
+    }
+    super(detailSentence(detail)
+      ?? (body.trim() || `The request failed with status ${status}.`));
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+    this.detail = detail;
+  }
+
+  override toString(): string { return this.message; }
+}
+
+/** True when `e` is the API refusing with this status — asked by the surfaces
+ * that treat "not found" or "already exists" as an outcome rather than a fault.
+ * A helper rather than `e.message.startsWith("404")`: the message is now a
+ * sentence, and a sentence is not a status. */
+export const isStatus = (e: unknown, status: number): boolean =>
+  e instanceof ApiError && e.status === status;
 
 async function get<T>(path: string, params?: Params, signal?: AbortSignal): Promise<T> {
   const url = new URL(`/api${path}`, window.location.origin);
@@ -25,7 +99,7 @@ async function get<T>(path: string, params?: Params, signal?: AbortSignal): Prom
     }
   }
   const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.json() as Promise<T>;
 }
 
@@ -37,7 +111,7 @@ async function send<T>(
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.json() as Promise<T>;
 }
 
@@ -64,7 +138,7 @@ export const api = {
       headers: { "Content-Type": file.type || "application/octet-stream" },
       body: file,
     });
-    if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+    if (!res.ok) throw new ApiError(res.status, await res.text());
     return res.json() as Promise<SampleCard[]>;
   },
 
@@ -97,6 +171,15 @@ export const api = {
     "/detect", "POST", { sample_id: sampleId, queries }, signal),
   objectLabels: (signal?: AbortSignal) =>
     get<ObjectLabel[]>("/object-labels", undefined, signal),
+
+  /** Read-only local VLM proposals. The endpoint validates Ollama's live
+   * vision capability and returns exact model-digest provenance. */
+  visionModels: (signal?: AbortSignal) =>
+    get<VisionModelsResponse>("/vision/models", undefined, signal),
+  inspectVision: (body: VisionInspectRequest, signal?: AbortSignal) =>
+    send<VisionInspectResponse>("/vision/inspect", "POST", body, signal),
+  compareVision: (body: VisionPairCompareRequest, signal?: AbortSignal) =>
+    send<VisionPairCompareResponse>("/vision/compare", "POST", body, signal),
 
   overview: () => get<StatsOverview>("/stats/overview"),
   /** The workspace trail, newest first. A bare array by contract — see

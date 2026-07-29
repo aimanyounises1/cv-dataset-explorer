@@ -10,32 +10,62 @@ import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 from PIL import Image as PILImage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .. import config
 from ..ml import detect as detect_ml
+from ..proposal_tokens import issue_detection_proposal
+from ..schemas import (
+    DetectionProposalSource,
+    DetectResponse,
+    ModelCapabilityStatus,
+    SegmentBox,
+)
 from .annotations import canonical_object_name, lookup_object_label
 from .deps import get_conn
 
 router = APIRouter()
 
+_BENCHMARKED_MODEL = "IDEA-Research/grounding-dino-tiny"
+_BENCHMARKED_REVISION = "a2bb814dd30d776dcf7e30523b00659f4f141c71"
+_BENCHMARK_MEASUREMENT = "~330 ms/image warm on the reference M4 Max (MPS)"
 
-@router.get("/detect/status")
+
+@router.get("/detect/status", response_model=ModelCapabilityStatus)
 def detect_status():
     """Availability probe, so the UI can offer the control only when it works."""
-    ok, reason = detect_ml.detect_ready()
-    return {"ready": ok, "reason": reason, "model": detect_ml.DETECT_MODEL,
-            "measured": "~330 ms/image warm on the reference M4 Max (MPS)"}
+    state = detect_ml.detector_availability()
+    measured = (
+        _BENCHMARK_MEASUREMENT
+        if (
+            state.model == _BENCHMARKED_MODEL
+            and state.revision == _BENCHMARKED_REVISION
+        )
+        else "not measured for the configured detector artifact"
+    )
+    return {"ready": state.ready, "reason": state.reason, "model": state.model,
+            "revision": state.revision,
+            "measured": measured}
 
 
 class DetectRequest(BaseModel):
-    sample_id: int = Field(..., ge=1, le=2**63 - 1)
+    model_config = ConfigDict(extra="forbid")
+
+    sample_id: int = Field(..., strict=True, ge=1, le=2**63 - 1)
     # Period-separated phrases, per the model's own query format.
     queries: str = Field("a person. an animal. a vehicle. an object.",
                          min_length=3, max_length=300)
 
+    @field_validator("queries")
+    @classmethod
+    def _normalize_queries(cls, value: str) -> str:
+        normalized = " ".join(value.split())
+        if len(normalized) < 3:
+            raise ValueError("queries must contain a detector phrase")
+        return normalized
 
-@router.post("/detect")
+
+@router.post("/detect", response_model=DetectResponse)
 def detect_regions(body: DetectRequest,
                    conn: sqlite3.Connection = Depends(get_conn)):
     detector = detect_ml.get_detector()
@@ -59,7 +89,26 @@ def detect_regions(body: DetectRequest,
             resolved.path[-2] if resolved is not None and len(resolved.path) > 1
             else None)
         box["label_path"] = resolved.path if resolved is not None else []
-    return {"sample_id": body.sample_id, "model": detect_ml.DETECT_MODEL,
+        source = DetectionProposalSource(
+            model_id=detector.model_id,
+            model_revision=detector.revision,
+            queries=body.queries,
+            original_label=box["label"],
+            proposed_label=box["label_name"],
+            score=box["score"],
+            box=SegmentBox(
+                x=box["x"],
+                y=box["y"],
+                w=box["w"],
+                h=box["h"],
+            ),
+        )
+        box["proposal_token"] = issue_detection_proposal(
+            body.sample_id,
+            source,
+        )
+    return {"sample_id": body.sample_id, "model": detector.model_id,
+            "revision": detector.revision,
             "queries": body.queries,
             "boxes": boxes,
             "note": "zero-shot proposals — click one to use it as region "

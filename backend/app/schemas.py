@@ -1,8 +1,17 @@
 """API response models."""
+from __future__ import annotations
+
 import math
 from typing import Annotated, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 
 class AxisScores(BaseModel):
@@ -103,32 +112,71 @@ class SearchResponse(BaseModel):
     depth_reached: bool = False
 
 
+AxisName = Literal["legibility", "rarity", "difficulty", "clutter"]
+SearchMode = Literal["semantic", "keyword", "hybrid"]
+SearchSort = Literal[
+    "legibility_asc",
+    "legibility_desc",
+    "rarity_asc",
+    "rarity_desc",
+    "difficulty_asc",
+    "difficulty_desc",
+    "clutter_asc",
+    "clutter_desc",
+]
+
+
+class AxisRange(BaseModel):
+    """One validated 0–10 dataset-relative axis interval."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    min: Optional[int] = Field(None, strict=True, ge=0, le=10)
+    max: Optional[int] = Field(None, strict=True, ge=0, le=10)
+
+
 class SearchRequest(BaseModel):
     """POST body for search, carrying what a URL cannot.
 
     Mirrors the GET parameters exactly; it exists only because an id list of the
     size this tool accepts does not fit in a query string.
     """
-    q: str
-    mode: str = "hybrid"
-    top_k: int = 60
-    offset: int = 0
+    q: str = Field(..., strict=True, min_length=1)
+    mode: SearchMode = "hybrid"
+    top_k: int = Field(60, strict=True, ge=1, le=200)
+    offset: int = Field(0, strict=True, ge=0, le=5000)
     split: Optional[str] = None
     tag: Optional[str] = None
     vlm_tag: Optional[str] = None
     # One facet or several, intersected. A bare string is still accepted so the
     # POST body stays compatible with clients that only ever sent one.
     attr: Optional[Union[str, list[str]]] = None
-    sort: Optional[str] = None
+    sort: Optional[SearchSort] = None
     ids: Optional[str] = None            # raw pasted text, parsed server-side
-    axes: dict[str, dict[str, Optional[int]]] = {}   # {"difficulty": {"min": 8}}
-    max_agreement: Optional[float] = None
+    axes: dict[AxisName, AxisRange] = Field(default_factory=dict)
+    max_agreement: Optional[float] = Field(
+        None,
+        strict=True,
+        ge=0.0,
+        le=1.0,
+        allow_inf_nan=False,
+    )
     # One k-means cluster. Bounded to what SQLite can bind and no narrower —
     # cluster ids are assigned at ingest and carry no sign convention.
-    cluster: Optional[int] = Field(None, ge=-(2**63), le=2**63 - 1)
+    cluster: Optional[int] = Field(
+        None,
+        strict=True,
+        ge=-(2**63),
+        le=2**63 - 1,
+    )
     # Membership filter, bounded to SQLite's signed 64-bit range like every
     # album id. An id naming no album matches nothing — honest empty, no error.
-    album: Optional[int] = Field(None, ge=1, le=2**63 - 1)
+    album: Optional[int] = Field(
+        None,
+        strict=True,
+        ge=1,
+        le=2**63 - 1,
+    )
 
 
 class StatsOverview(BaseModel):
@@ -465,7 +513,7 @@ class ComposedSearchRequest(BaseModel):
     attr: Optional[Union[str, list[str]]] = None
     album: Optional[int] = Field(None, ge=1, le=2**63 - 1)
     max_agreement: Optional[float] = Field(None, ge=0.0, le=1.0, allow_inf_nan=False)
-    axes: dict[str, dict[str, Optional[int]]] = {}
+    axes: dict[AxisName, AxisRange] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _needs_a_direction(self):
@@ -608,15 +656,19 @@ class AnnotationOut(BaseModel):
     label_name: Optional[str] = None
     parent_name: Optional[str] = None
     label_path: list[str] = Field(default_factory=list)
-    points: list[dict] = Field(default_factory=list)
-    box: Optional[dict] = None
-    bbox: Optional[dict] = None
+    points: list[SegmentPoint] = Field(default_factory=list)
+    box: Optional[SegmentBox] = None
+    bbox: Optional[SegmentBox] = None
     mask_data_url: Optional[str] = None
     mask_url: Optional[str] = None
+    cutout_url: Optional[str] = None
+    artifact_package_url: Optional[str] = None
     mask_width: Optional[int] = None
     mask_height: Optional[int] = None
     model_id: Optional[str] = None
-    prompt: Optional[dict] = None
+    model_revision: Optional[str] = None
+    prompt: Optional[SegmentPrompt] = None
+    proposal_source: Optional[DetectionProposalSource] = None
     predicted_iou: Optional[float] = None
 
 
@@ -646,7 +698,33 @@ class SegmentBox(BaseModel):
         return self
 
 
+class DetectionProposalSource(BaseModel):
+    """Immutable detector evidence that led to an accepted mask.
+
+    The accepted taxonomy is stored separately. That keeps a reviewer relabel
+    visible instead of rewriting what the detector originally proposed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["detector"] = "detector"
+    model_id: str = Field(..., min_length=1, max_length=200)
+    model_revision: str = Field(
+        ...,
+        min_length=40,
+        max_length=40,
+        pattern=r"^[0-9a-f]{40}$",
+    )
+    queries: str = Field(..., min_length=3, max_length=300)
+    original_label: str = Field(..., min_length=1, max_length=100)
+    proposed_label: str = Field(..., min_length=1, max_length=100)
+    score: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    box: SegmentBox
+
+
 class SegmentPrompt(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     points: list[SegmentPoint] = Field(default_factory=list, max_length=16)
     box: Optional[SegmentBox] = None
 
@@ -655,6 +733,12 @@ class SegmentPrompt(BaseModel):
         if self.box is None and not any(p.label == 1 for p in self.points):
             raise ValueError("Provide a box or at least one foreground point")
         return self
+
+
+# AnnotationOut is declared before the segment types because it is also the
+# response contract for manual rectangles and polygons. Resolve those typed
+# forward references once every segment contract exists.
+AnnotationOut.model_rebuild()
 
 
 def _clean_label(value: Optional[str]) -> Optional[str]:
@@ -688,6 +772,20 @@ class SegmentRequest(SegmentPrompt):
 class SegmentAcceptRequest(SegmentPrompt):
     label_name: str = Field(..., min_length=1, max_length=100)
     parent_name: Optional[str] = Field(None, max_length=100)
+    # The preview token authenticates the exact mask bytes the reviewer saw.
+    # They remain optional at the schema seam only so the endpoint can return
+    # one actionable "generate and review a preview" error for a missing pair;
+    # acceptance rejects both a missing pair and a partial pair.
+    preview_token: Optional[str] = Field(None, min_length=64, max_length=16_384)
+    mask_data_url: Optional[str] = Field(
+        None,
+        min_length=len("data:image/png;base64,") + 4,
+        max_length=4_000_000,
+    )
+    # Opaque, server-issued evidence returned by POST /api/detect. The server
+    # verifies and resolves it; callers never submit model identity/confidence
+    # as trusted provenance.
+    proposal_token: Optional[str] = Field(None, min_length=64, max_length=4_096)
 
     @field_validator("label_name", "parent_name")
     @classmethod
@@ -704,7 +802,11 @@ class SegmentAcceptRequest(SegmentPrompt):
 class SegmentPreview(BaseModel):
     sample_id: int
     model: str
-    prompt: dict
+    model_revision: str
+    preview_token: str = Field(..., min_length=64, max_length=16_384)
+    source_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    mask_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    prompt: SegmentPrompt
     predicted_iou: float
     bbox: dict
     area_fraction: float
@@ -716,11 +818,469 @@ class SegmentPreview(BaseModel):
     label_path: list[str] = Field(default_factory=list)
 
 
+class ModelCapabilityStatus(BaseModel):
+    ready: bool
+    reason: str | None = None
+    model: str
+    revision: str | None = None
+    measured: str
+
+
+class DetectBoxOut(SegmentBox):
+    label: str
+    score: float
+    label_name: str | None = None
+    parent_name: str | None = None
+    label_path: list[str] = Field(default_factory=list)
+    proposal_token: str = Field(..., min_length=64, max_length=4_096)
+
+
+class DetectResponse(BaseModel):
+    sample_id: int
+    model: str
+    revision: str
+    queries: str
+    boxes: list[DetectBoxOut]
+    note: str
+
+
 class ObjectLabelOut(BaseModel):
     id: int
     name: str
     parent_id: Optional[int] = None
     path: list[str] = Field(default_factory=list)
+
+
+# ---- Local vision inspection ------------------------------------------------
+
+VisionTask = Literal["scene", "road_scene", "caption_audit", "ocr", "question"]
+VisionSetting = Literal["indoor", "outdoor", "mixed", "unknown"]
+VisionLighting = Literal[
+    "daylight",
+    "low_light",
+    "artificial_light",
+    "backlit",
+    "mixed",
+    "unknown",
+]
+
+
+class VisionModelStatus(BaseModel):
+    """One configured local Ollama artifact and its measured capabilities."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    ready: bool
+    reason: str | None = None
+    digest: str | None = None
+    family: str | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class VisionPairCapabilityStatus(BaseModel):
+    """The one server-selected pair adapter, separate from model discovery."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ready: bool
+    reason: str | None = None
+    provider: Literal["ollama"] = "ollama"
+    model: str | None = None
+    model_digest: str | None = None
+    runtime: Literal["ollama"] = "ollama"
+    runtime_version: str | None = None
+    adapter_id: Literal["ollama_sequential_frames"] = "ollama_sequential_frames"
+    adapter_version: int = 1
+    protocol: Literal["sequential_frames_v1"] | None = None
+
+
+class VisionModelsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    default_model: str | None = None
+    models: list[VisionModelStatus]
+    pair_comparison: VisionPairCapabilityStatus
+
+
+class VisionInspectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sample_id: int = Field(..., strict=True, ge=1, le=2**63 - 1)
+    model: str = Field(..., min_length=1, max_length=200)
+    task: VisionTask
+    question: str | None = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def _question_matches_task(self) -> "VisionInspectRequest":
+        question = " ".join(self.question.split()) if self.question else None
+        if self.task == "question" and not question:
+            raise ValueError("question is required for the question task")
+        if self.task != "question" and question:
+            raise ValueError("question is only accepted for the question task")
+        self.question = question
+        return self
+
+
+class VisionVisibleObject(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=100)
+    attributes: list[str] = Field(default_factory=list, max_length=8)
+    location: Literal[
+        "foreground",
+        "midground",
+        "background",
+        "throughout",
+        "unknown",
+    ] = "unknown"
+
+
+class VisionSceneProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["scene"] = "scene"
+    summary: str = Field(..., min_length=1, max_length=800)
+    objects: list[VisionVisibleObject] = Field(default_factory=list, max_length=24)
+    setting: VisionSetting
+    lighting: VisionLighting
+    surface_conditions: list[str] = Field(default_factory=list, max_length=12)
+    visible_text: list[str] = Field(default_factory=list, max_length=20)
+    uncertainties: list[str] = Field(default_factory=list, max_length=12)
+    search_terms: list[str] = Field(default_factory=list, max_length=16)
+
+
+class VisionRoadActor(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: Literal[
+        "pedestrian",
+        "cyclist",
+        "motorcyclist",
+        "vehicle",
+        "animal",
+        "other",
+    ]
+    description: str = Field(..., min_length=1, max_length=240)
+    location: Literal[
+        "road",
+        "road_edge",
+        "sidewalk",
+        "crossing",
+        "off_road",
+        "unknown",
+    ] = "unknown"
+
+
+class VisionRoadSceneProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["road_scene"] = "road_scene"
+    road_scene: bool
+    summary: str = Field(..., min_length=1, max_length=800)
+    actors: list[VisionRoadActor] = Field(default_factory=list, max_length=24)
+    traffic_controls: list[str] = Field(default_factory=list, max_length=16)
+    surface_conditions: list[str] = Field(default_factory=list, max_length=12)
+    visibility_limitations: list[str] = Field(default_factory=list, max_length=12)
+    uncertainties: list[str] = Field(default_factory=list, max_length=12)
+    search_terms: list[str] = Field(default_factory=list, max_length=16)
+
+
+class VisionCaptionAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    caption_index: int = Field(..., strict=True, ge=0, le=100)
+    status: Literal["supported", "partly_supported", "unsupported", "uncertain"]
+    visible_evidence: str = Field(..., min_length=1, max_length=500)
+
+
+class VisionCaptionAuditProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["caption_audit"] = "caption_audit"
+    assessments: list[VisionCaptionAssessment] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    discrepancies: list[str] = Field(default_factory=list, max_length=20)
+    uncertainties: list[str] = Field(default_factory=list, max_length=12)
+    search_terms: list[str] = Field(default_factory=list, max_length=16)
+
+
+class VisionTextRegion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(..., min_length=1, max_length=500)
+    location: Literal[
+        "top_left",
+        "top",
+        "top_right",
+        "left",
+        "center",
+        "right",
+        "bottom_left",
+        "bottom",
+        "bottom_right",
+        "unknown",
+    ] = "unknown"
+    legibility: Literal["clear", "partial", "uncertain"]
+
+
+class VisionOcrProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["ocr"] = "ocr"
+    regions: list[VisionTextRegion] = Field(default_factory=list, max_length=40)
+    uncertainties: list[str] = Field(default_factory=list, max_length=12)
+    search_terms: list[str] = Field(default_factory=list, max_length=16)
+
+
+class VisionQuestionProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["question"] = "question"
+    answer: str = Field(..., min_length=1, max_length=1_200)
+    visible_evidence: list[str] = Field(default_factory=list, max_length=16)
+    uncertainties: list[str] = Field(default_factory=list, max_length=12)
+
+
+VisionPairChange = Literal[
+    "presence",
+    "count",
+    "position",
+    "pose",
+    "appearance",
+    "background",
+    "text",
+    "other",
+]
+
+
+def _strip_pair_text(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("pair proposal text must not be blank")
+    return value
+
+
+VisionPairSubject = Annotated[
+    str,
+    Field(min_length=1, max_length=160),
+    AfterValidator(_strip_pair_text),
+]
+VisionPairEvidence = Annotated[
+    str,
+    Field(min_length=1, max_length=400),
+    AfterValidator(_strip_pair_text),
+]
+VisionGroundingTerm = Annotated[
+    str,
+    Field(min_length=1, max_length=160),
+    AfterValidator(_strip_pair_text),
+]
+VisionPairSummary = Annotated[
+    str,
+    Field(min_length=1, max_length=1_000),
+    AfterValidator(_strip_pair_text),
+]
+
+
+class VisionPairDifference(BaseModel):
+    """One concrete, directly visible difference between frame A and frame B."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    subject: VisionPairSubject
+    change_type: VisionPairChange
+    image_a: VisionPairEvidence = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "Concrete visible state in image A; never merely the label 'Frame A'."
+        ),
+    )
+    image_b: VisionPairEvidence = Field(
+        ...,
+        min_length=1,
+        max_length=400,
+        description=(
+            "Concrete visible state in image B; never merely the label 'Frame B'."
+        ),
+    )
+
+
+class VisionPairProposal(BaseModel):
+    """A reviewable semantic comparison, never a pixel or corruption metric."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["pair_comparison"] = "pair_comparison"
+    summary: VisionPairSummary
+    shared: list[VisionPairEvidence] = Field(..., max_length=16)
+    only_a: list[VisionPairEvidence] = Field(..., max_length=16)
+    only_b: list[VisionPairEvidence] = Field(..., max_length=16)
+    differences: list[VisionPairDifference] = Field(
+        ...,
+        max_length=24,
+    )
+    uncertainties: list[VisionPairEvidence] = Field(
+        ...,
+        max_length=12,
+    )
+    grounding_terms_a: list[VisionGroundingTerm] = Field(
+        ...,
+        max_length=12,
+    )
+    grounding_terms_b: list[VisionGroundingTerm] = Field(
+        ...,
+        max_length=12,
+    )
+
+    @field_validator(
+        "shared",
+        "only_a",
+        "only_b",
+        "uncertainties",
+        "grounding_terms_a",
+        "grounding_terms_b",
+    )
+    @classmethod
+    def _phrases_are_nonblank_and_unique(cls, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        for value in values:
+            key = " ".join(value.split()).casefold()
+            if not key:
+                raise ValueError("pair evidence phrases must not be blank")
+            if key in seen:
+                raise ValueError("pair evidence phrases must be unique within a field")
+            seen.add(key)
+        return values
+
+    @model_validator(mode="after")
+    def _contains_reviewable_evidence(self) -> "VisionPairProposal":
+        if not any(
+            (
+                self.shared,
+                self.only_a,
+                self.only_b,
+                self.differences,
+                self.uncertainties,
+                self.grounding_terms_a,
+                self.grounding_terms_b,
+            )
+        ):
+            raise ValueError(
+                "pair proposals require evidence beyond the summary"
+            )
+        return self
+
+
+class VisionPairCompareRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    a_sample_id: int = Field(..., strict=True, ge=1, le=2**63 - 1)
+    b_sample_id: int = Field(..., strict=True, ge=1, le=2**63 - 1)
+
+    @model_validator(mode="after")
+    def _samples_are_distinct(self) -> "VisionPairCompareRequest":
+        if self.a_sample_id == self.b_sample_id:
+            raise ValueError("pair comparison requires two distinct samples")
+        return self
+
+
+class VisionSource(BaseModel):
+    """One source whose encoded bytes passed a forced local pixel decode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sample_id: int
+    filename: str
+    split: str
+    image_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    decode_status: Literal["decoded"] = "decoded"
+    width: int = Field(..., ge=1)
+    height: int = Field(..., ge=1)
+    mode: str = Field(..., min_length=1, max_length=32)
+    byte_length: int = Field(..., ge=1)
+
+
+class VisionPairSource(VisionSource):
+    """Compatibility name for an ordered source in a pair proposal."""
+
+
+class VisionPairCompareResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    epistemic_status: Literal["model_proposal"] = "model_proposal"
+    task: Literal["semantic_difference"] = "semantic_difference"
+    image_a: VisionPairSource
+    image_b: VisionPairSource
+    model: str
+    model_digest: str
+    model_family: str | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    provider: Literal["ollama"] = "ollama"
+    runtime: Literal["ollama"] = "ollama"
+    runtime_version: str
+    adapter_id: Literal["ollama_sequential_frames"]
+    adapter_version: int
+    protocol: Literal["sequential_frames_v1"]
+    prompt_version: int
+    schema_version: int
+    request_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+    proposal_id: str = Field(..., pattern=r"^vp_[0-9a-f]{32}$")
+    latency_ms: int = Field(..., ge=0)
+    proposal: VisionPairProposal
+    note: str
+
+
+VisionProposal = Annotated[
+    Union[
+        VisionSceneProposal,
+        VisionRoadSceneProposal,
+        VisionCaptionAuditProposal,
+        VisionOcrProposal,
+        VisionQuestionProposal,
+    ],
+    Field(discriminator="kind"),
+]
+
+
+class VisionInspectResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    epistemic_status: Literal["model_proposal"] = "model_proposal"
+    sample_id: int
+    filename: str
+    task: VisionTask
+    # Present only for the focused-question task. Keeping the normalized input
+    # beside the answer makes the exported proposal independently readable;
+    # input_sha256 remains the integrity binding for image bytes + task input.
+    question: str | None = Field(None, max_length=500)
+    model: str
+    model_digest: str
+    model_family: str | None = None
+    parameter_size: str | None = None
+    quantization_level: str | None = None
+    prompt_version: int
+    schema_version: int
+    input_sha256: str
+    latency_ms: int = Field(..., ge=0)
+    source: VisionSource
+    proposal: VisionProposal
+    note: str
+
+    @model_validator(mode="after")
+    def _question_matches_task(self) -> VisionInspectResponse:
+        if self.task == "question" and not self.question:
+            raise ValueError("question-task responses must preserve the question")
+        if self.task != "question" and self.question is not None:
+            raise ValueError("question is only valid for the question task")
+        return self
 
 
 class ChatMessage(BaseModel):

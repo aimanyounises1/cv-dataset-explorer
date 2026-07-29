@@ -5,6 +5,8 @@ Data-dir isolation happens in conftest.py, before any `app` import.
     cd backend && pytest
 """
 import json
+import sys
+from types import ModuleType
 
 import pytest
 from fastapi.testclient import TestClient
@@ -52,6 +54,37 @@ def test_health(client):
     r = client.get("/api/health")
     assert r.status_code == 200
     assert r.json()["samples"] == 3
+
+
+def test_lifespan_resolves_transformers_lazy_exports_before_requests(monkeypatch):
+    required = {
+        "AutoModel",
+        "AutoProcessor",
+        "GroundingDinoForObjectDetection",
+        "Sam2Model",
+        "Sam2Processor",
+    }
+
+    class RecordingTransformers(ModuleType):
+        def __init__(self):
+            super().__init__("transformers")
+            self.lookups: list[str] = []
+            for name in required:
+                setattr(self, name, object())
+            self.lookups.clear()
+
+        def __getattribute__(self, name):
+            if name in required:
+                super().__getattribute__("lookups").append(name)
+            return super().__getattribute__(name)
+
+    fake = RecordingTransformers()
+    monkeypatch.setitem(sys.modules, "transformers", fake)
+
+    with TestClient(app) as startup_client:
+        assert startup_client.get("/api/health").status_code == 200
+
+    assert set(fake.lookups) == required
 
 
 def test_list_and_filter(client):

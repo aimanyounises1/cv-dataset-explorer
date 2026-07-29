@@ -128,7 +128,7 @@ export default function Inspector({ id }: { id: number | null }) {
       </div>
 
       <div className="inspector-meta">
-        <Link to={`/sample/${s.id}`} className="inspector-id">#{s.id}</Link>
+        <Link to={`/samples/${s.id}`} className="inspector-id">#{s.id}</Link>
         <span className="ev">{s.split}</span>
         {s.cluster != null && <span className="ev">cluster {s.cluster}</span>}
       </div>

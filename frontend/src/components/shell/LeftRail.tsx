@@ -299,6 +299,14 @@ export default function LeftRail() {
   const [overview, setOverview] = useState<StatsOverview | null>(null);
   const [chat, setChat] = useState<ChatStatus | null>(null);
   const [histOpen, setHistOpen] = useState(false);
+  /* Bad news is never collapsed. The three dots are the summary, the card is
+     the disclosure, and any measured fault opens it — so folding the card can
+     never be how a degraded model stays quiet. Seeded closed and opened by
+     effect rather than computed inline, because `chat` is null while the probe
+     is in flight and an inline expression would flash open on every healthy
+     first paint. `vlm_ready: false` is deliberately NOT a fault: an un-pulled
+     enrichment model is the documented default, not a break. */
+  const [diagOpen, setDiagOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [compactRail, setCompactRail] = useState(compactRailMatches);
   const toolsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -327,6 +335,10 @@ export default function LeftRail() {
     chatStatusOnce().then((c) => { if (live && c) setChat(c); });
     return () => { live = false; };
   }, []);
+
+  const railDegraded = (overview !== null && !retrievalActive(overview))
+    || (chat !== null && chat.available !== true);
+  useEffect(() => { if (railDegraded) setDiagOpen(true); }, [railDegraded]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return undefined;
@@ -377,8 +389,7 @@ export default function LeftRail() {
         Filters{sel.chips.length > 0 ? ` · ${sel.chips.length}` : ""}
       </button>
 
-      <div className="rail-scroll">
-        <div className="rail-groups">
+      <div className="rail-groups">
           {GROUPS.map((g) => (
             <div className="rail-group" key={g.title}>
               <div className="eyebrow rail-group-title">{g.title}</div>
@@ -468,8 +479,21 @@ export default function LeftRail() {
                     aria-hidden="true" />
             </button>
           )}
-        </div>
+      </div>
 
+      {/* The work body: the only scroller in the rail.
+
+          The rail used to be one scroller carrying two jobs with opposite
+          lifetimes — constant navigation stacked on top of situational filters
+          — so the working controls were what fell off the bottom. Measured at
+          1600x1000 that hid the whole difficulty-axis panel, which
+          FilterPanel's own docstring calls the reason this tool exists, and it
+          got worse as the window got shorter: 42% of the rail unreachable at
+          900px tall, 60% at 720px. Navigation is fixed above this band and
+          status is fixed below it, so the filters now always begin at the same
+          y and this band is sized by what is left rather than by what
+          navigation happened to consume. */}
+      <div className="rail-scroll">
         {/* One mounted copy serves both layouts. At compact widths this same
             stateful tree becomes a modal surface; it is never duplicated behind
             the drawer, so saved views and API-backed filters cannot diverge. */}
@@ -529,7 +553,29 @@ export default function LeftRail() {
                 title="Recent searches and album changes">
           History
         </button>
-        <ModelsCard overview={overview} chat={chat} />
+        {/* This file already states the rule at ModelsCard: "status is
+            furniture until it is bad news, and bad news arrives as amber plus
+            a collapsed why, never as layout." The card was the last surface
+            not obeying it — 159px of a 1000px column, expanded on all eight
+            routes whether or not anything was wrong, while the difficulty axes
+            it was crowding out sat below the fold. The dots keep every state
+            on screen; only the detail folds, and a fault forces it open. */}
+        <details className="rail-diag" open={diagOpen}
+                 onToggle={(e) => setDiagOpen(e.currentTarget.open)}>
+          <summary className="rail-status" title="Local model status">
+            <span className={`models-dot ${retrievalActive(overview) ? "ok" : "warn"}`}
+                  aria-hidden="true" />
+            <span>retrieval</span>
+            <span className={`models-dot ${chat?.available ? "ok" : "warn"}`}
+                  aria-hidden="true" />
+            <span>assistant</span>
+            <span className={`models-dot ${overview?.vlm_ready ? "ok" : "off"}`}
+                  aria-hidden="true" />
+            <span>tags</span>
+          </summary>
+          <ModelsCard overview={overview} chat={chat} />
+        </details>
+        <p className="models-foot">{PRIVACY_NOTE}</p>
       </div>
 
       {/* Portalled to <body>: the rail is a stacking context (sticky on
@@ -561,12 +607,19 @@ function LibraryAndFilters({
 }) {
   return (
     <>
+      {/* Filters before Library, because this band scrolls and the first thing
+          in it is the thing that stays on screen. The library is a list of
+          destinations you visit; the filters are the controls you operate, and
+          the difficulty axes inside them are what this tool is for. With the
+          library on top its 185px pushed the axes under the fold on any window
+          shorter than ~1100px — the working surface was queued behind the
+          bookmarks. */}
+      <FilterPanel />
       <div className="rail-group rail-library">
         <div className="eyebrow rail-group-title">Library</div>
         <AlbumShelf />
         <SavedViews current={current} onRestore={onRestore} />
       </div>
-      <FilterPanel />
     </>
   );
 }
@@ -630,13 +683,19 @@ function ModelsCard({ overview: ov, chat }:
         </span>
         <span className="models-state" title={enrichHint}>{enrichState}</span>
       </div>
-      {/* Verbatim by requirement: the tool's one-sentence privacy statement. */}
-      <p className="models-foot">
-        {"All models local. Ollama serves the language models only — image embeddings are computed in-process."}
-      </p>
     </div>
   );
 }
+
+/** Verbatim by requirement: the tool's one-sentence privacy statement.
+ *
+ * Lifted out of `ModelsCard` so that folding the diagnostic rows behind a
+ * disclosure cannot fold this with them. The three model rows are reference a
+ * reader consults once a session; this sentence is a claim the product makes
+ * about itself, and a claim behind a click is a weaker claim. It stays on
+ * screen at every viewport height. */
+const PRIVACY_NOTE =
+  "All models local. Ollama serves the language models only — image embeddings are computed in-process.";
 
 /** The reason is developer-authored plain text (an enabling command, a path).
  * It waits behind a collapsed disclosure: the row states the state; the why

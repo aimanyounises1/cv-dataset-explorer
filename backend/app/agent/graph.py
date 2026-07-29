@@ -40,7 +40,7 @@ from langchain_ollama import ChatOllama
 from langgraph.errors import NodeError, NodeTimeoutError
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.types import Command
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, StringConstraints, create_model
 
 from .. import config
 from . import registry
@@ -70,24 +70,29 @@ with its own scores on a different scale, and two sets of numbers about the same
 question cannot be combined into one honest answer.
 
 Answer with the routing decision itself — the reply is schema-constrained, so \
-name the specialist(s), give them one line of instruction, and list any factual \
-premises ASSERTED BY THE LATEST USER that must be verified from tool evidence \
-before they may be repeated. Do not copy facts from this system message or prior \
-assistant messages. A request to discover, count, inspect or verify something is \
-not itself a factual premise. Do not decide premises with keyword rules; \
+name the specialist(s), give them one line of instruction, and classify relevant \
+user phrases in `propositions`. Do not copy facts from this system message or \
+prior assistant messages. Do not decide propositions with keyword rules; \
 interpret the meaning of the complete latest request.
 
-Examples:
-- "How many images and captions are in the dataset?" asserts nothing: []
-- "Is there a duplicate cluster?" asserts nothing: []
-- "Summarize the 30% improvement the correction produced" asserts a premise: \
-["Summarize the 30% improvement the correction produced"]
+Use `discovery_request` when the quoted fact or value is what the user is asking \
+you to find, show, count, inspect, compare, or verify. A question and an \
+imperative are discovery requests, not claims that need a refusal gate.
 
-Never turn a question into a generic claim such as "the dataset contains a \
-specific number"; the user asked you to discover that value rather than asserting \
-one. `claims_to_verify` is normally an empty list and may contain at most three \
-items. Every item must be an exact, contiguous quote from the latest user's text; \
-never paraphrase it."""
+Use `asserted_premise` only when the user treats the quoted fact as already true \
+while asking for a DIFFERENT operation, such as explaining or summarizing it. \
+Only asserted premises require current-turn tool evidence before they may be \
+repeated as facts.
+
+Examples:
+- "How many images and captions are in the dataset?" → discovery_request
+- "Show me the worst caption matches" → discovery_request
+- "Summarize the 30% improvement the correction produced" → asserted_premise
+
+Never turn a question into a generic assertion such as "the dataset contains a \
+specific number"; the user asked you to discover that value. Include at most \
+three propositions. Every `quote` must be an exact, contiguous quote from the \
+latest user's text; never paraphrase it."""
 
 
 SYNTHESIZER_PROMPT = """You are the quality gate and final voice of a dataset \
@@ -97,14 +102,15 @@ the user's latest request?
 Charts, tables and reports the specialists produced are already displayed to the \
 user. Refer to them, do not re-describe them, and never restate a table as prose.
 
-- If YES: write the final user-facing answer. Start by naming what was produced \
+- If YES: choose the `answer` outcome and write the final user-facing answer. \
+Start by naming what was produced \
 and the single most useful thing in it — "The report covers X; the notable \
 finding is Y" — then stop. Ground every claim in a tool result, mention sample \
 ids rather than inventing links, and never end by offering further options: \
 answer the question that was asked.
 - If NO (wrong direction, missing the point, tool errors went unaddressed): \
-leave the answer empty and put one line of corrective instruction in the \
-structured `retry_feedback` field.
+choose the `retry` outcome and put one line of corrective instruction in \
+`retry_feedback`. The output contract makes answer and retry mutually exclusive.
 
 NUMBERS. Tool results carry a `score_basis` with a `score_meaning` beside it. \
 Quote a score only together with the basis that produced it, in the form \
@@ -136,7 +142,7 @@ plainly instead of substituting capability status for it."""
 class ClaimAssessment(BaseModel):
     """The synthesizer's assessment and cited excerpt for one routed premise."""
 
-    claim: str = Field(description="Exact claim copied from claims_to_verify.")
+    claim: str = Field(description="Exact asserted premise supplied by the router.")
     status: Literal["supported", "not_supported"] = Field(
         description=(
             "The synthesizer's judgment of whether a current-turn tool result "
@@ -152,24 +158,45 @@ class ClaimAssessment(BaseModel):
     )
 
 
-class SynthesisDecision(BaseModel):
-    """Schema-constrained quality-gate output."""
+NonEmptyText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1),
+]
 
-    answer: str = Field(
-        default="",
-        description="Final user-facing answer; empty when requesting a retry.",
-    )
-    retry_feedback: str = Field(
-        default="",
-        description="One-line correction for the specialists, or empty to finish.",
-    )
+
+class AnswerDecision(BaseModel):
+    """The quality gate accepted the evidence and is answering the user."""
+
+    outcome: Literal["answer"]
+    answer: NonEmptyText
     claim_assessments: list[ClaimAssessment] = Field(
         default_factory=list,
         description=(
-            "One assessment for every claim in claims_to_verify. Never mark a "
-            "claim supported without an exact tool-result excerpt."
+            "One assessment for every asserted premise supplied by the router. "
+            "Never mark a claim supported without an exact tool-result excerpt."
         ),
     )
+
+
+class RetryDecision(BaseModel):
+    """The quality gate rejected the work and requests one bounded retry."""
+
+    outcome: Literal["retry"]
+    retry_feedback: NonEmptyText
+
+
+class SynthesisDecision(BaseModel):
+    """Required, discriminated quality-gate output.
+
+    An empty object is intentionally invalid. The model must either provide a
+    non-empty answer or a non-empty retry instruction; there is no ambiguous
+    third state for application code to repair.
+    """
+
+    decision: Annotated[
+        AnswerDecision | RetryDecision,
+        Field(discriminator="outcome"),
+    ]
 
 
 class AgentState(MessagesState):
@@ -244,6 +271,23 @@ def _model() -> ChatOllama:
                       client_kwargs={"timeout": config.OLLAMA_TIMEOUT})
 
 
+class UserProposition(BaseModel):
+    """One exact user phrase, typed by how truth is treated in the request."""
+
+    quote: str = Field(
+        description="Exact contiguous quote from the latest user message.",
+    )
+    kind: Literal["discovery_request", "asserted_premise"] = Field(
+        description=(
+            "discovery_request when the quoted fact or value is what the user "
+            "asks the assistant to find, show, count, inspect, compare, or "
+            "verify; asserted_premise when the user presupposes it is already "
+            "true while asking for a different operation such as summarizing "
+            "or explaining it."
+        ),
+    )
+
+
 def route_schema() -> type[BaseModel]:
     """The router's output contract, built from the registry.
 
@@ -277,19 +321,18 @@ def route_schema() -> type[BaseModel]:
                                 "same question cannot be combined.")),
         brief=(str, Field(default="", description="One line telling the "
                                                   "specialist what to do.")),
-        claims_to_verify=(
-            list[str],
+        propositions=(
+            list[UserProposition],
             Field(
                 default_factory=list,
                 max_length=3,
                 description=(
-                    "At most three factual premises asserted by the latest user "
-                    "that require tool evidence before the answer may repeat "
-                    "them as facts. Every item must be an exact contiguous quote "
-                    "from the latest user. Questions asking to discover, count, "
-                    "inspect or verify a value are not claims. Never paraphrase "
-                    "a question as a generic existential claim; an empty list is "
-                    "the normal value."
+                    "Classify at most three relevant factual phrases from the "
+                    "latest user. Include ordinary questions and imperatives as "
+                    "discovery_request; include a fact only as asserted_premise "
+                    "when the user treats it as already true while requesting a "
+                    "different operation. Every quote must be exact and "
+                    "contiguous; never paraphrase."
                 ),
             ),
         ),
@@ -369,11 +412,12 @@ def build_graph(model=None, specialists=None):
                 ),
                 "",
             )
-            claims = []
-            for raw_claim in decision.claims_to_verify:
-                candidate = raw_claim.strip()
+            claims: list[str] = []
+            for proposition in decision.propositions:
+                candidate = proposition.quote.strip()
                 if (
-                    candidate
+                    proposition.kind == "asserted_premise"
+                    and candidate
                     and candidate in latest_user
                     and candidate not in claims
                 ):
@@ -501,6 +545,12 @@ def build_graph(model=None, specialists=None):
                 + "\nRepeat a claim as fact only when a tool result from this "
                   "turn establishes it. Otherwise state that it could not be "
                   "verified, then answer only from the evidence returned."
+                  "\nAssess EVERY premise listed above in `claim_assessments`, "
+                  "including the ones you find unsupported — an omitted "
+                  "assessment counts as unsupported and cannot help the user. "
+                  "An unsupported premise is not a reason to request a retry. "
+                  "Choose the answer outcome and assess it as `not_supported`; "
+                  "the deterministic gate will return the refusal."
             )
         try:
             decision = await synthesizer.ainvoke(
@@ -515,21 +565,35 @@ def build_graph(model=None, specialists=None):
             return {"messages": [AIMessage(
                 content=_fallback_answer(state, exc), name="final")]}
 
+        outcome = decision.decision
+        if isinstance(outcome, RetryDecision):
+            if state.get("retries", 0) < 1:
+                return {
+                    "retries": state.get("retries", 0) + 1,
+                    "messages": [
+                        AIMessage(
+                            content=f"[quality gate] {outcome.retry_feedback}",
+                            name="synthesizer",
+                        )
+                    ],
+                }
+            if claims:
+                content = _claim_refusal(claims)
+            else:
+                content = _fallback_answer(
+                    state,
+                    RuntimeError("quality gate rejected the retry"),
+                )
+            return {"messages": [AIMessage(content=content, name="final")]}
+
         unverified = _unverified_claims(
-            claims, decision.claim_assessments, state["messages"]
+            claims, outcome.claim_assessments, state["messages"]
         )
         if unverified:
             return {"messages": [AIMessage(
                 content=_claim_refusal(unverified), name="final"
             )]}
-
-        content = (decision.answer or "").strip()
-        asked_retry = decision.retry_feedback.strip()
-        if asked_retry and state.get("retries", 0) < 1:
-            return {"retries": state.get("retries", 0) + 1,
-                    "messages": [AIMessage(content=f"[quality gate] {asked_retry}",
-                                           name="synthesizer")]}
-        return {"messages": [AIMessage(content=content, name="final")]}
+        return {"messages": [AIMessage(content=outcome.answer, name="final")]}
 
     def synth_failure(state: AgentState, error: NodeError):
         logger.warning("Synthesizer node failed: %s", error.error)
@@ -573,6 +637,30 @@ def build_graph(model=None, specialists=None):
     return graph.compile()
 
 
+def _lane_answer(state: AgentState) -> str:
+    """The last thing a specialist said to the user in its own voice.
+
+    Messages carrying tool calls are skipped along with the tool results
+    themselves: a `search_images` payload is the evidence behind an answer, not
+    an answer, and handing raw JSON to a reader is not an improvement on saying
+    nothing. Bracketed lines are skipped too — those are the graph narrating
+    itself, never a reply.
+    """
+    successful = set(state.get("lanes_ok") or [])
+    for msg in reversed(state["messages"]):
+        if (
+            not isinstance(msg, AIMessage)
+            or getattr(msg, "name", "") not in successful
+            or getattr(msg, "tool_calls", None)
+        ):
+            continue
+        raw = msg.content
+        content = raw.strip() if isinstance(raw, str) else ""
+        if content and not content.startswith("["):
+            return content
+    return ""
+
+
 def _fallback_answer(state: AgentState, exc: Exception) -> str:
     """What to say when the synthesizer itself is unavailable.
 
@@ -580,12 +668,10 @@ def _fallback_answer(state: AgentState, exc: Exception) -> str:
     handed over directly rather than discarded — with the failure named, because
     an answer that skipped its own quality gate should say so.
     """
-    for msg in reversed(state["messages"]):
-        raw = getattr(msg, "content", "")
-        content = raw.strip() if isinstance(raw, str) else ""
-        if content and not content.startswith("["):
-            return (f"{content.strip()}\n\n(The final review step was unavailable — "
-                    f"{type(exc).__name__} — so this is the specialist's own answer, "
-                    f"unverified.)")
+    content = _lane_answer(state)
+    if content:
+        return (f"{content}\n\n(The final review step was unavailable — "
+                f"{type(exc).__name__} — so this is the specialist's own answer, "
+                f"unverified.)")
     return (f"The specialists ran but the final review step failed "
             f"({type(exc).__name__}: {exc}).")

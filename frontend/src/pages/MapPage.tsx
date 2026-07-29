@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
 import { AXES } from "../api/types";
 import type { MapPoint } from "../api/types";
 import MapWorkingSet, { ISOLATED_N } from "../components/MapWorkingSet";
@@ -46,19 +46,13 @@ function neighbourSim(p: Point): number | null {
   return typeof p.isolation === "number" ? 1 - p.isolation : null;
 }
 
-/** The API client throws `"<status>: <body>"`; when the body is FastAPI's error
- * envelope, the sentence a reader needs is inside `detail`. A 503 that names the
- * command which enables a capability should read as that sentence and not as a
- * JSON blob. */
+/** The sentence a reader needs out of a failed request. `ApiError` has already
+ * read it out of FastAPI's envelope — so a 503 that names the command which
+ * enables a capability reads as that sentence, and this only has to cover the
+ * non-API rejections (an aborted fetch, a network failure) that reach the same
+ * handlers. */
 function apiMessage(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  const brace = raw.indexOf("{");
-  if (brace === -1) return raw;
-  try {
-    const parsed = JSON.parse(raw.slice(brace)) as { detail?: unknown };
-    if (typeof parsed.detail === "string") return parsed.detail;
-  } catch { /* not JSON: the raw text is the best message available */ }
-  return raw;
+  return e instanceof Error ? e.message : String(e);
 }
 
 function quantile(sortedAsc: number[], q: number): number {
@@ -134,7 +128,7 @@ export default function MapPage() {
     setScope({ status: "loading", ids: new Set(), message: null });
     fetch(`${exportHref("json")}&scores=false`, { signal: ctrl.signal })
       .then(async (r) => {
-        if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 200)}`);
+        if (!r.ok) throw new ApiError(r.status, await r.text());
         return r.json() as Promise<{ samples: { id: number }[] }>;
       })
       .then((data) => setScope({
@@ -397,6 +391,7 @@ export default function MapPage() {
             browser-voiced control in the app, and it sits on the one setting
             that decides what the map is saying. */}
         <Listbox
+          inline
           label="Colour points by"
           trigger={colorModeOptions.find((o) => o.value === activeMode)?.label ?? "Colour by"}
           selected={activeMode}

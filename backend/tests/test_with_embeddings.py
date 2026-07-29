@@ -287,6 +287,65 @@ def test_benchmark_reports_candidate_pool_per_mode(client):
     assert body["mean_query_words"] > 0
 
 
+def test_hybrid_candidate_pool_counts_unique_corpus_images(client):
+    """Lexical evidence must not count an already-ranked image a second time.
+
+    Each indexed caption gets an identical sibling caption. The held-out
+    caption therefore has one lexical match, but that match points to an image
+    already present in the semantic corpus. Hybrid's candidate population is
+    the union of the two paths: exactly the four corpus images, never 4 + 1.
+    """
+    from app import config, db
+
+    conn = db.connect()
+    sibling_ids: list[int] = []
+    try:
+        rows = conn.execute(
+            "SELECT c.sample_id, c.text FROM captions c "
+            "JOIN samples s ON s.id = c.sample_id "
+            "WHERE s.filename LIKE 'emb_%' AND c.idx = 0 "
+            "ORDER BY c.id"
+        ).fetchall()
+        assert len(rows) == 4
+        for row in rows:
+            cursor = conn.execute(
+                "INSERT INTO captions(sample_id, idx, text) VALUES (?, 99, ?)",
+                (row["sample_id"], row["text"]),
+            )
+            sibling_ids.append(cursor.lastrowid)
+            conn.execute(
+                "INSERT INTO captions_fts(rowid, text) VALUES (?, ?)",
+                (cursor.lastrowid, row["text"]),
+            )
+        conn.commit()
+        for path in config.CACHE_DIR.glob("eval_*.json"):
+            path.unlink(missing_ok=True)
+
+        body = client.get(
+            "/api/eval/retrieval", params={"sample_size": 50}
+        ).json()
+        modes = {row["mode"]: row for row in body["results"]}
+
+        assert modes["keyword"]["mean_candidates"] >= 1.0
+        assert modes["hybrid"]["mean_candidates"] == 4.0
+        assert modes["hybrid"]["mean_candidates"] <= body["pool_size"]
+    finally:
+        if sibling_ids:
+            placeholders = ",".join("?" for _ in sibling_ids)
+            conn.execute(
+                f"DELETE FROM captions_fts WHERE rowid IN ({placeholders})",
+                sibling_ids,
+            )
+            conn.execute(
+                f"DELETE FROM captions WHERE id IN ({placeholders})",
+                sibling_ids,
+            )
+            conn.commit()
+        conn.close()
+        for path in config.CACHE_DIR.glob("eval_*.json"):
+            path.unlink(missing_ok=True)
+
+
 class _Recorder:
     """Wraps the fake embedder and records exactly what text reached it."""
 

@@ -38,11 +38,19 @@ QWEN_EMBED_BATCH = int(os.environ.get("CVDE_QWEN_EMBED_BATCH", "8"))
 # scripts/bench_detector.py re-measures it), ~1 GB resident. Weights
 # are fetched explicitly, never on the request path.
 DETECT_MODEL = os.environ.get("CVDE_DETECT_MODEL", "IDEA-Research/grounding-dino-tiny")
+DETECT_REVISION = os.environ.get(
+    "CVDE_DETECT_REVISION",
+    "a2bb814dd30d776dcf7e30523b00659f4f141c71",
+)
 
 # Optional promptable segmenter. SAM2 is provided by the base transformers
 # dependency and its tiny checkpoint was measured by scripts/bench_sam2.py.
 # Weights are fetched explicitly; request handlers only use the local cache.
 SEGMENT_MODEL = os.environ.get("CVDE_SEGMENT_MODEL", "facebook/sam2.1-hiera-tiny")
+SEGMENT_REVISION = os.environ.get(
+    "CVDE_SEGMENT_REVISION",
+    "de431c4043854a71d8101e17995dfe596bf101a5",
+)
 
 
 def emb_dir_for(provider: str) -> Path:
@@ -55,6 +63,47 @@ def emb_dir_for(provider: str) -> Path:
 OLLAMA_URL = os.environ.get("CVDE_OLLAMA_URL", "http://localhost:11434")
 VLM_MODEL = os.environ.get("CVDE_VLM_MODEL", "qwen2.5vl:7b")
 CHAT_MODEL = os.environ.get("CVDE_CHAT_MODEL", "qwen3:8b")  # needs tool calling
+
+# Image inspection is a separate role from batch enrichment and from the chat
+# model. These are aliases already measured on the target laptop; the status
+# endpoint still asks Ollama whether each installed artifact advertises the
+# documented `vision` capability before it can be selected. A comma-separated
+# environment value keeps the allowlist an operator decision rather than
+# accepting arbitrary model names from a browser request.
+VISION_MODELS = tuple(
+    model.strip()
+    for model in os.environ.get(
+        "CVDE_VISION_MODELS",
+        "gemma4:12b,qwen3.5:9b",
+    ).split(",")
+    if model.strip()
+)
+VISION_DEFAULT_MODEL = os.environ.get(
+    "CVDE_VISION_DEFAULT_MODEL",
+    VISION_MODELS[0] if VISION_MODELS else "",
+)
+# Ollama reports only the broad `vision` capability; it does not say whether
+# one artifact can preserve two ordered images across chat messages. The exact
+# artifact below passed that application-level contract on the target machine.
+# Binding the adapter to its digest prevents a later pull under the same alias
+# from inheriting an unmeasured capability. Operators can validate and pin a
+# different artifact without changing endpoint or UI code.
+VISION_PAIR_MODEL = os.environ.get("CVDE_VISION_PAIR_MODEL", "qwen3.5:9b")
+VISION_PAIR_MODEL_DIGEST = os.environ.get(
+    "CVDE_VISION_PAIR_MODEL_DIGEST",
+    "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+)
+# Provider behavior is part of the measured pair capability. An Ollama upgrade
+# must be rerun through scripts/validate_pair_vision.py before the server
+# advertises the capability under a different runtime version.
+VISION_PAIR_RUNTIME_VERSION = os.environ.get(
+    "CVDE_VISION_PAIR_RUNTIME_VERSION",
+    "0.32.0",
+)
+VISION_STATUS_TIMEOUT = float(os.environ.get("CVDE_VISION_STATUS_TIMEOUT", "4"))
+VISION_TIMEOUT = float(os.environ.get("CVDE_VISION_TIMEOUT", "90"))
+VISION_NUM_CTX = int(os.environ.get("CVDE_VISION_NUM_CTX", "8192"))
+VISION_NUM_PREDICT = int(os.environ.get("CVDE_VISION_NUM_PREDICT", "768"))
 
 # Agent bounds. LangGraph owns each async node timeout; the API owns the complete
 # turn timeout; Ollama's generation cap below stops server-side decoding.

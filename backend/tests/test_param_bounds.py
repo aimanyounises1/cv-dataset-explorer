@@ -37,6 +37,48 @@ def test_max_agreement_rejects_what_used_to_500(client):
     assert client.get("/api/samples", params={"max_agreement": 0.1}).status_code == 200
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"q": ""},
+        {"q": "dog", "mode": "boosted"},
+        {"q": "dog", "top_k": 0},
+        {"q": "dog", "top_k": 201},
+        {"q": "dog", "offset": -1},
+        {"q": "dog", "offset": 5001},
+        {"q": "dog", "sort": "difficulty_sideways"},
+        {"q": "dog", "max_agreement": "NaN"},
+        {"q": "dog", "max_agreement": 1.1},
+        {"q": "dog", "axes": {"unknown": {"min": 1}}},
+        {"q": "dog", "axes": {"difficulty": {"min": -1}}},
+        {"q": "dog", "axes": {"difficulty": {"max": 11}}},
+        {"q": "dog", "axes": {"difficulty": "high"}},
+        {"q": "dog", "axes": {"difficulty": {"minimum": 8}}},
+        {"q": True},
+        {"q": "dog", "top_k": True},
+        {"q": "dog", "offset": False},
+        {"q": "dog", "max_agreement": True},
+        {"q": "dog", "cluster": True},
+        {"q": "dog", "album": True},
+        {"q": "dog", "axes": {"difficulty": {"min": True}}},
+    ],
+)
+def test_post_search_rejects_invalid_get_equivalents(client, body):
+    assert client.post("/api/search", json=body).status_code == 422
+
+
+def test_post_search_accepts_valid_axis_bounds(client):
+    response = client.post(
+        "/api/search",
+        json={
+            "q": "dog",
+            "mode": "keyword",
+            "axes": {"difficulty": {"min": 3, "max": 8}},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+
 def test_page_has_a_ceiling(client):
     assert client.get("/api/samples", params={"page": 2**63 - 1}).status_code == 422
     assert client.get("/api/samples", params={"page": 1}).status_code == 200
