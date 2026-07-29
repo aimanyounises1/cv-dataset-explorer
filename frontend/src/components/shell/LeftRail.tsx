@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { api } from "../../api/client";
@@ -23,8 +24,14 @@ import SavedViews from "../SavedViews";
 
 /** A view of a destination: same page, different addressable slice. */
 interface View { to: string; label: string; end?: boolean }
-interface Item { to: string; label: string; end?: boolean; hint: string;
-                 views?: View[] }
+/** `keycap` is what the collapsed strip shows in place of the label. It is
+ * written per item rather than sliced off `label[0]`, because a substring
+ * cannot know that "Compare two" and "Caption quality" both start with C —
+ * which is exactly what the strip used to render, twice, in two different
+ * groups, with the difference living only in a hover tooltip. The keycap is a
+ * named product decision like the label beside it. */
+interface Item { to: string; label: string; keycap: string; end?: boolean;
+                 hint: string; views?: View[] }
 interface Group { title: string; items: Item[] }
 
 /** The two routes that read the same selection: the gallery and the map both
@@ -53,29 +60,29 @@ const GROUPS: Group[] = [
   {
     title: "Find",
     items: [
-      { to: "/", label: "Browse", end: true,
+      { to: "/", label: "Browse", keycap: "B", end: true,
         hint: "Search and filter the corpus" },
-      { to: "/map", label: "Embedding map",
+      { to: "/map", label: "Embedding map", keycap: "E",
         hint: "Lasso a region of embedding space" },
       // Reachable by name, not only by picking two cards. It is the only place
       // a region can be saved as an annotation, and a destination you can get
       // to solely by a side effect of another screen is one most people never
       // find. It opens empty and says how to fill itself.
-      { to: "/compare", label: "Compare two",
+      { to: "/compare", label: "Compare two", keycap: "Cmp",
         hint: "Two frames under one loupe: synced zoom, shared/different, regions" },
     ],
   },
   {
     title: "Audit",
     items: [
-      { to: "/quality", label: "Caption quality",
+      { to: "/quality", label: "Caption quality", keycap: "Q",
         hint: "Rank captions least supported by their image" },
     ],
   },
   {
     title: "Trust",
     items: [
-      { to: "/stats", label: "Dataset profile",
+      { to: "/stats", label: "Dataset profile", keycap: "D",
         hint: "Composition, coverage, duplicates and leakage",
         /* The profile's five views belong to the rail, not to a second left
            column beside it: two stacked navigations on one edge read as one
@@ -89,14 +96,14 @@ const GROUPS: Group[] = [
           { to: "/stats?view=captions", label: "Caption health" },
           { to: "/stats?view=provenance", label: "Provenance" },
         ] },
-      { to: "/eval", label: "Retrieval benchmark",
+      { to: "/eval", label: "Retrieval benchmark", keycap: "R",
         hint: "The tool measuring its own search accuracy" },
     ],
   },
   {
     title: "Ask",
     items: [
-      { to: "/chat", label: "Assistant",
+      { to: "/chat", label: "Assistant", keycap: "A",
         hint: "Multi-agent answers rendered as live charts" },
     ],
   },
@@ -144,6 +151,138 @@ function retrievalActive(ov: StatsOverview | null): boolean {
 
 const RAIL_KEY = "cvde-rail";
 const COMPACT_RAIL_QUERY = "(max-width: 1100px)";
+
+/** WCAG 2.2 SC 2.5.8 puts the floor for a pointer target at 24×24 CSS px and
+ * SC 2.5.5 puts the comfortable target at 44×44 — the same number Apple's HIG
+ * uses, and roughly the contact patch of a fingertip. The two dismiss buttons
+ * this file renders inherit `.hist-close`, measured at 21×20; the strip's
+ * History button inherits `.rail-history-btn`, measured at 61×21. Both are
+ * under the floor, so the rail asks for the target on the controls it owns. */
+const TARGET_MIN_PX = 44;
+
+/** One geometry for "close this dialog", so the drawer and the tools surface
+ * cannot disagree about how big a dismiss target is. */
+const DISMISS_TARGET = {
+  minWidth: TARGET_MIN_PX,
+  minHeight: TARGET_MIN_PX,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+} as const;
+
+/** Everything a modal must put out of reach. The two dialogs sit in different
+ * places in the tree — the tools surface is a child of the rail, the history
+ * drawer is portalled to <body> beside it — so the background is named as a
+ * flat list of the shell's regions and filtered against whichever dialog is
+ * open, rather than assuming one fixed shape. */
+const DIALOG_BACKGROUND = [
+  ".pane",
+  ".rail-r",
+  ".rail-brand",
+  ".rail-mobile-tools-btn",
+  ".rail-groups",
+  ".rail-foot",
+  ".rail-tools-surface",
+  ".cmdk-mobile-trigger",
+].join(",");
+
+const DIALOG_FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
+
+/**
+ * The modal contract, written once for both dialogs this rail owns.
+ *
+ * Saying `role="dialog"` promises five things: focus starts inside, Tab cannot
+ * leave, Escape closes, the page behind is inert and does not scroll, and
+ * focus returns where it came from. The tools surface kept that promise and
+ * the history drawer did not — Tab walked straight into the gallery it was
+ * covering — which is worse than not claiming the role at all, because a
+ * screen reader announces a modal and then hands you the page underneath.
+ * The behaviour lives here so the two cannot drift apart again.
+ *
+ * The opener is read from the document rather than passed in: whatever had
+ * focus when the dialog opened is the honest place to land on close, and
+ * neither caller has to name its own trigger.
+ */
+function useDialogFocus(
+  dialogRef: RefObject<HTMLElement | null>,
+  open: boolean,
+  onClose: () => void,
+) {
+  /* Held in a ref so a parent re-render cannot re-run the effect below and
+     re-take focus mid-interaction: the effect's subject is the dialog, not the
+     identity of the callback. */
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; });
+
+  useEffect(() => {
+    const dialog = open ? dialogRef.current : null;
+    if (!dialog) return undefined;
+
+    const focusable = () => Array.from(
+      dialog.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE),
+    ).filter((element) => element.getClientRects().length > 0);
+
+    const background = Array.from(
+      document.querySelectorAll<HTMLElement>(DIALOG_BACKGROUND),
+    ).filter((element) => !dialog.contains(element) && !element.contains(dialog));
+    const priorInert = background.map((element) => element.hasAttribute("inert"));
+    background.forEach((element) => element.setAttribute("inert", ""));
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const opener = document.activeElement as HTMLElement | null;
+    const focusFrame = requestAnimationFrame(() => focusable()[0]?.focus());
+
+    const containFocus = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const items = focusable();
+      if (items.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", containFocus);
+
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", containFocus);
+      background.forEach((element, index) => {
+        if (!priorInert[index]) element.removeAttribute("inert");
+      });
+      document.body.style.overflow = previousOverflow;
+      /* Only back to something still on screen: growing past the compact
+         breakpoint closes the tools surface by hiding its own trigger, and
+         focusing a display:none button drops focus onto <body>. */
+      if (opener?.isConnected && opener.getClientRects().length > 0) {
+        opener.focus();
+      }
+    };
+  }, [dialogRef, open]);
+}
 
 function compactRailMatches(): boolean {
   return typeof window !== "undefined"
@@ -201,81 +340,10 @@ export default function LeftRail() {
     return () => media.removeEventListener("change", onChange);
   }, []);
 
-  const closeMobileTools = (restoreFocus = true) => {
-    setMobileToolsOpen(false);
-    if (restoreFocus) {
-      requestAnimationFrame(() => toolsTriggerRef.current?.focus());
-    }
-  };
-
-  useEffect(() => {
-    if (!compactRail || !mobileToolsOpen) return undefined;
-    const dialog = toolsDialogRef.current;
-    if (!dialog) return undefined;
-
-    const focusableSelector = [
-      "a[href]",
-      "button:not([disabled])",
-      "input:not([disabled])",
-      "select:not([disabled])",
-      "textarea:not([disabled])",
-      "[tabindex]:not([tabindex='-1'])",
-    ].join(",");
-    const focusable = () => Array.from(
-      dialog.querySelectorAll<HTMLElement>(focusableSelector),
-    ).filter((element) => element.getClientRects().length > 0);
-
-    const background = Array.from(document.querySelectorAll<HTMLElement>([
-      ".pane",
-      ".rail-r",
-      ".rail-brand",
-      ".rail-mobile-tools-btn",
-      ".rail-groups",
-      ".rail-foot",
-    ].join(","))).filter((element) => !dialog.contains(element));
-    const priorInert = background.map((element) => element.hasAttribute("inert"));
-    background.forEach((element) => element.setAttribute("inert", ""));
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    const focusFrame = requestAnimationFrame(() => focusable()[0]?.focus());
-
-    const containFocus = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeMobileTools();
-        return;
-      }
-      if (event.key !== "Tab") return;
-
-      const items = focusable();
-      if (items.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", containFocus);
-
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      window.removeEventListener("keydown", containFocus);
-      background.forEach((element, index) => {
-        if (!priorInert[index]) element.removeAttribute("inert");
-      });
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [compactRail, mobileToolsOpen]);
+  /* Closing is only a state change: the hook restores focus to whatever
+     opened the surface, so the trigger is not named twice. */
+  const closeMobileTools = () => setMobileToolsOpen(false);
+  useDialogFocus(toolsDialogRef, compactRail && mobileToolsOpen, closeMobileTools);
 
   const restoreView = (query: string) => {
     navigate(query ? `/?${query}` : "/");
@@ -314,12 +382,17 @@ export default function LeftRail() {
                   <NavLink to={railTo(it.to, location.pathname, location.search)}
                            end={it.end}
                            title={collapsed ? `${it.label} — ${it.hint}` : it.hint}
+                           /* Collapsed, the only rendered text is an
+                              aria-hidden keycap and the label is display:none
+                              — so without this the link has no accessible name
+                              at all. Expanded, the label speaks for itself. */
+                           aria-label={collapsed ? it.label : undefined}
                            className={({ isActive }) =>
                              `rail-link${isActive ? " active" : ""}`}>
                     {/* Both spans always render; CSS swaps them, so collapsing
                         never remounts the nav or loses keyboard focus. */}
                     <span className="rail-link-label">{it.label}</span>
-                    <span className="rail-link-min" aria-hidden="true">{it.label[0]}</span>
+                    <span className="rail-link-min" aria-hidden="true">{it.keycap}</span>
                   </NavLink>
                   {/* A destination's own views, shown only while you are there —
                       and never in the collapsed strip, which has room for one
@@ -356,6 +429,21 @@ export default function LeftRail() {
               {sel.chips.length > 0 && (
                 <span className="rail-filter-count">{sel.chips.length}</span>
               )}
+            </button>
+          )}
+
+          {/* Collapsing hides the whole footer (`.rail-l.collapsed .rail-foot`
+              is display:none) and History went with it — the one state that
+              removed an entry point instead
+              of narrowing it, which teaches that collapsing is lossy in ways
+              you only find by looking. It comes back wearing the strip's
+              existing keycap chrome rather than a second one, and a glyph
+              instead of a letter says it opens a drawer rather than routing. */}
+          {collapsed && (
+            <button className="rail-filter-key" onClick={() => setHistOpen(true)}
+                    aria-label="History: recent searches and album changes"
+                    title="History — recent searches and album changes">
+              ⟲
             </button>
           )}
 
@@ -397,6 +485,7 @@ export default function LeftRail() {
             <button
               className="hist-close"
               type="button"
+              style={DISMISS_TARGET}
               aria-label="Close filters and library"
               onClick={() => closeMobileTools()}
             >
@@ -426,7 +515,12 @@ export default function LeftRail() {
             rail is the map for people who do not. Neither replaces the other, so
             the hint lives here rather than the palette growing a nav. */}
         <div className="rail-kbd"><kbd>⌘K</kbd> search anything</div>
+        {/* On the phone strip this pill is the only way back into a search you
+            already ran (there is no keyboard for ⌘K), and its stylesheet size
+            is 61×21 — a thumb target three times too short. It grows only
+            where it is touched; the desktop rail keeps its quiet footer. */}
         <button className="rail-history-btn" onClick={() => setHistOpen(true)}
+                style={compactRail ? { minHeight: TARGET_MIN_PX } : undefined}
                 title="Recent searches and album changes">
           History
         </button>
@@ -592,9 +686,12 @@ function relTime(iso: string): string {
  * both close; a glance must cost nothing to leave. Rows that stored a
  * query string travel (the URL is the state doctrine's shareable artifact);
  * rows without one are the record only. */
+const HIST_TITLE_ID = "hist-drawer-title";
+
 function HistoryDrawer({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
+  const drawerRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     let live = true;
@@ -604,19 +701,26 @@ function HistoryDrawer({ onClose }: { onClose: () => void }) {
     return () => { live = false; };
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  /* The drawer exists only while open, so the contract is on from mount:
+     focus lands inside, Tab stays inside, Escape closes and hands focus back
+     to the History button. */
+  useDialogFocus(drawerRef, true, onClose);
 
   return (
     <>
       <div className="hist-backdrop" onClick={onClose} />
-      <aside className="hist-drawer" role="dialog" aria-label="Activity history">
+      <aside className="hist-drawer" ref={drawerRef} role="dialog"
+             aria-modal="true" aria-labelledby={HIST_TITLE_ID} tabIndex={-1}>
         <div className="hist-head">
-          <span className="eyebrow">History</span>
-          <button className="hist-close" onClick={onClose} title="Close (Esc)">
+          {/* A real heading, not a styled span: it is what a screen reader
+              reads on entering the dialog and the only landmark inside it.
+              `.eyebrow` carries the small-caps; the flush margin keeps it
+              sitting in the head's flex row exactly where the span did. */}
+          <h2 id={HIST_TITLE_ID} className="eyebrow" style={{ margin: 0 }}>
+            History
+          </h2>
+          <button className="hist-close" onClick={onClose} style={DISMISS_TARGET}
+                  aria-label="Close history" title="Close (Esc)">
             ×
           </button>
         </div>

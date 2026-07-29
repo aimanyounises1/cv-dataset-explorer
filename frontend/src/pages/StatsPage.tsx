@@ -27,6 +27,26 @@ const VIEWS = [
 
 type ViewId = (typeof VIEWS)[number]["id"];
 
+/** Longest-side size buckets, smallest first. They are an ordinal variable that
+ * arrives as a JSON object, and an object's key order is the order the backend
+ * happened to count them in (`backend/app/api/stats.py` fills a Counter in row
+ * order), not the order a reader thinks in — so the reading order is stated
+ * here rather than inherited from the serialization. A bucket the API adds
+ * later sorts after the named ones instead of disappearing. */
+const SIZE_BUCKET_ORDER = ["<400px", "400-499px", "500px+"];
+
+/** Bar width cap, the same 54px the block views use
+ * (components/blocks/BarBlockView, HistogramBlockView): with three splits in a
+ * full-width panel an uncapped bar is wider than it is tall and reads as a
+ * block, not a bar. Wants to live in lib/viz next to the other chart tokens —
+ * deferred only because that file is open in another agent's working tree. */
+const MAX_BAR_SIZE = 54;
+
+const sizeBucketRank = (name: string) => {
+  const i = SIZE_BUCKET_ORDER.indexOf(name);
+  return i === -1 ? SIZE_BUCKET_ORDER.length : i;
+};
+
 const isViewId = (v: string | null): v is ViewId =>
   v !== null && VIEWS.some((x) => x.id === v);
 
@@ -66,7 +86,14 @@ export default function StatsPage() {
   if (!overview) return <div className="loading">Loading statistics…</div>;
 
   const splitData = Object.entries(overview.splits).map(([name, count]) => ({ name, count }));
-  const sizeData = Object.entries(overview.image_size_buckets).map(([name, count]) => ({ name, count }));
+  // Sorted at the point of construction, so the buckets read smallest-to-largest
+  // whatever order the API serialized them in.
+  const sizeBuckets = Object.entries(overview.image_size_buckets)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => sizeBucketRank(a.name) - sizeBucketRank(b.name) || a.name.localeCompare(b.name));
+  // Samples whose width/height are stored: the backend skips rows without both,
+  // so this is the population the percentages below are shares of.
+  const sizeMeasured = sizeBuckets.reduce((n, b) => n + b.count, 0);
 
   return (
     <div>
@@ -121,31 +148,39 @@ export default function StatsPage() {
                 </div>
               </div>
 
-              <div className="charts">
-                <div className="panel">
-                  <h3>Samples per split</h3>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={splitData}>
-                      <CartesianGrid stroke={GRID_STROKE} vertical={false} />
-                      <XAxis dataKey="name" stroke={AXIS_STROKE} />
-                      <YAxis stroke={AXIS_STROKE} />
-                      <Tooltip contentStyle={TOOLTIP_STYLE} />
-                      <Bar dataKey="count" fill={SERIES.blue} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="panel">
-                  <h3>Image size (longest side)</h3>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={sizeData}>
-                      <CartesianGrid stroke={GRID_STROKE} vertical={false} />
-                      <XAxis dataKey="name" stroke={AXIS_STROKE} />
-                      <YAxis stroke={AXIS_STROKE} />
-                      <Tooltip contentStyle={TOOLTIP_STYLE} />
-                      <Bar dataKey="count" fill={SERIES.green} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              {/* Image size is one line, not a chart: a distribution where one
+                  bucket holds ~99% draws two bars too short to see, and a
+                  reader has to squint at an axis to learn what a sentence says
+                  outright. The counts stay complete so the tail is still
+                  auditable. */}
+              {sizeMeasured > 0 && (
+                <p className="meta-line tight">
+                  <strong>Image size (longest side):</strong>{" "}
+                  {sizeBuckets.map((b, i) => (
+                    <span key={b.name}>
+                      {i > 0 && " · "}
+                      {b.name} {b.count.toLocaleString()}{" "}
+                      ({((b.count / sizeMeasured) * 100).toFixed(1)}%)
+                    </span>
+                  ))}
+                  {" — "}
+                  {sizeMeasured.toLocaleString()} of{" "}
+                  {overview.total_samples.toLocaleString()} images carry stored dimensions.
+                </p>
+              )}
+
+              <div className="panel">
+                <h3>Samples per split</h3>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={splitData}>
+                    <CartesianGrid stroke={GRID_STROKE} vertical={false} />
+                    <XAxis dataKey="name" stroke={AXIS_STROKE} />
+                    <YAxis stroke={AXIS_STROKE} />
+                    <Tooltip contentStyle={TOOLTIP_STYLE} />
+                    <Bar dataKey="count" fill={SERIES.blue} radius={[4, 4, 0, 0]}
+                         maxBarSize={MAX_BAR_SIZE} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </section>
           )}

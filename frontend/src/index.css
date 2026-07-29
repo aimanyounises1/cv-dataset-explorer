@@ -32,6 +32,13 @@
   --accent: #216d50;         /* sage green — the product's own hand */
   --accent-deep: #164c39;    /* solid fills that carry white text */
   --accent-soft: #dceee5;
+  /* The sage hairline: the accent at the weight a border wants beside an
+     --accent-soft fill, and the same weight --green and --amber use for their
+     pills below. It exists because two places drew that line in a hand-mixed
+     sky blue left over from the dark system — a value that matched none of
+     the tokens here, on the two surfaces (the transcript, the accent pill)
+     where "this was a person's doing" has to read at a glance. */
+  --accent-line: color-mix(in srgb, var(--accent) 35%, transparent);
   --ai: #5f6bd8;             /* indigo — agents and only agents */
   --ai-soft: #e9ebff;
   --green: #1e7a55;          /* values: scores, counts that are good news */
@@ -419,14 +426,28 @@ body {
 .groups-note { font-size: 11.5px; color: var(--text-faint); flex: 1 1 240px; }
 .groups-back { margin-left: auto; font-size: 12.5px; white-space: nowrap; }
 
-/* Steering buttons inside the hover overlay: the overlay itself ignores the
-   pointer so the card stays a link, but these two act. Sized to the strip
-   they now live in — every pixel of button height is a pixel of picture. */
-.card-actions { display: flex; gap: 5px; pointer-events: auto; flex: 0 0 auto; }
+/* Steering buttons over the picture: the overlay itself ignores the pointer so
+   the card stays a link, but these two act. They sit ON the frame rather than
+   in the strip below it, at the same 6px inset as the frame number and the
+   pick control, because as a row of the strip every pixel of button height was
+   a pixel of strip — which is a pixel of picture — and the only way to keep
+   that row affordable was an 18px-tall button, under the 24px minimum target.
+   Held up here they cost the strip nothing and match the pick control's 24x24
+   box at every density. They appear and disappear with the strip, by the same
+   hover-or-focus rule and by opacity alone, so nothing moves. */
+.card-actions {
+  position: absolute; left: 6px; bottom: calc(100% + 6px);
+  display: flex; gap: 5px; pointer-events: auto;
+}
 .card-actions button {
-  padding: 1px 7px; font-size: 10.5px; cursor: pointer;
+  min-width: 24px; min-height: 24px;
+  /* gap, not the label's leading space: a flex line box trims that away. */
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  padding: 0 7px; font-size: 10.5px; line-height: 1; cursor: pointer;
   border: 1px solid var(--border); border-radius: 999px;
-  background: var(--bg-raised); color: var(--text-dim);
+  /* Slightly translucent, like the pick control beside it: these float on the
+     photograph, not on paper. */
+  background: rgba(255, 255, 255, 0.92); color: var(--text-dim);
   transition: color var(--t-quick), border-color var(--t-quick);
 }
 .card-actions button:hover { color: var(--accent-deep); border-color: var(--accent); }
@@ -437,8 +458,12 @@ body {
    bearing and each is measured in the browser, not assumed:
 
    * it cannot escape the frame — absolutely positioned inside .card-media,
-     capped at that box's height, and the box clips, so the strip can neither
-     reach the caption below nor paint outside the card;
+     capped at that box's height, and .card-media clips, so the strip can
+     neither reach the caption below nor paint outside the card. The clip is
+     the media box's, not the strip's: the two steering buttons are held above
+     the strip and a clip here would cut them off. Nothing else can reach that
+     edge — measured, the strip is 23px of a 97px frame at density S and 31px
+     of 312px at L, against a ceiling of the whole frame;
    * it cannot move anything — opacity and transform only, nothing enters or
      leaves the flow, so every row is the same height hovered and unhovered,
      before and after a "Load more";
@@ -451,8 +476,9 @@ body {
   position: absolute; left: 0; right: 0; bottom: 0;
   box-sizing: border-box;
   /* The frame is the ceiling. Content is sized to sit well under it; this is
-     the guarantee that holds even if a caption-length string ever appears. */
-  max-height: 100%; overflow: hidden;
+     the guarantee that holds even if a caption-length string ever appears —
+     anything past the cap runs off the bottom of the media box, which clips. */
+  max-height: 100%; overflow: visible;
   display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px;
   padding: 5px 8px 6px;
   background: rgba(255, 255, 255, 0.94);
@@ -483,6 +509,22 @@ body {
   .card-details .ev-path,
   .card-details .card-axis-row { display: none; }
   .card-actions .ca-label { display: none; }
+  /* What is left — the score with its basis, and the split — is one line. S is
+     the density chosen to sweep thousands of frames for one anomaly, so the
+     strip must read as a caption under the picture and not as a second panel
+     over it: no wrapping, and only enough padding to set the line. */
+  .card-details { flex-wrap: nowrap; gap: 0 6px; padding: 3px 7px 4px; }
+  /* The score is the part of that line that is never negotiable: it is why
+     this frame is at this rank, and a number the tool cuts in half is worse
+     than one it does not show. Everything else on the row may shorten —
+     measured, the only chip that ever needs to is the split, whose
+     "validation" is 78px of a 115px row beside the score, and a clipped
+     category still reads as its category.
+     Qualified by the strip because a container query carries no specificity of
+     its own and the base .card-evidence rule is further down this file. */
+  .card-details .card-evidence { flex: 1 1 auto; flex-wrap: nowrap; }
+  .card-details .ev { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .card-details .ev-score { flex: none; }
 }
 
 /* ---- Search settings ---------------------------------------------------
@@ -504,7 +546,11 @@ body {
 .search-settings-pop {
   position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
   display: flex; flex-direction: column; gap: 14px;
-  min-width: 430px; padding: 16px;
+  /* 430px is what the three dials need side by side; below that the panel
+     takes the viewport less the page's own 16px gutter on each side, because
+     a fixed min-width anchored to a summary that has wrapped to the left of a
+     narrow row put 290 of these 430 pixels off the left edge. */
+  width: min(430px, calc(100vw - 32px)); min-width: 0; padding: 16px;
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow);
 }
@@ -634,6 +680,17 @@ body {
   .rail-group { display: flex; align-items: center; gap: 4px; }
   .rail-group-title { padding: 0 4px 0 0; }
   .rail-link { white-space: nowrap; margin: 0; }
+  /* The open page's own views were the one part of the rail that kept its
+     vertical shape inside the horizontal strip: five 85px links stacked into
+     a 175px column, which is most of why the strip stood 201px tall, and at
+     1024 that column sat at x=970 inside a 611px scroll window — Provenance,
+     Caption health and the retrieval benchmark unreachable from navigation on
+     an ordinary half-screen laptop. They are a row here, like their peers. */
+  .rail-views {
+    flex-direction: row; align-items: center; gap: 2px;
+    margin: 0 0 0 6px; padding-left: 6px;
+  }
+  .rail-view { white-space: nowrap; }
   /* The strip carries navigation only — and History IS navigation here: with
      no keyboard for ⌘K, it is the only way back to a search you already ran.
      Its shelf-mates stay hidden; a corpus count, a keyboard hint and the
@@ -714,6 +771,30 @@ body {
   backdrop-filter: blur(3px);
 }
 .rail-tools-head .eyebrow { margin-bottom: 3px; }
+
+/* Between the phone width and the three-column layout the strip has the room
+   to be two or three short lines, and wrapping is worth more than a sideways
+   scroller: measured on /stats at 1024, the nav needed 1116px inside a 611px
+   window, so half of it — including every /stats view — could only be reached
+   by a drag the mask-image fade was the sole hint of. Wrapped, every
+   destination is on screen and the strip drops from 201px to 163px of a 768px
+   viewport. Below 700px the scroller stays: there the same content wraps to
+   320px of header, which costs more than it returns. */
+@media (min-width: 701px) and (max-width: 1100px) {
+  .rail-l { align-items: flex-start; }
+  .rail-groups {
+    flex-wrap: wrap; row-gap: 4px; column-gap: 10px; padding-right: 0;
+    mask-image: none; -webkit-mask-image: none;
+  }
+  .rail-group { flex-wrap: wrap; }
+  /* The views take their group's own last line rather than splitting it: they
+     are five items wide, and inline they pushed each remaining destination of
+     that group onto a line of its own. */
+  .rail-views {
+    order: 1; flex-basis: 100%;
+    margin: 2px 0 0; padding-left: 0; border-left: none;
+  }
+}
 
 @media (max-width: 700px) {
   .rail-brand-name, .rail-l .rail-group-title { display: none; }
@@ -1183,8 +1264,29 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;
 }
+.sample-context {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+}
+.sample-identity {
+  display: flex; align-items: baseline; gap: 9px; min-width: 0;
+}
+.sample-identity h1 {
+  margin: 0; font-size: 14.5px; font-weight: 650; white-space: nowrap;
+}
+.sample-filename {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-dim); font: 11.5px var(--font-mono);
+}
+.sample-identity .pill {
+  flex: none; font-family: var(--font-mono); color: var(--text-faint);
+}
 .detail-stepper { display: flex; align-items: center; gap: 9px; }
 .detail-stepper .meta-line { font-size: 11.5px; color: var(--text-faint); }
+@media (max-width: 620px) {
+  .sample-context { width: 100%; }
+  .sample-identity { flex: 1; }
+  .sample-identity .pill { display: none; }
+}
 
 /* ---- Contact sheet ---------------------------------------------------- */
 .grid {
@@ -1251,7 +1353,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   background: var(--bg-hover); color: var(--text-dim); border: 1px solid var(--border);
 }
 .pill.score { color: var(--green); border-color: rgba(30, 122, 85, 0.35); }
-.pill.accent { color: var(--accent); border-color: rgba(91, 157, 255, 0.38); }
+.pill.accent { color: var(--accent); border-color: var(--accent-line); }
 .pill.warn-pill { color: var(--amber); border-color: rgba(154, 101, 18, 0.38); }
 
 .load-more { display: flex; justify-content: center; margin: 26px 0; }
@@ -1525,6 +1627,14 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
   .selection-tray .tray-compare {
     grid-area: compare; justify-self: end;
     flex-direction: column; align-items: flex-end; gap: 2px;
+  }
+  /* The one place mode, order and density are set. At this width the command
+     bar wraps and its settings button sits at the left, so a panel anchored
+     to that button's right edge opens leftwards into nothing. Pinned to the
+     viewport with the same 12px inset the tray uses, it is reachable instead
+     of theoretical. */
+  .search-settings-pop {
+    position: fixed; left: 12px; right: 12px; top: auto; width: auto;
   }
 }
 @keyframes tray-in-flat {
@@ -1853,13 +1963,21 @@ mark {
   .chat-session-title { -webkit-line-clamp: 1; }
   .chat-main { min-height: 0; }
 }
-.chat-turn { display: flex; margin-bottom: 13px; }
+.chat-turn { display: flex; min-width: 0; margin-bottom: 13px; }
 .chat-turn.user { justify-content: flex-end; }
 .chat-bubble {
-  max-width: 860px; background: var(--bg-raised); border: 1px solid var(--border);
+  /* A measure for prose, and never wider than the pane. Without the `100%`
+     and the `min-width: 0` the bubble is a flex item sized to its widest
+     child's max-content: an answer carrying a seven-column difficulty table
+     measured 844px inside a 358px transcript on a phone, which put the SOURCE
+     line — the provenance that makes the number worth reading — off the right
+     edge. Shrinking here hands the overflow down to the table block's own
+     `overflow-x: auto` wrapper, so the table scrolls and the prose does not. */
+  max-width: min(860px, 100%); min-width: 0;
+  background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: 12px; padding: 12px 15px;
 }
-.chat-turn.user .chat-bubble { background: var(--accent-soft); border-color: rgba(91, 157, 255, 0.3); }
+.chat-turn.user .chat-bubble { background: var(--accent-soft); border-color: var(--accent-line); }
 .chat-text { white-space: pre-wrap; line-height: 1.6; font-size: 13.5px; }
 .chat-grid { margin-top: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
 .trace-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
@@ -2271,3 +2389,39 @@ a.tag:hover { filter: brightness(1.15); }
 .live-trace li.current::after { content: "…"; color: var(--ai); }
 .live-trace .lt-t { margin-left: auto; color: var(--text-faint); font-size: 11px;
   font-variant-numeric: tabular-nums; }
+
+/* ---- The zero-state's findings ----------------------------------------
+   Two measured problems, each opening the set it counts. The number leads
+   because it is the thing worth reacting to; the cut sits under it because
+   none of these is a fact — every one is a threshold on a continuous
+   measurement, and a reader who cannot see the cut cannot judge the count. */
+.findings { margin: 14px 0 4px; }
+.findings-row {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px;
+}
+.finding {
+  display: grid; gap: 1px;
+  flex: 1 1 300px; max-width: 420px;
+  padding: 12px 14px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--bg-raised);
+  text-decoration: none; color: inherit;
+  transition: border-color var(--t-quick), background var(--t-quick);
+}
+.finding:hover { border-color: var(--accent); background: var(--bg-hover); }
+.finding-n {
+  font-family: var(--font-mono); font-size: 25px; line-height: 1.1;
+  font-variant-numeric: tabular-nums; color: var(--amber);
+}
+.finding-unit { font-size: 11px; color: var(--text-faint); }
+.finding-what {
+  margin-top: 5px; font-size: 13px; font-weight: 500; color: var(--text);
+}
+.finding-cut {
+  margin-top: 3px; font-family: var(--font-mono); font-size: 10.5px;
+  color: var(--text-faint);
+}
+.finding-why { margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+@media (max-width: 700px) {
+  .finding { flex-basis: 100%; max-width: none; padding: 10px 12px; }
+  .finding-n { font-size: 22px; }
+}
