@@ -307,6 +307,23 @@ class LeakageReport(BaseModel):
     caveat: str
 
 
+class LeakageContamination(BaseModel):
+    """The contaminated held-out ids, not just how many there are.
+
+    `LeakageReport.contaminated` answers "how bad is it?". This answers "which
+    ones?" — the question a researcher acts on, and the one that otherwise sends
+    them back to numpy to re-derive a set the tool already had in memory. The
+    ids are the gallery's own `?ids=` vocabulary, so the answer arrives as a
+    slice that can be opened, exported, tagged or excluded.
+    """
+    threshold: float
+    held_out_split: Optional[str] = None   # None = test + validation together
+    total: int                             # before any cap
+    ids: list[int]
+    # Never a silently short list: a caller that would page has to be told.
+    truncated: bool = False
+
+
 class FacetLift(BaseModel):
     """One attribute label, and how over- or under-represented it is in a set.
 

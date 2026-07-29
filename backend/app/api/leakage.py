@@ -27,8 +27,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .. import config
 from ..ml.index import get_index
-from ..schemas import LeakagePair, LeakagePoint, LeakageReport
-from .deps import get_conn, thumb_url
+from ..schemas import (
+    LeakageContamination,
+    LeakagePair,
+    LeakagePoint,
+    LeakageReport,
+)
+from .deps import MAX_ID_LIST, get_conn, thumb_url
 
 router = APIRouter()
 
@@ -72,6 +77,62 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+def _contaminated_ids(pairs: list[tuple[int, int, float]],
+                      splits: dict[int, str],
+                      held_out: set[str],
+                      threshold: float) -> set[int]:
+    """Held-out ids having at least one training near-duplicate above `threshold`.
+
+    The set, not its size. Reporting only the count answers "how bad is it?" and
+    leaves "which ones?" — the question you act on — to a re-derivation the tool
+    already did. One implementation, shared by the report and the id endpoint,
+    so the number on the page and the ids you export can never disagree.
+    """
+    out: set[int] = set()
+    for a, b, score in pairs:
+        if score <= threshold:
+            break                         # sorted by score, so the rest are below
+        for x, y in ((a, b), (b, a)):
+            if splits.get(x) in held_out and splits.get(y) == "train":
+                out.add(x)
+    return out
+
+
+@router.get("/stats/leakage/contaminated", response_model=LeakageContamination)
+def contaminated_ids(
+    threshold: float = Query(0.90, ge=FLOOR, le=1.0),
+    split: Optional[str] = Query(None, description="Restrict the held-out side"),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """The contaminated held-out ids themselves, as a set you can act on.
+
+    `/stats/leakage` measures the problem; this hands it over. The ids go
+    straight into `?ids=` (the gallery's own selection vocabulary) and into
+    `/api/export?ids=`, so "12% of my test split is contaminated" becomes a
+    slice a researcher can open, tag, or exclude — without re-deriving in numpy
+    what this endpoint already computed.
+
+    Capped at the same ceiling the rest of the id vocabulary uses, and says so
+    when it truncates rather than silently handing back a short list.
+    """
+    index = get_index()
+    if index is None:
+        raise HTTPException(
+            503, "Leakage detection needs image embeddings — run "
+                 "`python -m app.ingest` first.")
+
+    splits = {r["id"]: r["split"] for r in conn.execute("SELECT id, split FROM samples")}
+    held_out = {"test", "validation"} if split is None else {split}
+    found = sorted(_contaminated_ids(_pairs(index), splits, held_out, threshold))
+    return LeakageContamination(
+        threshold=threshold,
+        held_out_split=split,
+        total=len(found),
+        ids=found[:MAX_ID_LIST],
+        truncated=len(found) > MAX_ID_LIST,
+    )
+
+
 @router.get("/stats/leakage", response_model=LeakageReport)
 def leakage_report(
     threshold: float = Query(0.90, ge=FLOOR, le=1.0),
@@ -92,7 +153,6 @@ def leakage_report(
     def summarise(th: float) -> tuple[int, int, set[int]]:
         """(pairs, cross-split pairs, held-out ids with a train near-duplicate)."""
         total = cross = 0
-        contaminated: set[int] = set()
         for a, b, score in pairs:
             if score <= th:
                 break                     # sorted by score, so the rest are below
@@ -100,10 +160,7 @@ def leakage_report(
             sa, sb = splits.get(a), splits.get(b)
             if sa != sb:
                 cross += 1
-            for x, y in ((a, b), (b, a)):
-                if splits.get(x) in held_out and splits.get(y) == "train":
-                    contaminated.add(x)
-        return total, cross, contaminated
+        return total, cross, _contaminated_ids(pairs, splits, held_out, th)
 
     curve = []
     for th in LADDER:
