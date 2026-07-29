@@ -99,6 +99,10 @@ body {
 :root {
   --rail-l: 240px;
   --rail-r: 300px;
+  /* Reading width of the audit lists (caption quality). One value for the
+     ranking switch, the scroll frame and the rows, so a change to any of them
+     cannot leave the three misaligned. */
+  --audit-w: 1080px;
 }
 
 .app {
@@ -1542,7 +1546,7 @@ mark {
 .list-switch {
   display: flex; align-items: center; justify-content: space-between;
   gap: 16px; flex-wrap: wrap;
-  max-width: 860px; margin: 16px 0 10px;
+  max-width: var(--audit-w); margin: 16px 0 10px;
 }
 /* The switch is two peers, not a rail row: it takes its content's width and
    sits inline instead of filling the column. */
@@ -1553,7 +1557,7 @@ mark {
    them changes — stacked full-height, every list-length change pushed the
    controls off screen. The floor keeps the frame useful on a short window. */
 .suspect-frame {
-  max-width: 860px;
+  max-width: var(--audit-w);
   max-height: calc(100vh - 430px); min-height: 300px;
   overflow-y: auto; overscroll-behavior: contain;
   padding-right: 4px;
@@ -1566,7 +1570,12 @@ mark {
 }
 .suspect-list {
   display: flex; flex-direction: column; gap: 3px;
-  max-width: 860px;   /* a caption line, not a wall — prose measure rules */
+  /* One width for the whole audit surface, so the switch, the frame and the
+     rows cannot drift apart. Was 860px against a caption's prose measure —
+     but the row is one ellipsized line beside an image, not a paragraph, and
+     860 left 478px of a 1440 screen empty next to the evidence. The extra
+     width goes to the thumbnail first and the caption second. */
+  max-width: var(--audit-w);
 }
 .suspect-row, .suspect-head {
   display: flex; align-items: center; gap: 10px;
@@ -1578,8 +1587,16 @@ mark {
   transition: border-color var(--t-quick);
 }
 .suspect-row:hover { border-color: var(--accent); }
+/* The evidence, at a size you can actually judge.
+   Deciding whether a caption describes its image is a visual act, and at
+   56x40 it cannot be performed — every row became a trip to the sample page
+   and back just to see what was being scored. 2.6x the area costs ~26px of row
+   height and buys the judgement the page exists for; the list widens into the
+   478px that was sitting empty to its right rather than taking it from the
+   caption. This is also what the repo already says it does: images lead,
+   diagnostics wait. */
 .suspect-row img {
-  width: 56px; height: 40px; object-fit: cover;
+  width: 88px; height: 66px; object-fit: cover;
   border-radius: 6px; flex-shrink: 0;
 }
 .suspect-caption {
