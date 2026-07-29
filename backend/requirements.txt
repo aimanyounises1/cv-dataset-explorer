@@ -1,23 +1,23 @@
-fastapi>=0.110
-uvicorn[standard]>=0.29
-pydantic>=2.6
-numpy>=1.26
-pillow>=10.0
-tqdm>=4.66
-httpx>=0.27
+fastapi>=0.141.0
+uvicorn[standard]>=0.52.0
+pydantic>=2.13.4
+numpy>=2.5.1
+pillow>=12.3.0
+tqdm>=4.70.0
+httpx>=0.28.1
 
 # Dataset download
-datasets>=2.19
-huggingface_hub>=0.23
+datasets>=5.0.1
+huggingface_hub>=1.25.1
 
 # Embeddings (SigLIP 2). Runs on Apple Silicon (MPS), CUDA, or CPU.
-torch>=2.2
+torch>=2.13.0
 # 4.56 is the first supported baseline exposing Sam2Model/Sam2Processor.
-transformers>=4.56
+transformers>=5.14.1
 
 # Analytics
-scikit-learn>=1.4
-umap-learn>=0.5.5
+scikit-learn>=1.9.0
+umap-learn>=0.5.12
 
 # Tests
-pytest>=8.0
+pytest>=9.1.1
