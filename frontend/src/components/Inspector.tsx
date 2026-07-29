@@ -4,6 +4,8 @@ import { api } from "../api/client";
 import { SampleDetail, AXES } from "../api/types";
 import { AXIS_META } from "./AxisFilters";
 import AgreementBadge from "./AgreementBadge";
+import { showToast } from "./Toast";
+import { VERDICTS, VERDICT_PREFIX, recordedVerdict } from "../lib/verdicts";
 
 /** Sweeping a grid revisits the same handful of images constantly (arrow back
  *  one, then forward again). Keeping the fetched detail for the session makes
@@ -31,6 +33,7 @@ const CACHE = new Map<number, SampleDetail>();
 export default function Inspector({ id }: { id: number }) {
   const [detail, setDetail] = useState<SampleDetail | null>(null);
   const [failed, setFailed] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -70,6 +73,36 @@ export default function Inspector({ id }: { id: number }) {
   }
 
   const axes = s.axes;
+  const recorded = recordedVerdict(s.tags);
+
+  /** One call per sample: whatever was recorded before is removed, so the two
+   *  writes are a replacement rather than an accumulation. Clicking the call
+   *  that is already recorded retracts it — a reviewer who changes their mind
+   *  must be able to leave the sample unjudged, not merely differently judged.
+   *
+   *  Not optimistic. A verdict is data a later export will be trusted to carry,
+   *  so the button waits for the server rather than showing a call that may not
+   *  have been saved. */
+  async function record(value: string) {
+    if (!s || saving) return;
+    const tag = VERDICT_PREFIX + value;
+    const next = recorded === tag ? null : tag;
+    setSaving(true);
+    try {
+      if (recorded) await api.removeTag(s.id, recorded);
+      if (next) await api.addTag(s.id, next);
+      const kept = s.tags.filter((t) => !t.startsWith(VERDICT_PREFIX));
+      const updated = { ...s, tags: next ? [...kept, next] : kept };
+      CACHE.set(s.id, updated);
+      setDetail(updated);
+    } catch {
+      // The cache still holds the pre-write tags, so the buttons snap back to
+      // what the server actually has rather than to what was clicked.
+      showToast(`Couldn’t record that call on #${s.id} — nothing was saved.`);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="inspector">
@@ -112,6 +145,34 @@ export default function Inspector({ id }: { id: number }) {
             </div>
           ))}
         </dl>
+      )}
+
+      {/* The judgement, recorded where it is made. Until now the review
+          vocabulary existed only as prose in Quality's guide: you were told to
+          type `verdict:caption-error` by hand, on another page, one sample at a
+          time. These write the same tag, so a review session stays a filterable,
+          exportable slice rather than a new kind of object. */}
+      <div className="inspector-verdicts" role="group" aria-label="Record your call">
+        {VERDICTS.map((v) => {
+          const on = recorded === VERDICT_PREFIX + v.value;
+          return (
+            <button key={v.value} type="button" disabled={saving}
+                    className={`verdict-btn${on ? " on" : ""}`}
+                    aria-pressed={on}
+                    title={on ? `${v.hint} — click again to retract` : v.hint}
+                    onClick={() => record(v.value)}>
+              {v.label}
+            </button>
+          );
+        })}
+      </div>
+      {recorded && (
+        <p className="inspector-note">
+          Recorded as <span className="mono">{recorded}</span> —{" "}
+          <Link to={`/?tag=${encodeURIComponent(recorded)}`}>
+            see every sample you called this
+          </Link>.
+        </p>
       )}
 
       {s.caption_consistency != null && (

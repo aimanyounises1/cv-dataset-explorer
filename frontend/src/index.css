@@ -669,6 +669,26 @@ body {
 .inspector-axis-bar { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
 .inspector-axes b { text-align: right; font-variant-numeric: tabular-nums; }
 .inspector-note { margin: 12px 0 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.5; }
+.inspector-note .mono { font-size: 11px; }
+/* The reviewer's own call, so it wears the product's hand and not --ai. */
+.inspector-verdicts {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border);
+}
+.verdict-btn {
+  font-size: 11px; padding: 3px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+}
+.verdict-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+/* The hover state is listed with the recorded state deliberately. Recording a
+   call leaves the pointer resting on the button that was just clicked, and
+   `:hover:not(:disabled)` outranks a lone `.on` — which painted a sage label on
+   a sage fill and made the one selected verdict the only unreadable one. */
+.verdict-btn.on,
+.verdict-btn.on:hover:not(:disabled) {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.verdict-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* A mode, not a hover affordance — it costs the rail's width. */
 .loupe-toggle {
