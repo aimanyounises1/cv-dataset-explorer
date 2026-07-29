@@ -123,6 +123,9 @@ class SearchRequest(BaseModel):
     ids: Optional[str] = None            # raw pasted text, parsed server-side
     axes: dict[str, dict[str, Optional[int]]] = {}   # {"difficulty": {"min": 8}}
     max_agreement: Optional[float] = None
+    # One k-means cluster. Bounded to what SQLite can bind and no narrower —
+    # cluster ids are assigned at ingest and carry no sign convention.
+    cluster: Optional[int] = Field(None, ge=-(2**63), le=2**63 - 1)
     # Membership filter, bounded to SQLite's signed 64-bit range like every
     # album id. An id naming no album matches nothing — honest empty, no error.
     album: Optional[int] = Field(None, ge=1, le=2**63 - 1)

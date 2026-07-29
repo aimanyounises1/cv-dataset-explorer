@@ -176,9 +176,14 @@ def export_subset(
     if q:
         from .search import run_search
 
+        # `cluster` travels with the rest. Omitting it here while the manifest
+        # below still named it produced the one thing this project's own
+        # standard forbids: a curated slice that misdescribes itself —
+        # `?q=dog&cluster=3` returned 300 rows, none of them from cluster 3.
         result = run_search(conn, q, mode=mode, top_k=top_k, split=split,
                             tag=tag, vlm_tag=vlm_tag, attr=attr, axes=axes, ids=ids,
-                            max_agreement=max_agreement, album=album)
+                            max_agreement=max_agreement, cluster=cluster,
+                            album=album)
         ranked_depth = result.depth_limit
         truncated = bool(result.depth_reached)
         ids = [it.id for it in result.items]
