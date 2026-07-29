@@ -150,7 +150,12 @@ function retrievalActive(ov: StatsOverview | null): boolean {
 }
 
 const RAIL_KEY = "cvde-rail";
-const COMPACT_RAIL_QUERY = "(max-width: 1100px)";
+/** The width at which the app stops being three columns — it mirrors the
+ *  `@media (max-width: 1100px)` block in `index.css` that collapses `.app` to a
+ *  single column and stacks both rails. Exported because anything whose value
+ *  depends on there *being* a side column has to agree with that block, and a
+ *  second literal would be a second breakpoint waiting to drift. */
+export const COMPACT_RAIL_QUERY = "(max-width: 1100px)";
 
 /** WCAG 2.2 SC 2.5.8 puts the floor for a pointer target at 24×24 CSS px and
  * SC 2.5.5 puts the comfortable target at 44×44 — the same number Apple's HIG

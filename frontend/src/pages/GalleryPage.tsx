@@ -679,7 +679,7 @@ export default function GalleryPage() {
   }, [loupe]);
 
   // Publishes the card under the cursor to the rail. Attached to both grids.
-  const cursor = useGridCursor(loupe);
+  const { gridProps, available: loupeAvailable } = useGridCursor(loupe);
 
   // Scroll restore for back-nav, keyed by the full query string. The hook owns
   // the whole of it, including the `isConnected` guard the repo's known-traps
@@ -1260,7 +1260,7 @@ export default function GalleryPage() {
               × Clear image query
             </button>
           </div>
-          <div className="grid" data-signal={signal || undefined} {...cursor}
+          <div className="grid" data-signal={signal || undefined} {...gridProps}
                style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
             {imageQuery.items.map((s) => (
               <ImageCard key={s.id} sample={s} scoreBasis="cosine"
@@ -1322,8 +1322,10 @@ export default function GalleryPage() {
           )}
           {/* A mode, because it costs the rail's 300px and therefore two grid
               columns. Making that trade on hover would reflow the grid out from
-              under the pointer that asked for it. */}
-          <button type="button" className={`loupe-toggle${loupe ? " on" : ""}`}
+              under the pointer that asked for it. Absent below the three-column
+              breakpoint, where the rail stacks under the grid and the trade is
+              not one worth offering. */}
+          {loupeAvailable && <button type="button" className={`loupe-toggle${loupe ? " on" : ""}`}
                   aria-pressed={loupe} onClick={() => setLoupe((v) => !v)}
                   title={loupe
                     ? "Close the inspector and give the grid its columns back"
@@ -1331,7 +1333,7 @@ export default function GalleryPage() {
                       + "five captions and their measured agreement, without "
                       + "leaving the grid"}>
             Inspector
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -1353,7 +1355,7 @@ export default function GalleryPage() {
       )}
 
       {view === "ranked" && (
-      <div className="grid" data-signal={signal || undefined} {...cursor}
+      <div className="grid" data-signal={signal || undefined} {...gridProps}
            style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
         {/* Each card links with the query, mode and score that put it here.
             `items` accumulates every page loaded so far, so the array index is

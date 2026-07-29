@@ -1,5 +1,12 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { setInspected, setInspecting } from "../lib/inspected";
+import { COMPACT_RAIL_QUERY } from "../components/shell/LeftRail";
+
+function matches(query: string): boolean {
+  return typeof window !== "undefined"
+    && typeof window.matchMedia === "function"
+    && window.matchMedia(query).matches;
+}
 
 /**
  * Turns a grid of cards into a cursor: whichever card the reader is on gets
@@ -24,11 +31,26 @@ import { setInspected, setInspecting } from "../lib/inspected";
  * than attached and returning early — the grid stays exactly as cheap as it was
  * before the loupe existed.
  */
-export function useGridCursor(active: boolean) {
-  const canHover = useMemo(
-    () => typeof window !== "undefined"
-      && !!window.matchMedia?.("(hover: hover)").matches,
-    []);
+export function useGridCursor(wanted: boolean) {
+  const canHover = useMemo(() => matches("(hover: hover)"), []);
+
+  /* Below the app's three-column breakpoint both rails stack, so the inspector
+     would land underneath the whole grid — where it is strictly worse than
+     opening the sample page, because you would scroll past every result to
+     reach it. The mode is therefore *unavailable* rather than merely awkward
+     there, and the toggle that offers it goes away with it. The reader's stored
+     preference is untouched: widening the window brings it back on. */
+  const [roomy, setRoomy] = useState(() => !matches(COMPACT_RAIL_QUERY));
+  useEffect(() => {
+    if (typeof window === "undefined"
+        || typeof window.matchMedia !== "function") return undefined;
+    const media = window.matchMedia(COMPACT_RAIL_QUERY);
+    const onChange = () => setRoomy(!media.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  const active = wanted && roomy;
 
   // The rail reads a module store, so a mode left open outlives the grid that
   // opened it: switching to the map would show an inspector for a card that is
@@ -38,7 +60,7 @@ export function useGridCursor(active: boolean) {
     return () => setInspecting(false);
   }, [active]);
 
-  return useMemo(() => {
+  const gridProps = useMemo(() => {
     const read = (e: { target: EventTarget | null }) => {
       const el = (e.target as HTMLElement | null)?.closest?.("[data-sample-id]");
       const id = el?.getAttribute("data-sample-id");
@@ -46,12 +68,14 @@ export function useGridCursor(active: boolean) {
     };
     return {
       // Always bound. Walking a grid with the arrow keys is worth having on its
-      // own; the loupe is what makes it fast, not what makes it legal.
+      // own; the inspector is what makes it fast, not what makes it legal.
       onKeyDown: moveCursor,
       onFocusCapture: active ? read : undefined,
       onPointerOver: active && canHover ? read : undefined,
     };
   }, [active, canHover]);
+
+  return { gridProps, available: roomy };
 }
 
 /** Rows are laid out by `auto-fill`, so the column count is a fact about the
