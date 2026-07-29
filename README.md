@@ -200,6 +200,8 @@ Rectangle search **toward or away from the region** remains available as the
 fast fallback. `scripts/bench_detector.py` and `scripts/bench_sam2.py`
 re-measure both optional models.
 
+![Review-ready object mask: Grounding DINO proposes a dog box and SAM 2.1 refines it before any label is accepted](docs/screenshots/19-segmentation.png)
+
 If the mask began with a detector proposal, the accepted record also preserves
 Grounding DINO's exact revision, full query, original/proposed labels, score and
 source box. The detector evidence reaches acceptance through a short-lived,
@@ -210,6 +212,8 @@ accepted binary mask, a tight RGBA object cutout whose alpha channel is that
 mask, and a manifest binding the source, mask, and cutout byte lengths and
 SHA-256 values to the annotation, model revisions, and the documented Pillow
 operations that derived it. The source frame is never modified.
+
+![Local vision inspector: a completed structured scene proposal with source and model provenance](docs/screenshots/18-vision-inspector.png)
 
 The same sample page has a read-only **local vision inspector**. It runs one
 typed task—scene inventory, road-scene triage, caption audit, OCR, or a focused
@@ -227,6 +231,7 @@ OWLv2 / Florence-2 / SAM3 evidence are in
 ### Compare two frames
 
 ![Compare canvas: synchronized zoom, shared/different panel](docs/screenshots/14-compare.png)
+![Semantic pair inspection: decoded-source checks followed by a typed local-model difference proposal](docs/screenshots/20-pair-vision.png)
 
 `/compare` puts two samples under one loupe. Synchronized zoom/pan and manual
 rectangle search remain deterministic tools. A separate Inspection Run first

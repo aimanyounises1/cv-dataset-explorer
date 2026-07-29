@@ -15,8 +15,10 @@ layout depends on the machine that captured it cannot be compared against a late
 one. Screenshots are deliberately *not* full-page: the point of most of these is
 what a reviewer sees without scrolling.
 """
+
 import argparse
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
@@ -26,8 +28,8 @@ from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PWTimeout
 
 OUT = Path(__file__).resolve().parent.parent / "docs" / "screenshots"
-BASE = "http://localhost:5173"
-API = "http://localhost:8000"
+BASE = os.environ.get("CVDE_SCREENSHOT_BASE", "http://localhost:5173").rstrip("/")
+API = os.environ.get("CVDE_SCREENSHOT_API", "http://localhost:8000").rstrip("/")
 VIEWPORT = {"width": 1600, "height": 1000}
 
 
@@ -68,11 +70,11 @@ def _drop_tag(name: str) -> None:
         ids = [s["id"] for s in json.load(r)["items"]]
     for sid in ids:
         req = urllib.request.Request(
-            f"{API}/api/samples/{sid}/tags/{urllib.parse.quote(name)}",
-            method="DELETE")
+            f"{API}/api/samples/{sid}/tags/{urllib.parse.quote(name)}", method="DELETE"
+        )
         try:
             urllib.request.urlopen(req, timeout=15).close()
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             print(f"    could not untag {sid}: {exc}")
     print(f"    reverted the assistant's `{name}` tag on {len(ids)} samples")
 
@@ -145,18 +147,22 @@ def _ask_assistant(page: Page) -> None:
                 const last = t[t.length - 1];
                 return !!last && last.innerText.trim().length > 60;
             }""",
-            timeout=180_000)
+            timeout=180_000,
+        )
     except PWTimeout:
         raise SystemExit(
             "    assistant produced no completed answer in 180s — refusing to "
-            "capture a figure of an empty chat. Warm the model and re-run.")
+            "capture a figure of an empty chat. Warm the model and re-run."
+        )
     page.wait_for_timeout(1200)
     # The pane auto-scrolls to the newest content, which puts the question
     # off-screen and leaves a figure of an answer to nothing. Pull the user turn
     # back to the top so the exchange reads as an exchange.
     page.locator(".chat-turn.user").last.scroll_into_view_if_needed()
-    page.evaluate("() => { const s = document.querySelector('.chat-scroll');"
-                  " if (s) s.scrollTop -= 24; }")
+    page.evaluate(
+        "() => { const s = document.querySelector('.chat-scroll');"
+        " if (s) s.scrollTop -= 24; }"
+    )
     page.wait_for_timeout(500)
     for name in set(_tags()) - set(before):
         _drop_tag(name)
@@ -167,16 +173,72 @@ def _show_floor(page: Page) -> None:
     viewport, so the above-floor cards, the divider and the greyed tail all
     land inside the fixed 1600x1000 capture."""
     page.wait_for_selector(".sim-divider")
-    page.eval_on_selector(".similar-head",
-                          "el => el.scrollIntoView({block: 'start'})")
-    page.wait_for_timeout(1200)          # lazy thumbnails below the fold
+    page.eval_on_selector(".similar-head", "el => el.scrollIntoView({block: 'start'})")
+    page.wait_for_timeout(1200)  # lazy thumbnails below the fold
+
+
+def _run_vision_inspection(page: Page) -> None:
+    """Capture a completed, source-bound single-image VLM proposal."""
+    run = page.locator(".vision-inspector button.primary")
+    run.wait_for(state="visible", timeout=30_000)
+    run.click()
+    page.wait_for_selector(".vi-results", timeout=240_000)
+    page.eval_on_selector(
+        ".vi-results",
+        "el => window.scrollTo({top: window.scrollY + "
+        "el.getBoundingClientRect().top - 300, behavior: 'instant'})",
+    )
+    page.wait_for_timeout(900)
+
+
+def _run_pair_inspection(page: Page) -> None:
+    """Capture the semantic proposal after the deterministic pair checks."""
+    run = page.get_by_role("button", name="Analyze visual differences")
+    run.wait_for(state="visible", timeout=30_000)
+    run.click()
+    page.wait_for_selector(".vc-result", timeout=240_000)
+    page.eval_on_selector(
+        ".vc-result",
+        "el => window.scrollTo({top: window.scrollY + "
+        "el.getBoundingClientRect().top - 330, behavior: 'instant'})",
+    )
+    page.wait_for_timeout(900)
+
+
+def _show_segmentation_preview(page: Page) -> None:
+    """Ground one object and refine its mask without accepting a label."""
+    page.wait_for_function(
+        "() => document.querySelector('.detail-image')?.naturalWidth > 0",
+        timeout=30_000,
+    )
+    page.get_by_text(
+        "Enter annotation mode — points, box, and detector", exact=True
+    ).click()
+    detector = page.get_by_label("Detector query")
+    detector.wait_for(state="visible", timeout=30_000)
+    detector.fill("dog.")
+    page.get_by_role("button", name="Suggest boxes").click()
+    page.wait_for_selector(".rs-box", timeout=180_000)
+    page.locator(".rs-box").first.click()
+    page.wait_for_selector(".rs-mask", timeout=180_000)
+    page.wait_for_selector(".rs-workbench", timeout=30_000)
+    page.eval_on_selector(
+        ".rs-stage",
+        "el => window.scrollTo({top: window.scrollY + "
+        "el.getBoundingClientRect().top - 210, behavior: 'instant'})",
+    )
+    page.wait_for_timeout(900)
 
 
 # (filename, url, settle_ms, extra_action)
 SHOTS = [
     ("1-gallery.png", "/?q=a+crowded+street+at+night&mode=hybrid", 3000, None),
-    ("2-describe.png",
-     "/?attr=time_of_day%3Anight&attr=setting%3Aindoor", 2200, _open_describe),
+    (
+        "2-describe.png",
+        "/?attr=time_of_day%3Anight&attr=setting%3Aindoor",
+        2200,
+        _open_describe,
+    ),
     ("4-axes.png", "/?difficulty_min=8&legibility_min=8", 2600, None),
     ("5-map.png", "/map", 6000, None),
     ("6-quality.png", "/quality", 4000, None),
@@ -189,9 +251,12 @@ SHOTS = [
     ("11-assistant.png", "/chat", 2500, _ask_assistant),
     # A search click-through arrives carrying its provenance in the URL, so the
     # banner in this figure is exactly what a pasted link reproduces.
-    ("12-provenance.png",
-     "/samples/6065?src=search&q=a+crowded+street+at+night&mode=hybrid&rank=1",
-     3500, None),
+    (
+        "12-provenance.png",
+        "/samples/6065?src=search&q=a+crowded+street+at+night&mode=hybrid&rank=1",
+        3500,
+        None,
+    ),
     # A sample whose neighbours straddle the similarity floor: real class above
     # the divider, greyed context below it. The grid sits below the inspector,
     # so the shot scrolls to it — a figure about the floor must show the floor.
@@ -201,11 +266,16 @@ SHOTS = [
     # A real album with its header open: editable details and the measured
     # analysis panel. The action builds the album live (and main() deletes it
     # after the run) so the figure never depends on leftover user data.
-    ("15-album.png", "/", 1500, None),   # action assigned below
-    ("16-share.png", "/", 1500, None),   # action assigned below
+    ("15-album.png", "/", 1500, None),  # action assigned below
+    ("16-share.png", "/", 1500, None),  # action assigned below
     # The front door plus the rail's local-models card: which models are
     # real, live and local — retrieval, assistant, enrichment.
     ("17-models.png", "/", 2500, None),
+    # Real optional-model outputs. These actions wait for inference and capture
+    # proposals; the segmentation plate deliberately stops before Accept & save.
+    ("18-vision-inspector.png", "/samples/1723", 2500, _run_vision_inspection),
+    ("19-segmentation.png", "/samples/1723", 2500, _show_segmentation_preview),
+    ("20-pair-vision.png", "/compare?a=76&b=2259", 2500, _run_pair_inspection),
 ]
 
 FIG_ALBUM = "fig-night-streets"
@@ -213,17 +283,17 @@ FIG_ALBUM = "fig-night-streets"
 
 def _album_id(page: Page) -> int:
     """Create (or reuse) the figure album from a real search's top results."""
-    api = BASE.replace(":5173", ":8000")
-    for a in page.request.get(f"{api}/api/albums").json():
+    for a in page.request.get(f"{API}/api/albums").json():
         if a["name"] == FIG_ALBUM:
             return a["id"]
     hits = page.request.get(
-        f"{api}/api/search?q=a+crowded+street+at+night&mode=hybrid&top_k=8"
+        f"{API}/api/search?q=a+crowded+street+at+night&mode=hybrid&top_k=8"
     ).json()["items"]
-    album = page.request.post(f"{api}/api/albums",
-                              data={"name": FIG_ALBUM}).json()
-    page.request.post(f"{api}/api/albums/{album['id']}/items",
-                      data={"sample_ids": [h["id"] for h in hits]})
+    album = page.request.post(f"{API}/api/albums", data={"name": FIG_ALBUM}).json()
+    page.request.post(
+        f"{API}/api/albums/{album['id']}/items",
+        data={"sample_ids": [h["id"] for h in hits]},
+    )
     return album["id"]
 
 
@@ -247,15 +317,15 @@ def _share_figure(page: Page) -> None:
 
 
 def _cleanup_album(page: Page) -> None:
-    api = BASE.replace(":5173", ":8000")
-    for a in page.request.get(f"{api}/api/albums").json():
+    for a in page.request.get(f"{API}/api/albums").json():
         if a["name"] == FIG_ALBUM:
-            page.request.delete(f"{api}/api/albums/{a['id']}")
+            page.request.delete(f"{API}/api/albums/{a['id']}")
 
 
-SHOTS = [(n, u, s, {"15-album.png": _album_figure,
-                    "16-share.png": _share_figure}.get(n, a))
-         for n, u, s, a in SHOTS]
+SHOTS = [
+    (n, u, s, {"15-album.png": _album_figure, "16-share.png": _share_figure}.get(n, a))
+    for n, u, s, a in SHOTS
+]
 
 
 def main() -> int:
@@ -275,8 +345,14 @@ def main() -> int:
         # A 4xx/5xx behind a screenshot is invisible in the image but makes the
         # figure a lie, so the run reports one rather than saving quietly.
         bad: list[str] = []
-        page.on("response", lambda r: bad.append(f"{r.status} {r.url}")
-                if r.status >= 400 and "/api/" in r.url else None)
+        page.on(
+            "response",
+            lambda r: (
+                bad.append(f"{r.status} {r.url}")
+                if r.status >= 400 and "/api/" in r.url
+                else None
+            ),
+        )
 
         for name, url, settle, action in shots:
             bad.clear()
@@ -289,7 +365,7 @@ def main() -> int:
                 page.screenshot(path=str(OUT / name))
                 was, now = _shrink(OUT / name)
                 print(f"    {was // 1024} kB -> {now // 1024} kB")
-            except Exception as exc:                      # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 failures.append(f"{name}: {type(exc).__name__}: {exc}")
                 print(f"    FAILED: {exc}")
                 continue
@@ -301,7 +377,7 @@ def main() -> int:
         # the run that needed it.
         try:
             _cleanup_album(page)
-        except Exception as exc:                          # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             failures.append(f"album cleanup: {exc}")
         browser.close()
 
