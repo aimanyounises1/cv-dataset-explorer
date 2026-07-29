@@ -31,13 +31,14 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements*.txt
       # Deliberately lightweight: the suite runs without torch, transformers,
-      # datasets or langgraph. A fake embedder stands in for SigLIP and the
-      # graceful-degradation paths are exercised instead; the tests that do
-      # need torch or langgraph skip themselves. This list is therefore what
-      # the tests import, not what the app needs to serve a request --
+      # or datasets. A fake embedder stands in for SigLIP and the
+      # graceful-degradation paths are exercised instead. Agent contract tests
+      # import the optional LangChain/LangGraph layer, so CI installs its small
+      # dedicated manifest as well. This remains the set of packages the tests
+      # import, not what the app needs to serve a request --
       # backend/requirements.txt remains the canonical runtime manifest.
       # tqdm is here because app.analyze imports it at module scope.
-      - run: pip install fastapi httpx pydantic numpy pillow pytest ruff tqdm uvicorn
+      - run: pip install fastapi httpx pydantic numpy pillow pytest ruff tqdm uvicorn -r requirements-agent.txt
       - run: ruff check app tests
       - run: pytest -q
 
