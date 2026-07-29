@@ -5,6 +5,9 @@ import { AXES } from "../api/types";
 import type { MapPoint } from "../api/types";
 import MapWorkingSet, { ISOLATED_N } from "../components/MapWorkingSet";
 import ScatterPlot from "../components/ScatterPlot";
+import type {
+  MapAperture, MapInteractionMode,
+} from "../components/ScatterPlot";
 import { Listbox } from "../components/controls";
 import { useSelection } from "../hooks/useSelection";
 import {
@@ -91,6 +94,9 @@ export default function MapPage() {
   const [points, setPoints] = useState<Point[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [workingSet, setWorkingSet] = useState<WorkingSet | null>(null);
+  const [interactionMode, setInteractionMode] =
+    useState<MapInteractionMode>("pan");
+  const [aperture, setAperture] = useState<MapAperture | null>(null);
   const [dropped, setDropped] = useState<Set<number>>(new Set());
   const [marked, setMarked] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -276,10 +282,14 @@ export default function MapPage() {
     setToast(null);
     setDropped(new Set());
     setMarked(null);
+    // A measured queue is a set, but not a spatial region. Retaining the old
+    // rectangle would claim geometry that did not produce the new selection.
+    if (source !== "lasso") setAperture(null);
     if (ids.length === 0) {
       setWorkingSet(null);
+      if (source === "lasso") setAperture(null);
       setToast(source === "lasso"
-        ? "That lasso caught no points — drag over a denser region."
+        ? "That aperture caught no points — drag over a denser region."
         : "Nothing matched.");
       return;
     }
@@ -346,7 +356,41 @@ export default function MapPage() {
   const clearSet = useCallback(() => {
     setWorkingSet(null);
     setDropped(new Set());
+    setAperture(null);
   }, []);
+
+  /** Escape is deliberately two-stage. First it leaves the explicit Select
+   * tool without destroying the result; once back in Pan, a second Escape
+   * clears the aperture and the working set it produced. Dialogs, native
+   * selects, and editable document regions retain their own Escape behavior;
+   * ordinary text fields do not trap the map mode. */
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (
+        target.tagName === "SELECT"
+        || target.isContentEditable
+        || target.closest("[role='dialog']")
+      )) return;
+
+      if (interactionMode === "select") {
+        event.preventDefault();
+        setInteractionMode("pan");
+        setToast(aperture
+          ? "Pan mode — the aperture and its working set remain selected."
+          : "Pan mode — drag to move around the projection.");
+        return;
+      }
+      if (aperture) {
+        event.preventDefault();
+        clearSet();
+        setToast("Aperture and working set cleared.");
+      }
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, [interactionMode, aperture, clearSet]);
 
   /** Tags everything still in the set. Resolves true when the tag stuck, which
    * is when — and only when — the panel clears its input. */
@@ -359,6 +403,7 @@ export default function MapPage() {
       setLastTag(res.tag);
       setWorkingSet(null);
       setDropped(new Set());
+      setAperture(null);
       return true;
     } catch (err) {
       setToast(apiMessage(err) || "Bulk tag failed");
@@ -398,6 +443,27 @@ export default function MapPage() {
           options={colorModeOptions}
           onPick={(v) => setColorMode(v as MapColorMode)}
         />
+
+        {/* A visible mode is the primary path. Shift+drag remains available
+            from Pan for an experienced reviewer, but is no longer the only
+            discoverable way to create a working set. */}
+        <div className="view-switch map-mode-switch" role="group"
+             aria-label="Map interaction mode">
+          <button type="button"
+                  className={interactionMode === "pan" ? "on" : ""}
+                  aria-pressed={interactionMode === "pan"}
+                  onClick={() => setInteractionMode("pan")}
+                  title="Drag the map to pan; scroll to zoom">
+            Pan
+          </button>
+          <button type="button"
+                  className={interactionMode === "select" ? "on" : ""}
+                  aria-pressed={interactionMode === "select"}
+                  onClick={() => setInteractionMode("select")}
+                  title="Drag an aperture around points to create a working set">
+            Select region
+          </button>
+        </div>
 
         <div className="map-legend">
           {ramp.kind === "quantity" && ramp.domain ? (
@@ -460,8 +526,12 @@ export default function MapPage() {
           image — click opens its sample page
         </span>
         <span className="map-key-item">
-          <span className="map-key-kbd">shift+drag</span> lasso a region into the
+          choose <strong>Select region</strong>, then drag an aperture into the
           working set below
+        </span>
+        <span className="map-key-item">
+          <span className="map-key-kbd">shift+drag</span> selects directly from
+          Pan mode
         </span>
         <span className="map-key-item">
           the working set stays lit; everything else drops to grey — hover a
@@ -507,9 +577,15 @@ export default function MapPage() {
 
       <ScatterPlot
         points={visible}
+        interactionMode={interactionMode}
+        aperture={aperture}
+        apertureCount={workingSet?.source === "lasso" ? kept.length : undefined}
         onSelect={(id) => navigate(`/samples/${id}`)}
-        onSelectBox={(ids) => adopt(ids, "lasso",
-          `${ids.length} images from one lasso on the projection`)}
+        onSelectBox={(ids, nextAperture) => {
+          setAperture(ids.length > 0 ? nextAperture : null);
+          adopt(ids, "lasso",
+            `${ids.length} ${ids.length === 1 ? "image" : "images"} from one aperture on the projection`);
+        }}
         selectedIds={ringIds}
         ringIds={ringIds}
         colorOf={colorOf}
@@ -600,8 +676,8 @@ export default function MapPage() {
           </li>
         </ul>
         <p>
-          Use the map to find regions worth looking at, then lasso them
-          (shift+drag) and inspect the actual images in the working set.
+          Use the map to find regions worth looking at, switch to Select region,
+          then draw an aperture and inspect the actual images in the working set.
         </p>
       </details>
     </div>

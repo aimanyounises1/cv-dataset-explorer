@@ -11,8 +11,8 @@
 .compare-title { margin-top: 2px; }
 
 .compare-panes {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
-  margin-bottom: 14px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 12px;
 }
 
 .compare-pane {
@@ -25,7 +25,14 @@
   align-items: center; justify-content: center;
   min-height: 380px; border-style: dashed;
 }
-.compare-pane.drop { border-color: var(--accent); background: var(--accent-soft); }
+.compare-pane.drop {
+  border-color: var(--accent);
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 1px var(--accent-line);
+}
+.compare-pane.drop .pane-stage {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--stage-human) 55%, transparent);
+}
 .compare-empty-msg {
   color: var(--text-faint); font-size: 13.5px; line-height: 1.6;
   max-width: 32ch; text-align: center; padding: 20px;
@@ -51,7 +58,8 @@
   inset: 0;
   place-content: center;
   max-width: none;
-  background: var(--bg-inset);
+  background: var(--stage-bg);
+  color: var(--stage-muted);
 }
 .compare-annotation-error {
   border-top: 1px solid color-mix(in srgb, var(--red) 30%, var(--border));
@@ -63,7 +71,9 @@
 
 .pane-head {
   display: flex; align-items: center; gap: 9px;
-  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  min-height: 42px;
+  padding: 7px 10px; border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-raised) 72%, var(--bg-inset));
 }
 .pane-id {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
@@ -85,11 +95,15 @@
   --stage-h: max(46vh, 320px);
   position: relative; height: var(--stage-h);
   display: flex; align-items: center; justify-content: center;
-  overflow: hidden; background: var(--bg-inset);
+  overflow: hidden; background: var(--stage-bg);
+  box-shadow: inset 0 0 0 1px rgba(237, 243, 240, 0.025);
   cursor: grab; touch-action: none;
 }
 .pane-stage:active { cursor: grabbing; }
 .pane-stage.drawing { cursor: crosshair; }
+.pane-stage:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stage-human) 42%, transparent);
+}
 
 .compare-img-layer {
   position: relative;
@@ -105,6 +119,7 @@
   height: auto;
   transform-origin: 0 0;
   flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(237, 243, 240, 0.08);
 }
 /* The pixels must not be resampled to a shape they are not. The layer above is
    the correct shape, so `contain` changes nothing while it holds — it is the
@@ -118,23 +133,23 @@
 /* Regions. Saved ones are thin sage outlines — marks in the margin, not paint
    over the evidence. The draft is dashed until it becomes a claim. */
 .region-rect { position: absolute; pointer-events: none; }
-.region-rect.saved { border: 1.5px solid var(--accent); }
+.region-rect.saved { border: 1.5px solid var(--stage-human); }
 .region-rect.draft {
-  border: 1.5px dashed var(--accent);
-  background: rgba(33, 109, 80, 0.12);
+  border: 1.5px dashed var(--stage-human);
+  background: color-mix(in srgb, var(--stage-human) 12%, transparent);
 }
 .region-label {
   position: absolute; top: 0; left: -1.5px; transform: translateY(-100%);
   font-family: var(--font-mono); font-size: 10px; line-height: 1.5;
   padding: 0 5px; border-radius: 3px 3px 0 0;
-  background: var(--accent-deep); color: #ffffff; white-space: nowrap;
+  background: var(--stage-human); color: var(--stage-bg); white-space: nowrap;
 }
 
 /* One dominant action per panel: searching the region is the point; saving
    and discarding are ghosts beside it. */
 .region-actions {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 12px; border-top: 1px solid var(--border);
+  padding: 8px 10px; border-top: 1px solid var(--border);
 }
 .region-actions input {
   flex: 1; min-width: 0; padding: 7px 10px;
@@ -238,12 +253,12 @@
 /* A queue of pairs is a table, not prose: it takes the data rung, which is
    what stops each row from being two thumbnails on the left and a cosine
    stranded 400px away on the right. */
-.pair-queue { margin-top: 18px; max-width: var(--w-data); }
+.pair-queue { margin-top: 14px; max-width: var(--w-data); }
 .pair-queue h3 { margin-top: 0; }
 .pair-queue-list { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .pair-queue-row {
   display: flex; align-items: center; gap: 10px;
-  padding: 5px 10px 5px 5px; border-radius: var(--radius-sm);
+  padding: 4px 9px 4px 4px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--bg-raised);
   text-decoration: none; color: inherit;
   transition: border-color var(--t-quick), background var(--t-quick);

@@ -10,7 +10,7 @@ FastAPI, SQLite, local embedding models, and optional local vision models. It
 does not require a cloud service, hosted search, external vector database, or
 paid API.
 
-![Searchable Flickr8k gallery](assets/gallery.png)
+![Searchable Flickr8k gallery](assets/gallery.jpg)
 
 ## Run locally
 
@@ -85,17 +85,17 @@ stored under `backend/data/` in both workflows.
 | Compare two frames | Use synchronized zoom, corruption checks, stored signals, and an optional local semantic-difference proposal. |
 | Curate and export | Save ordered albums and export slices, accepted masks, transparent cutouts, and provenance manifests. |
 
-![Embedding map for dataset-level exploration](assets/embedding-map.png)
+![Embedding map for dataset-level exploration](assets/embedding-map.jpg)
 
 Model output is always presented as a proposal. A VLM result never becomes a
 caption or label automatically, and a detector or segmentation result is not
 stored until a reviewer accepts it.
 
-![Local vision inspection with a structured proposal](assets/vision-inspector.png)
+![Local vision inspection with a structured proposal](assets/vision-inspector.jpg)
 
-![Grounding DINO box refined into a reviewable SAM 2.1 mask](assets/segmentation.png)
+![Grounding DINO box refined into a reviewable SAM 2.1 mask](assets/segmentation.jpg)
 
-![Two-frame semantic comparison after source validation](assets/pair-comparison.png)
+![Two-frame semantic comparison after source validation](assets/pair-comparison.jpg)
 
 ## Optional local models
 
@@ -144,7 +144,7 @@ use the same service layer as the REST API, and any proposed write still
 requires explicit browser approval. The main CV workflows do not depend on
 the assistant.
 
-![Optional local LangGraph assistant](assets/assistant.png)
+![Optional local LangGraph assistant](assets/assistant.jpg)
 
 A strictly read-only local MCP surface is also exposed at `POST /mcp`.
 

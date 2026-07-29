@@ -11,14 +11,19 @@
    to scroll to, past a full-height canvas, is a separate page wearing a panel's
    clothes. The canvas gives back the height the grid needs, and keeps a floor
    so a short window still gets a usable projection. */
-.map-page .map-canvas { height: 52vh; min-height: 300px; }
+.map-page .map-canvas {
+  height: 52vh;
+  min-height: 300px;
+  /* Pointer gestures belong to the map; page scrolling resumes outside it. */
+  touch-action: none;
+}
 
 .map-workbench {
-  margin-top: 12px;
+  margin-top: 10px;
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px 14px 14px;
+  padding: 11px 12px 12px;
 }
 
 .mw-head {
@@ -51,12 +56,12 @@
 .mw-grid {
   list-style: none; margin: 10px 0 0; padding: 0;
   display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 6px; max-height: 26vh; overflow-y: auto;
+  gap: 5px; max-height: 26vh; overflow-y: auto;
 }
 .mw-card { position: relative; min-width: 0; }
 .mw-thumb {
   display: block; width: 100%; padding: 0; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-inset);
+  border-radius: 4px; overflow: hidden; background: var(--stage-bg);
   cursor: pointer; transition: border-color var(--t-quick) var(--ease),
                                box-shadow var(--t-quick) var(--ease);
 }
@@ -65,7 +70,7 @@
 /* The map side of the link is a ring on the canvas; this is the same mark on
    the grid side, so a reader can see both ends of it at once. */
 .mw-card.marked .mw-thumb {
-  border-color: var(--text); box-shadow: 0 0 0 2px var(--accent-soft);
+  border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft);
 }
 /* Dropped: still visible, because a set you cannot un-edit is a set you cannot
    trust. Faded and desaturated rather than removed. */
@@ -90,6 +95,11 @@
   .map-page .map-canvas { height: 44vh; }
   .mw-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
   .mw-tools { gap: 6px; }
+  .map-toolbar .map-mode-switch {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

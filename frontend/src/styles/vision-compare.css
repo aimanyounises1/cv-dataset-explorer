@@ -1,21 +1,21 @@
 .vision-compare {
   position: relative;
   overflow: hidden;
-  margin-top: 16px;
-  border-color: color-mix(in srgb, var(--ai) 24%, var(--border));
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--ai-soft) 38%, white), white 36%);
+  margin-top: 12px;
+  border-color: color-mix(in srgb, var(--ai) 30%, var(--border));
+  border-left: 3px solid var(--ai);
+  background: var(--bg-raised);
 }
 
 .vc-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 24px;
+  gap: 18px;
 }
 .vc-header h2 {
-  margin: 2px 0 5px;
-  font-size: 18px;
+  margin: 1px 0 4px;
+  font-size: 17px;
   letter-spacing: -0.02em;
 }
 .vc-header p {
@@ -48,7 +48,7 @@
 .vc-spine {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  margin: 20px 0 16px;
+  margin: 16px 0 13px;
   padding: 0;
   list-style: none;
 }
@@ -85,7 +85,7 @@
   gap: 1px;
   min-width: 0;
   padding-right: 7px;
-  background: color-mix(in srgb, white 90%, transparent);
+  background: var(--bg-raised);
 }
 .vc-spine strong {
   overflow: hidden;
@@ -139,11 +139,15 @@
 .vc-runbar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 .vc-runbar button.primary {
   min-width: 220px;
   background: var(--ai);
+}
+.vc-runbar button.primary:focus-visible,
+.vc-grounding button:focus-visible {
+  outline-color: var(--ai);
 }
 .vc-runbar > span {
   color: var(--text-faint);
@@ -218,10 +222,10 @@
 
 .vc-result {
   display: grid;
-  gap: 14px;
-  margin-top: 15px;
+  gap: 11px;
+  margin-top: 13px;
   border-top: 1px solid var(--border);
-  padding-top: 14px;
+  padding-top: 12px;
 }
 .vc-result-head {
   display: flex;
@@ -298,7 +302,7 @@
 .vc-grounding {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 .vc-only section,
 .vc-grounding > div,
@@ -306,7 +310,7 @@
 .vc-uncertainties {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 10px 11px;
+  padding: 9px 10px;
   background: var(--bg-raised);
 }
 .vision-compare h3 {

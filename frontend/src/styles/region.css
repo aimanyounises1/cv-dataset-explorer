@@ -1,8 +1,8 @@
 /* Promptable segmentation and rectangle-search fallback on the sample page. */
 .region-search {
-  margin-top: 18px;
+  margin-top: 14px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .rs-head,
@@ -60,7 +60,7 @@
 }
 
 .rs-detector {
-  padding: 9px 10px;
+  padding: 8px 9px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-raised);
@@ -91,15 +91,17 @@
   width: 100%;
   max-width: 100%;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-inset);
+  border: 1px solid var(--stage-border);
+  border-radius: var(--radius-sm);
+  background: var(--stage-bg);
+  box-shadow: inset 0 0 0 1px rgba(237, 243, 240, 0.025);
   touch-action: none;
   outline: none;
 }
 .rs-stage:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft);
+  border-color: var(--stage-human);
+  box-shadow: inset 0 0 0 1px rgba(237, 243, 240, 0.04),
+              0 0 0 2px color-mix(in srgb, var(--stage-human) 32%, transparent);
 }
 .rs-stage.tool-positive,
 .rs-stage.tool-negative,
@@ -116,8 +118,8 @@
   place-content: center;
   gap: 5px;
   padding: 24px;
-  background: var(--bg-inset);
-  color: var(--text-dim);
+  background: var(--stage-bg);
+  color: var(--stage-muted);
   font-size: 12px;
   text-align: center;
 }
@@ -158,8 +160,8 @@
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background: var(--accent);
-  opacity: 0.48;
+  background: var(--stage-human);
+  opacity: 0.38;
   mask-repeat: no-repeat;
   mask-position: center;
   mask-size: 100% 100%;
@@ -172,9 +174,9 @@
   position: absolute;
   z-index: 3;
   box-sizing: border-box;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--stage-human);
   border-radius: 3px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--stage-human) 12%, transparent);
   pointer-events: none;
 }
 .rs-point,
@@ -184,13 +186,13 @@
   width: 14px;
   height: 14px;
   box-sizing: border-box;
-  border: 2px solid var(--bg-raised);
+  border: 2px solid var(--stage-text);
   border-radius: 50%;
   transform: translate(-50%, -50%);
   pointer-events: none;
   box-shadow: var(--shadow-sm);
 }
-.rs-point.positive { background: var(--accent); }
+.rs-point.positive { background: var(--stage-human); }
 .rs-point.negative {
   background: var(--red);
 }
@@ -202,37 +204,37 @@
   right: 2px;
   top: 4px;
   height: 1.5px;
-  background: var(--bg-raised);
+  background: var(--stage-text);
 }
 .rs-key-cursor {
   width: 18px;
   height: 18px;
-  border-color: var(--text);
+  border-color: var(--stage-text);
   background: transparent;
-  box-shadow: 0 0 0 2px var(--bg-inset);
+  box-shadow: 0 0 0 2px var(--stage-bg);
 }
 .rs-key-cursor::before,
 .rs-key-cursor::after {
   content: "";
   position: absolute;
-  background: var(--text);
+  background: var(--stage-text);
 }
 .rs-key-cursor::before { left: 7px; top: -5px; width: 1px; height: 24px; }
 .rs-key-cursor::after { left: -5px; top: 7px; width: 24px; height: 1px; }
-.rs-key-cursor.anchored { border-color: var(--accent); }
+.rs-key-cursor.anchored { border-color: var(--stage-human); }
 
 .rs-box {
   position: absolute;
   z-index: 5;
   padding: 0;
-  border: 2px dashed var(--accent);
+  border: 2px dashed var(--stage-human);
   border-radius: 3px;
   background: transparent;
   cursor: pointer;
 }
 .rs-box:hover,
 .rs-box:focus-visible {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--stage-human) 14%, transparent);
 }
 .rs-box span {
   position: absolute;
@@ -254,10 +256,10 @@
   right: 10px;
   bottom: 10px;
   padding: 6px 9px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--stage-border);
   border-radius: var(--radius-sm);
-  background: var(--bg-raised);
-  color: var(--text);
+  background: var(--stage-raised);
+  color: var(--stage-text);
   box-shadow: var(--shadow-sm);
   font-size: 12px;
 }
@@ -279,14 +281,14 @@
 
 .rs-workbench,
 .rs-saved {
-  padding: 12px;
+  padding: 11px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg-raised);
 }
 .rs-workbench {
   display: grid;
-  gap: 11px;
+  gap: 9px;
 }
 .rs-fields {
   display: grid;
