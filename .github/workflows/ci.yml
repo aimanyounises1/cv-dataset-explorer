@@ -30,15 +30,15 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: backend/requirements*.txt
-      # Deliberately lightweight: the suite runs without torch, transformers,
-      # or datasets. A fake embedder stands in for SigLIP and the
-      # graceful-degradation paths are exercised instead. Agent contract tests
-      # import the optional LangChain/LangGraph layer, so CI installs its small
-      # dedicated manifest as well. This remains the set of packages the tests
-      # import, not what the app needs to serve a request --
-      # backend/requirements.txt remains the canonical runtime manifest.
-      # tqdm is here because app.analyze imports it at module scope.
-      - run: pip install fastapi httpx pydantic numpy pillow pytest ruff tqdm uvicorn -r requirements-agent.txt
+      # Test the application against its declared runtime, including the
+      # optional assistant contract. The suite stubs model inference and never
+      # downloads weights, but detector and segmenter contract tests import
+      # their real torch/transformers boundary.
+      # Install PyTorch's official CPU wheel first. The default Linux wheel
+      # would otherwise pull CUDA and Triton libraries that this runner cannot
+      # use; requirements.txt then sees the declared torch constraint satisfied.
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.2"
+      - run: pip install -r requirements.txt -r requirements-agent.txt ruff
       - run: ruff check app tests
       - run: pytest -q
 
