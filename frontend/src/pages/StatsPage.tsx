@@ -193,9 +193,12 @@ export default function StatsPage() {
             <section className="profile-view">
               <div className="section-title tight">Train/test leakage</div>
               <p className="meta-line tight">
-                A held-out image with a near-duplicate in training means reported
-                accuracy on it is partly memorisation. Move the threshold and look at
-                the pairs — “near-duplicate” is a cut on a cosine, not a fact.
+                A held-out image with a near-duplicate in training is a held-out
+                image the model has effectively already seen the subject of. Move
+                the threshold and look at the pairs — “near-duplicate” is a cut on
+                a cosine, not a fact, and on this corpus the pairs turn out to be
+                the same subject photographed again rather than the same
+                photograph.
               </p>
               <div className="panel"><LeakagePanel /></div>
 

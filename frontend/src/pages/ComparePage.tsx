@@ -715,8 +715,13 @@ function DiffPanel({ a, b, sim }: DiffPanelProps) {
  * pair list, same cosine: no second ranking implementation.
  *
  * The pairs are the highest-cosine cross-split ones because those are the pairs
- * with consequences — a held-out image that repeats a training image is the
- * case where a reported score is partly memorisation.
+ * with consequences — a held-out image whose subject already appears in
+ * training is a held-out image that is not fully held out.
+ *
+ * Judging them by eye is the point, and it is what settled what they are:
+ * measured perceptually (`/api/stats/leakage/pixel`) these are the same scene
+ * photographed again, not the same photograph, so this screen is where you
+ * decide whether that still disqualifies the pair from a benchmark.
  */
 function PairQueue() {
   const [pairs, setPairs] = useState<LeakagePair[] | null>(null);

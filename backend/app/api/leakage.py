@@ -6,6 +6,15 @@ of CIFAR-10 and 10% of CIFAR-100 test images have near-duplicates in train, and
 that removing them costs 9-14% relative accuracy — meaning a reported number was
 partly measuring memorisation (*"Do we train on test data?"*, J. Imaging 6(6):41).
 
+**What that citation does and does not license here.** In CIFAR the duplicated
+thing is the photograph, which is why the accuracy it buys is memorisation. A
+cosine cannot tell you the same is true of this corpus, because SigLIP is built
+to be invariant to exactly what separates two photographs of one scene. So the
+conclusion is not assumed: `/stats/leakage/pixel` hashes the flagged pairs
+perceptually and reports what they actually share. On Flickr8k the answer is a
+subject, not a frame — the contamination is real and worth excluding from a
+benchmark, but "memorisation" would be borrowed rather than measured.
+
 The tool already computed every embedding it needs. What it lacked was the split
 comparison: the existing duplicate view shows the strongest 200 pairs as
 thumbnails and never says which split either side came from, so the question
@@ -22,9 +31,12 @@ import sqlite3
 import threading
 from typing import Literal, Optional
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from .. import config
+from ..ml import phash
 from ..ml.index import get_index
 from ..schemas import (
     LeakageContamination,
@@ -228,3 +240,169 @@ def leakage_report(
             "dataset and are not independently verified, so this describes this "
             "copy. Every figure moves with the threshold: see the curve."),
     )
+
+
+# ---------------------------------------------------------------------------
+# Pixel-level check: are these the same photograph, or only the same scene?
+# ---------------------------------------------------------------------------
+
+# Models live here rather than in `schemas.py` because they describe one
+# endpoint's answer and nothing else reads them; `detect.py` sets the same
+# precedent. The rest of the leakage contract stays where it was.
+
+class PixelPair(BaseModel):
+    a_id: int
+    b_id: int
+    score: float
+    distance: int
+    duplicate_frame: bool
+    a_split: str
+    b_split: str
+    a_thumb: str
+    b_thumb: str
+
+
+class PixelReport(BaseModel):
+    threshold: float
+    pairs_measured: int
+    duplicate_frames: int
+    duplicate_frame_fraction: float
+    #: The cut, and what it was derived from — so the number is never a
+    #: bare threshold a reader has to take on trust.
+    duplicate_frame_max_distance: int
+    median_distance: float
+    #: Chance, measured on this corpus in the same request.
+    unrelated_median_distance: float
+    correlation_with_cosine: float
+    closest: list[PixelPair] = []
+    reading: str
+
+
+_phash_lock = threading.Lock()
+_phash_cache: dict[int, bytes] = {}
+
+
+def _hash_for(sample_id: int, filename: str) -> bytes:
+    with _phash_lock:
+        cached = _phash_cache.get(sample_id)
+    if cached is not None:
+        return cached
+    digest = phash.dhash(config.IMAGES_DIR / filename)
+    with _phash_lock:
+        _phash_cache[sample_id] = digest
+    return digest
+
+
+@router.get("/stats/leakage/pixel", response_model=PixelReport)
+def pixel_report(
+    threshold: float = Query(0.90, ge=FLOOR, le=1.0),
+    limit: int = Query(12, ge=0, le=60),
+    conn: sqlite3.Connection = Depends(get_conn),
+):
+    """Whether the cross-split near-duplicates are duplicated *photographs*.
+
+    The leakage report borrows its stakes from Barz & Denzler, whose CIFAR
+    finding is about the same photograph appearing in both splits — there,
+    reported accuracy is partly memorisation. That reading transfers to this
+    corpus only if these pairs are the same photograph too, and cosine cannot
+    say: SigLIP is trained to be invariant to exactly what separates two shots
+    of one scene.
+
+    So this measures it instead of assuming it, and reports the null in the
+    same breath: if the median distance between flagged pairs is the same as
+    the median between randomly chosen images, then whatever these pairs share
+    is not their pixels.
+
+    Costs one 0.8 ms hash per distinct image in a flagged pair, once per
+    process. It is a separate endpoint precisely because it reads image files
+    while `/stats/leakage` reads only vectors — that one stays fast.
+    """
+    index = get_index()
+    if index is None:
+        raise HTTPException(
+            503, "The pixel check needs the embedding index to know which pairs "
+                 "to look at — run `python -m app.ingest` first.")
+
+    rows = {r["id"]: r for r in conn.execute(
+        "SELECT id, split, filename FROM samples")}
+    cross = [(a, b, s) for a, b, s in _pairs(index)
+             if s > threshold and a in rows and b in rows
+             and rows[a]["split"] != rows[b]["split"]]
+
+    measured: list[tuple[int, int, float, int]] = []
+    digests: list[bytes] = []
+    seen: set[int] = set()
+    for a, b, score in cross:
+        try:
+            ha, hb = (_hash_for(i, rows[i]["filename"]) for i in (a, b))
+        except OSError:
+            # An unreadable file is one pair we cannot speak for, not a failed
+            # request — the count of what WAS measured is reported either way.
+            continue
+        measured.append((a, b, score, phash.hamming(ha, hb)))
+        for i, h in ((a, ha), (b, hb)):
+            if i not in seen:
+                seen.add(i)
+                digests.append(h)
+
+    if not measured:
+        return PixelReport(
+            threshold=threshold, pairs_measured=0, duplicate_frames=0,
+            duplicate_frame_fraction=0.0,
+            duplicate_frame_max_distance=phash.DUPLICATE_FRAME_MAX,
+            median_distance=0.0, unrelated_median_distance=0.0,
+            correlation_with_cosine=0.0, closest=[],
+            reading=("No cross-split pair sits above this threshold, so there is "
+                     "nothing to check. Lower the threshold to widen the net."))
+
+    distances = np.array([d for *_, d in measured], dtype=float)
+    scores = np.array([s for _, _, s, _ in measured], dtype=float)
+    same = int((distances <= phash.DUPLICATE_FRAME_MAX).sum())
+    null = phash.null_distance(digests)
+    # A constant column has no correlation to report; numpy would warn and
+    # return nan. Saying 0.0 there is not a fudge: nothing varies, so nothing
+    # co-varies.
+    corr = (float(np.corrcoef(scores, distances)[0, 1])
+            if distances.std() > 0 and scores.std() > 0 else 0.0)
+
+    measured.sort(key=lambda m: m[3])
+    closest = [
+        PixelPair(
+            a_id=a, b_id=b, score=round(s, 4), distance=d,
+            duplicate_frame=d <= phash.DUPLICATE_FRAME_MAX,
+            a_split=rows[a]["split"], b_split=rows[b]["split"],
+            a_thumb=thumb_url(rows[a]["filename"]),
+            b_thumb=thumb_url(rows[b]["filename"]))
+        for a, b, s, d in measured[:limit]
+    ]
+
+    median = float(np.median(distances))
+    if same == 0:
+        reading = (
+            f"None of the {len(measured)} cross-split pairs above {threshold:g} "
+            f"is a duplicate frame. Their median distance is {median:.0f} of "
+            f"{phash.HASH_BITS} bits, against {null:.0f} for randomly paired "
+            f"images from this corpus — so at the pixel level these are no more "
+            f"alike than any two images here. They share a subject, not a frame: "
+            f"accuracy on them measures generalisation across near-identical "
+            f"scenes, not memorisation of an image already seen.")
+    else:
+        subject = ("1 of {} cross-split pairs above {:g} is a duplicate frame"
+                   if same == 1 else
+                   "{2} of {0} cross-split pairs above {1:g} are duplicate frames")
+        reading = (
+            subject.format(len(measured), threshold, same)
+            + f" — within {phash.DUPLICATE_FRAME_MAX} of {phash.HASH_BITS} bits, "
+            f"meaning one shot rescaled, re-saved, or a burst neighbour. The full "
+            f"set has a median distance of {median:.0f} against {null:.0f} for "
+            f"randomly paired images here, so the rest share a subject rather "
+            f"than a frame. Open the closest pairs before reading either number "
+            f"as memorisation.")
+
+    return PixelReport(
+        threshold=threshold, pairs_measured=len(measured), duplicate_frames=same,
+        duplicate_frame_fraction=round(same / len(measured), 4),
+        duplicate_frame_max_distance=phash.DUPLICATE_FRAME_MAX,
+        median_distance=median, unrelated_median_distance=null,
+        correlation_with_cosine=round(corr, 3), closest=closest,
+        reading=reading)
