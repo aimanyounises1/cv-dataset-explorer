@@ -3,7 +3,6 @@ import { AXES, Axis, SampleCard } from "../api/types";
 import { heatBand } from "../lib/viz";
 import AxisSparkline from "./AxisSparkline";
 import { AXIS_META } from "./AxisFilters";
-import Highlight from "./Highlight";
 
 /** Short labels, so an axis name fits under a thumbnail without wrapping. */
 const AXIS_ABBR: Record<string, string> = {
@@ -260,11 +259,6 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
               </span>
             )}
           </div>
-        </div>
-      </div>
-      <div className="card-body">
-        <div className="card-caption" title={caption}>
-          <Highlight text={caption} terms={sample.matched_terms} />
         </div>
       </div>
     </Link>

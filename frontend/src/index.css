@@ -1325,12 +1325,12 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-sm);
   padding: 1px 5px; backdrop-filter: blur(4px); transition: color var(--t-quick), border-color var(--t-quick);
 }
-.card-body { padding: 8px 9px 7px; }
-.card-caption {
-  font-size: 11.5px; color: var(--text-dim); line-height: 1.4;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  min-height: 33px;
-}
+/* The tile prints no caption.
+   Every image here has FIVE, so the one shown was a sample of the least
+   informative field on the card — and it cost 48px of every tile, which is two
+   thirds of the grid's density: 16 frames on screen at 1440x900 where a triage
+   surface should show 48. The caption survives where it can be read against the
+   picture: the img alt, the hover strip, and the sample page. */
 
 /* The evidence line inside the hover strip: why this frame is here, always in
    the same order — the score with its basis first, then the split, then the
