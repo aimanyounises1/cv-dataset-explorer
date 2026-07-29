@@ -33,17 +33,57 @@ from .api import (
     stats,
     tags,
     views,
+    vision,
 )
 from .api import eval as eval_api
 from .api import map as map_api
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+_TRANSFORMERS_REQUEST_EXPORTS = (
+    "AutoModel",
+    "AutoProcessor",
+    "GroundingDinoForObjectDetection",
+    "Sam2Model",
+    "Sam2Processor",
+)
+
+
+def _resolve_transformers_request_exports() -> None:
+    """Resolve Transformers' lazy classes before requests can race over them.
+
+    FastAPI runs synchronous routes in worker threads. On a cold process,
+    simultaneous retrieval and model-status requests otherwise ask
+    Transformers' lazy top-level module for different classes concurrently.
+    This prepares class objects only; model weights remain lazy, local, and
+    capability-specific. A light installation without Transformers still
+    starts and follows the existing graceful-degradation paths.
+    """
+    try:
+        import transformers
+    except ImportError:
+        return
+
+    for name in _TRANSFORMERS_REQUEST_EXPORTS:
+        try:
+            getattr(transformers, name)
+        except Exception as exc:
+            # Optional capabilities report the same dependency failure when
+            # called. Startup remains available for browse/keyword workflows,
+            # but the exact import failure is no longer silently discarded.
+            logger.warning(
+                "Transformers export %s was unavailable during startup: %s",
+                name,
+                exc,
+            )
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     with db.get_db() as conn:
         db.init_db(conn)
+    _resolve_transformers_request_exports()
     yield
 
 
@@ -85,6 +125,7 @@ for router in (samples.router, search.router, stats.router, map_api.router,
                tags.router, qa.router, qa_run.router, attributes.router,
                describe.router, detect.router, leakage.router,
                segment.router,
+               vision.router,
                eval_api.router, admin.router, chat.router,
                views.router, albums.router, activity.router,
                annotations.router):

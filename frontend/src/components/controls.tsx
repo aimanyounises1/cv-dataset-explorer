@@ -1,4 +1,5 @@
-import { Fragment, KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import { Fragment, KeyboardEvent, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 /**
  * The rail's own control vocabulary: segmented pills, a listbox, a dual-range.
@@ -27,7 +28,11 @@ export interface PickOption {
  * them costs nothing and saves a click. Roving tabindex, arrows to move. */
 export function Segmented({ value, options, onChange, label }: {
   value: string;
-  options: { value: string; label: string }[];
+  /** `figure` is an optional second line — how many rows this option selects.
+   * A second LINE rather than a suffix because four segments share a 219px
+   * column, and `.segmented-opt` ellipsises: "train 6,000" would render as
+   * "train 6…" and a truncated count is worse than none. */
+  options: { value: string; label: string; figure?: string }[];
   onChange: (v: string) => void;
   label: string;
 }) {
@@ -55,7 +60,8 @@ export function Segmented({ value, options, onChange, label }: {
             if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
           }}
         >
-          {o.label}
+          <span className="segmented-label">{o.label}</span>
+          {o.figure && <span className="segmented-figure">{o.figure}</span>}
         </button>
       ))}
     </div>
@@ -65,7 +71,7 @@ export function Segmented({ value, options, onChange, label }: {
 /** Select-only combobox (APG pattern): focus stays on the trigger, arrows move
  * an active row, Enter picks, Escape closes. The popup positions inside the
  * rail column, so it scrolls with the panel it belongs to. */
-export function Listbox({ trigger, options, onPick, label, selected }: {
+export function Listbox({ trigger, options, onPick, label, selected, inline }: {
   /** Text on the closed control — the current value, or what picking adds. */
   trigger: string;
   options: PickOption[];
@@ -73,11 +79,51 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
   label: string;
   /** Marked aria-selected; "" is a real value (the "All …" row). */
   selected?: string;
+  /** Size to the widest option instead of filling the column.
+   *
+   * The rail stacks its controls in a fixed-width column, so the default is to
+   * fill it. A toolbar is a row, and there the same default made the trigger
+   * take every pixel its flex line had: measured at 319px to carry the word
+   * "Difficulty", which pushed the legend beside it onto three lines. */
+  inline?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const id = useId();
+
+  /* Where the popup sits, in viewport coordinates.
+   *
+   * The list used to be an absolutely positioned child of the trigger, which
+   * put it inside `.rail-scroll`'s `overflow-y: auto`. z-index cannot escape a
+   * clipping ancestor, so the attribute picker rendered 18 options and showed
+   * ONE: the popup ran to y=921 against a clip edge at y=723. It is now
+   * portalled to <body> and positioned from the trigger's rect, which is also
+   * why `active`'s scrollIntoView no longer scrolls the rail out from under
+   * the reader. */
+  const [rect, setRect] = useState<
+    { top: number; left: number; width: number; maxH: number } | null>(null);
+
+  /* Below the trigger when there is room, above it when there is not.
+   *
+   * The rail's filter controls sit near the bottom of a 100vh column, so
+   * "always downward" put the list off the bottom of the window — trading a
+   * clipped popup for one that runs past y=1000. Whichever side is chosen, the
+   * popup is capped to the space actually available on it. */
+  const place = useCallback(() => {
+    const r = rootRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const GAP = 4;
+    const below = window.innerHeight - r.bottom - GAP;
+    const above = r.top - GAP;
+    const useAbove = below < Math.min(220, above);
+    const maxH = Math.max(120, Math.min(360, useAbove ? above : below));
+    setRect({
+      top: useAbove ? r.top - GAP - maxH : r.bottom + GAP,
+      left: r.left, width: r.width, maxH,
+    });
+  }, []);
 
   const enabled = (i: number) => !options[i]?.disabled;
   const firstEnabled = options.findIndex((_, i) => enabled(i));
@@ -85,18 +131,36 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
   const openAt = () => {
     const sel = options.findIndex((o) => o.value === selected);
     setActive(sel >= 0 && enabled(sel) ? sel : Math.max(0, firstEnabled));
+    place();
     setOpen(true);
   };
 
   // Outside pointerdown closes; blur alone misses clicks on non-focusable text.
+  // The popup is portalled, so it is NOT inside rootRef any more and has to be
+  // asked separately — without this, picking an option counts as an outside
+  // click and closes the list before the pick lands.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (!rootRef.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false);
     };
     document.addEventListener("pointerdown", onDown);
     return () => document.removeEventListener("pointerdown", onDown);
   }, [open]);
+
+  // A fixed popup does not travel with its trigger, so it is re-placed while
+  // open. Capture phase: the rail is the scroller, not the window.
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const onMove = () => place();
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [open, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -145,7 +209,7 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
   };
 
   return (
-    <div className="listbox" ref={rootRef}
+    <div className={inline ? "listbox listbox-inline" : "listbox"} ref={rootRef}
          onBlur={(e) => {
            if (!rootRef.current?.contains(e.relatedTarget as Node)) setOpen(false);
          }}>
@@ -171,8 +235,12 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
         <span className="listbox-value">{trigger}</span>
         <span className="listbox-caret" aria-hidden="true">▾</span>
       </button>
-      {open && (
-        <div className="listbox-pop" role="listbox" id={`${id}-list`} aria-label={label}
+      {open && rect && createPortal(
+        <div ref={popRef}
+             className="listbox-pop portal" role="listbox" id={`${id}-list`}
+             aria-label={label}
+             style={{ top: rect.top, left: rect.left, minWidth: rect.width,
+                      maxHeight: rect.maxH }}
              // Focus stays on the trigger (select-only combobox pattern). Without
              // this, mousedown on an option blurs the button, the blur handler
              // unmounts the popup, and the click lands on a detached node —
@@ -217,7 +285,8 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
               </div>
             ) : <Fragment key={`g${run.from}`}>{opts}</Fragment>;
           })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

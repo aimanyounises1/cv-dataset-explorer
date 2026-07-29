@@ -39,6 +39,7 @@ from ..ml.providers import (
 )
 from ..schemas import (
     AnnotationSearchRequest,
+    AxisRange,
     ComposedSearchRequest,
     MatchPath,
     RegionSearchRequest,
@@ -47,6 +48,7 @@ from ..schemas import (
     ScenarioResponse,
     SearchRequest,
     SearchResponse,
+    SearchSort,
     TermStat,
 )
 from .deps import (
@@ -68,6 +70,16 @@ from .deps import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _axis_ranges(
+    axes: dict[str, AxisRange],
+) -> dict[str, tuple[Optional[int], Optional[int]]]:
+    """Convert validated request models to the shared SQL-filter contract."""
+    return {
+        axis: (bounds.min, bounds.max)
+        for axis, bounds in axes.items()
+    }
 
 
 def get_retrieval_index_bundle():
@@ -436,7 +448,10 @@ def search(
     mode: str = Query("hybrid", pattern="^(semantic|keyword|hybrid)$"),
     top_k: int = Query(60, ge=1, le=200),
     offset: int = Query(0, ge=0, le=5000),
-    sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
+    sort: Optional[SearchSort] = Query(
+        None,
+        description="<axis>_asc | <axis>_desc",
+    ),
     max_agreement: Optional[float] = Query(
         None, ge=0.0, le=1.0, allow_inf_nan=False,
         description="Samples with any caption at or below this agreement"),
@@ -475,7 +490,7 @@ def search_post(body: SearchRequest, conn: sqlite3.Connection = Depends(get_conn
     if len(entries) > MAX_ID_LIST:
         raise HTTPException(
             400, f"Too many entries: {len(entries)}. The limit is {MAX_ID_LIST}.")
-    axes = {a: (b.get("min"), b.get("max")) for a, b in (body.axes or {}).items()}
+    axes = _axis_ranges(body.axes)
     return run_search(conn, body.q, mode=body.mode, top_k=body.top_k,
                       split=body.split, tag=body.tag, vlm_tag=body.vlm_tag,
                       attr=body.attr, offset=body.offset, axes=axes,
@@ -587,7 +602,7 @@ def _composed_ranking(conn, body: ComposedSearchRequest):
     if pos:
         parts.append(_unit(np.mean(np.stack(pos), axis=0)))
 
-    axes = {a: (b.get("min"), b.get("max")) for a, b in (body.axes or {}).items()}
+    axes = _axis_ranges(body.axes)
     allowed = filtered_id_set(conn, body.split, body.tag, body.vlm_tag, body.attr,
                               axes, None, False, body.max_agreement, None,
                               body.album)
@@ -625,8 +640,7 @@ def run_composed(conn: sqlite3.Connection, body: ComposedSearchRequest) -> Searc
         if body.text and body.text.strip():
             # The honest fallback run_search's own degradation uses: rank what
             # can still be ranked and say exactly what was lost.
-            axes = {a: (b.get("min"), b.get("max"))
-                    for a, b in (body.axes or {}).items()}
+            axes = _axis_ranges(body.axes)
             out = run_search(conn, body.text, mode="keyword", top_k=body.top_k,
                              split=body.split, tag=body.tag, vlm_tag=body.vlm_tag,
                              attr=body.attr, offset=body.offset, axes=axes,

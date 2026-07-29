@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { AlbumAnalysis, AlbumDetail } from "../api/types";
-import { api } from "../api/client";
+import { ApiError, api } from "../api/client";
+import AlbumVisionInspection from "./AlbumVisionInspection";
 import { ALBUMS_CHANGED, albumsChanged, DRAG_IDS } from "./AlbumShelf";
 import ShareMenu from "./ShareMenu";
 
@@ -87,7 +88,7 @@ export default function AlbumHeader({ albumId, onGone }:
       body: JSON.stringify({ sample_ids: orderedIds }),
     })
       .then(async (res) => {
-        if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+        if (!res.ok) throw new ApiError(res.status, await res.text());
         albumsChanged();
       })
       .catch((e) => {
@@ -301,9 +302,11 @@ export default function AlbumHeader({ albumId, onGone }:
               notes: draft.notes || null,
             }, "Saved.")}>Save details</button>
             <button className="ghost" onClick={runAnalysis} disabled={analysisBusy}>
-              {analysisBusy ? "Analyzing…" : "Analyze"}
+              {analysisBusy ? "Analyzing stored signals…" : "Analyze stored signals"}
             </button>
           </div>
+
+          <AlbumVisionInspection albumId={album.id} />
 
           {analysis && (
             <div className="ah-analysis">

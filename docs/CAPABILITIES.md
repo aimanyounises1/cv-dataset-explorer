@@ -9,20 +9,20 @@ the QA flow registry and the router in `App.tsx`, so it cannot describe a
 capability the code does not have.
 
 - 8,000 images loaded · semantic search **on**
-- 64 HTTP endpoints · 4 agent specialists · 22 agent tools · 17 tested workflows
+- 70 HTTP endpoints · 4 agent specialists · 22 agent tools · 17 tested workflows
 
 ## Views
 
 | Job | Route | View | What it is for |
 | --- | --- | --- | --- |
 | Find | `/` | Browse | Browse and search; every filter and the paging depth live in the URL. |
-| — | `/samples/:id` | Sample | One image: captions, attributes, exact neighbours, and a promptable object-mask editor with annotation search. |
+| — | `/samples/:id` | Sample | One image: captions, attributes, exact neighbours, and a promptable object-mask editor, masked-object search, and typed local VLM proposals. |
 | Find | `/map` | Embedding map | UMAP projection of all embeddings. Lasso a region to hand that exact set to the gallery. |
 | Trust | `/stats` | Overview | Splits, caption lengths, vocabulary, image sizes, and abstaining prompt-slice review hypotheses. Bars open their slice. |
 | Audit | `/quality` | Caption quality | Caption agreement distribution with a review threshold; the selection can leave as a gallery filter or an export. |
 | Trust | `/eval` | Retrieval benchmark | The tool measuring its own retrieval accuracy — R@1/5/10 for all three search modes. |
-| Ask | `/chat` | Assistant | Multi-agent assistant. Answers render as interactive charts, tables and reports, not prose about data. |
-| Find | `/compare` | Compare two | Two images under one synchronized zoom; deterministic shared/different panel; draw a region to search or save it. |
+| Ask | `/chat` | Assistant | Experimental local assistant. Its end-to-end claim-verification probe must pass before this route is considered release-qualified. |
+| Find | `/compare` | Compare two | Two images under one synchronized zoom; typed local semantic difference proposals remain separate from stored metadata, duplicate triage and manual region search. |
 
 Navigation is grouped by job in a persistent left rail; the current selection has a permanent home in a right rail that appears whenever something is selected. Plus **⌘K** anywhere: a command palette over routes, samples, tags, attribute slices, saved views and search.
 
@@ -62,6 +62,14 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `DELETE /api/segment-annotations/{annotation_id}` | Delete Segment Annotation |
 | `GET /api/segment/status` | Segment Status |
 
+### Local vision inspection
+
+| Endpoint | |
+| --- | --- |
+| `POST /api/vision/compare` | Compare Images |
+| `POST /api/vision/inspect` | Inspect Image |
+| `GET /api/vision/models` | List Vision Models |
+
 ### Statistics and map
 
 | Endpoint | |
@@ -73,6 +81,7 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `GET /api/stats/duplicates` | Duplicates |
 | `GET /api/stats/leakage` | Leakage Report |
 | `GET /api/stats/leakage/contaminated` | Contaminated Ids |
+| `GET /api/stats/leakage/pixel` | Pixel Report |
 | `GET /api/stats/overview` | Overview |
 
 ### Annotation QA
@@ -111,6 +120,8 @@ Interactive schema at [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs)
 | `PUT /api/albums/{album_id}/items/order` | Reorder Items |
 | `DELETE /api/albums/{album_id}/items/{sample_id}` | Remove Item |
 | `DELETE /api/annotations/{annotation_id}` | Delete Annotation |
+| `GET /api/annotations/{annotation_id}/cutout` | Get Annotation Cutout |
+| `GET /api/annotations/{annotation_id}/export` | Export Annotation Package |
 | `GET /api/annotations/{annotation_id}/mask` | Get Annotation Mask |
 | `GET /api/object-labels` | List Object Labels |
 | `GET /api/tags` | List Tags |
@@ -240,6 +251,8 @@ and by the assistant on request — one registry, three consumers.
 | Caption QA, attributes, difficulty axes | `app.analyze` | Those views explain the command to run. |
 | Region suggestions | cached Grounding DINO tiny weights | Manual point/box prompting remains available; the UI names the fetch command. |
 | Promptable masks | cached SAM 2.1 tiny weights | Rectangle search remains available; the UI names the fetch command and never downloads on request. |
+| Local vision inspector | Ollama + an explicitly configured, installed vision model | The sample inspector remains fully usable; no model is pulled or substituted by a request. |
+| Semantic pair inspector | An explicitly configured Ollama artifact whose exact digest passed the ordered-frame contract | The loupe, stored-signal comparison and manual region tools remain usable. |
 | Assistant | `requirements-agent.txt` + Ollama | The tab shows exact setup instructions; nothing else is affected. |
 | Application self-QA | `requirements-qa.txt` (Playwright) | `POST /api/qa/run` returns 503 with setup instructions. |
 | PowerPoint deck | `python-pptx` | The Markdown report is still produced and says the deck was skipped. |

@@ -67,6 +67,20 @@ _FULL_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _RETRY_AFTER_S = 120.0
 
 
+def require_full_commit_revision(revision: str, setting: str) -> str:
+    """Require an immutable 40-character Hugging Face commit selector.
+
+    ``snapshot_download`` accepts branches and tags, but a moving selector does
+    not bind a future process restart to the bytes reviewed today. Optional
+    model wrappers call this before resolving their local snapshot so an
+    invalid selector degrades that capability instead of silently moving it.
+    """
+    if not _FULL_COMMIT_RE.fullmatch(revision):
+        raise ValueError(
+            f"{setting} must be a full 40-character Hugging Face commit")
+    return revision
+
+
 @dataclass(frozen=True)
 class ModelSnapshot:
     """An immutable, locally cached Hugging Face model snapshot."""

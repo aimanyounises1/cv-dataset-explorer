@@ -60,7 +60,10 @@ ENCODE_BATCH = 128
 #      protocol's results.
 #   9: image index, caption index, query encoder and hubness penalty are acquired
 #      from one validated provider generation.
-PROTOCOL_VERSION = 9
+#  10: hybrid mean_candidates counts unique corpus images. The semantic stage
+#      already evaluates every image, so adding the lexical pool double-counted
+#      overlapping images and could report more candidates than the corpus.
+PROTOCOL_VERSION = 10
 
 
 def _cache_path(
@@ -342,8 +345,10 @@ def retrieval_benchmark(
         # any depth; the other two are only computed TOP deep.
         result("semantic", sem_ranks, True, full_pool, 0.0),
         result("keyword", kw_ranks, False, lexical_mean, lexical_empty),
-        # Fusion sees the semantic list plus whatever lexical contributed.
-        result("hybrid", hy_ranks, False, full_pool + lexical_mean, 0.0),
+        # Hybrid combines ranking evidence for the same corpus images. Because
+        # its semantic stage already evaluates the full corpus, lexical matches
+        # can change fused ranks but cannot add a second copy of an image.
+        result("hybrid", hy_ranks, False, full_pool, 0.0),
     ]
 
     resp = EvalResponse(

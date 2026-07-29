@@ -7,7 +7,7 @@
    on the layer with origin 0 0, which is what makes the anchor-point algebra
    in ComparePage.tsx two lines instead of a matrix. */
 
-.compare-page { max-width: 1280px; }
+.compare-page { max-width: var(--pane-max); }
 .compare-title { margin-top: 2px; }
 
 .compare-panes {
@@ -30,6 +30,36 @@
   color: var(--text-faint); font-size: 13.5px; line-height: 1.6;
   max-width: 32ch; text-align: center; padding: 20px;
 }
+.compare-pane-error,
+.compare-image-error {
+  display: grid;
+  gap: 7px;
+  max-width: 36ch;
+  padding: 22px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: center;
+}
+.compare-pane-error strong,
+.compare-image-error strong { color: var(--red); }
+.compare-pane-error a,
+.compare-image-error a { color: var(--accent); }
+.compare-image-error {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  place-content: center;
+  max-width: none;
+  background: var(--bg-inset);
+}
+.compare-annotation-error {
+  border-top: 1px solid color-mix(in srgb, var(--red) 30%, var(--border));
+  padding: 8px 12px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 11.5px;
+}
 
 .pane-head {
   display: flex; align-items: center; gap: 9px;
@@ -49,7 +79,11 @@
 .draw-toggle { padding: 5px 11px; font-size: 12.5px; flex-shrink: 0; }
 
 .pane-stage {
-  position: relative; height: 46vh; min-height: 320px;
+  /* Stated once, because the layer inside has to multiply by this exact height
+     to size itself and a second copy would drift. `max()` carries what the
+     height/min-height pair used to say. */
+  --stage-h: max(46vh, 320px);
+  position: relative; height: var(--stage-h);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; background: var(--bg-inset);
   cursor: grab; touch-action: none;
@@ -58,12 +92,24 @@
 .pane-stage.drawing { cursor: crosshair; }
 
 .compare-img-layer {
-  position: relative; width: 100%; max-height: 100%;
-  /* aspect-ratio arrives inline per sample; max-height transfers through it,
-     so the layer is the largest same-shape box that fits the stage. */
+  position: relative;
+  /* aspect-ratio arrives inline per sample. Sizing is driven from ONE axis and
+     capped on the other, because `width: 100%` + `max-height: 100%` does not
+     "transfer through" the ratio the way this rule used to claim: max-height
+     clamps the height and leaves the width at 100%, so the box stops being the
+     image's shape. Measured on /compare?a=1&b=2 at a 1600px viewport, a 300x500
+     portrait rendered 631x460 — landscape, 128.6% off its true aspect. That is
+     not cosmetic here: region rectangles and the 1:1 view are computed in this
+     layer's coordinates, so a mis-shaped layer misplaces every saved box. */
+  width: min(100%, calc(var(--stage-h) * var(--ar)));
+  height: auto;
   transform-origin: 0 0;
   flex-shrink: 0;
 }
+/* The pixels must not be resampled to a shape they are not. The layer above is
+   the correct shape, so `contain` changes nothing while it holds — it is the
+   guard that keeps a future sizing change from silently stretching evidence. */
+.compare-img-layer img { object-fit: contain; }
 .compare-img-layer img {
   position: absolute; inset: 0; width: 100%; height: 100%;
   display: block; user-select: none; -webkit-user-drag: none;
@@ -189,7 +235,10 @@
 /* The pair queue: what to compare when you arrived with nothing.
    Rows, not a grid — this is a list you work down, and two thumbnails side by
    side already read as "a pair" without a card around them. */
-.pair-queue { margin-top: 18px; max-width: 720px; }
+/* A queue of pairs is a table, not prose: it takes the data rung, which is
+   what stops each row from being two thumbnails on the left and a cosine
+   stranded 400px away on the right. */
+.pair-queue { margin-top: 18px; max-width: var(--w-data); }
 .pair-queue h3 { margin-top: 0; }
 .pair-queue-list { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .pair-queue-row {

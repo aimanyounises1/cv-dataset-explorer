@@ -160,7 +160,9 @@ CREATE TABLE IF NOT EXISTS annotation_masks (
     width INTEGER NOT NULL,
     height INTEGER NOT NULL,
     model_id TEXT NOT NULL,
+    model_revision TEXT,
     prompt_json TEXT NOT NULL,
+    proposal_json TEXT,
     predicted_iou REAL NOT NULL
 );
 
@@ -234,6 +236,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE captions ADD COLUMN agreement REAL")
     if "caption_consistency" not in columns("samples"):
         conn.execute("ALTER TABLE samples ADD COLUMN caption_consistency REAL")
+    if "model_revision" not in columns("annotation_masks"):
+        conn.execute(
+            "ALTER TABLE annotation_masks ADD COLUMN model_revision TEXT")
+    if "proposal_json" not in columns("annotation_masks"):
+        conn.execute(
+            "ALTER TABLE annotation_masks ADD COLUMN proposal_json TEXT")
 
     # Difficulty axes: integer 0-10 percentile buckets, plus the raw component
     # values behind each so the UI can explain a score without a second query.

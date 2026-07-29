@@ -557,10 +557,12 @@ export default function ChatPage() {
               <div className="section-title" style={{ marginTop: 0 }}>Dataset assistant</div>
               <p className="meta-line" style={{ maxWidth: 660 }}>
                 An orchestrator routes your request to specialist agents — up to two
-                at once, in parallel — then a quality gate verifies the answer.
-                Charts and reports come back as live components you can hover, sort
-                and click through to the matching images, not as pictures. Runs
-                fully locally{status ? ` on ${status.model}` : ""}.
+                at once, in parallel — then a typed review step checks the response
+                contract. This assistant is experimental: verify quantitative
+                conclusions against its cited tool results and live charts. Charts
+                and reports come back as components you can hover, sort and click
+                through to the matching images, not as pictures. Runs fully locally
+                {status ? ` on ${status.model}` : ""}.
               </p>
               {status?.specialists && status.specialists.length > 0 && (
                 <p className="meta-line" style={{ maxWidth: 660 }}>

@@ -27,13 +27,16 @@ pytest.importorskip("langgraph")
 pytest.importorskip("langchain_core")
 
 from langchain_core.language_models import BaseChatModel  # noqa: E402
-from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage  # noqa: E402
 from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
 from pydantic import Field, ValidationError  # noqa: E402
 
 from app.agent import blocks, registry  # noqa: E402
 from app.agent.graph import (  # noqa: E402
+    AnswerDecision,
     ClaimAssessment,
+    RetryDecision,
+    SynthesisDecision,
     _unverified_claims,
     build_graph,
     normalise_routes,
@@ -57,6 +60,7 @@ class StubModel(BaseChatModel):
     """
     routes: list[str] = Field(default_factory=list)
     claims: list[str] = Field(default_factory=list)
+    discoveries: list[str] = Field(default_factory=list)
     assessments: list[dict] = Field(default_factory=list)
     synth: str = "Final answer."
     retry_feedback: str = ""
@@ -69,6 +73,7 @@ class StubModel(BaseChatModel):
         routes=None,
         *,
         claims=None,
+        discoveries=None,
         assessments=None,
         synth="Final answer.",
         retry_feedback="",
@@ -79,6 +84,7 @@ class StubModel(BaseChatModel):
         super().__init__(
             routes=list(routes or []),
             claims=list(claims or []),
+            discoveries=list(discoveries or []),
             assessments=list(assessments or []),
             synth=synth,
             retry_feedback=retry_feedback,
@@ -114,11 +120,19 @@ class StubModel(BaseChatModel):
                     if stub.synth_delay:
                         await asyncio.sleep(stub.synth_delay)
                     reply = stub.invoke(messages, config=config, **kw)
-                    return schema(
-                        answer=reply.content,
-                        retry_feedback=stub.retry_feedback,
-                        claim_assessments=stub.assessments,
-                    )
+                    if (
+                        stub.retry_feedback
+                        and stub.calls.count("synthesize") == 1
+                    ):
+                        return schema(decision={
+                            "outcome": "retry",
+                            "retry_feedback": stub.retry_feedback,
+                        })
+                    return schema(decision={
+                        "outcome": "answer",
+                        "answer": reply.content,
+                        "claim_assessments": stub.assessments,
+                    })
 
             return _Synthesizer()
 
@@ -128,10 +142,17 @@ class StubModel(BaseChatModel):
                 if "orchestrate" in stub.fail_on:
                     raise RuntimeError("stub model refused to orchestrate")
                 r = list(stub.routes) or ["retrieval"]
+                propositions = [
+                    {"quote": quote, "kind": "asserted_premise"}
+                    for quote in stub.claims
+                ] + [
+                    {"quote": quote, "kind": "discovery_request"}
+                    for quote in stub.discoveries
+                ]
                 return schema(route=r[0],
                               also=r[1] if len(r) > 1 else None,
                               brief="go",
-                              claims_to_verify=stub.claims)
+                              propositions=propositions)
 
             async def ainvoke(self, messages, config=None, **kw):
                 return self.invoke(messages, config=config, **kw)
@@ -232,20 +253,61 @@ def test_the_router_schema_only_admits_lanes_that_exist():
     ).also == "visualization"
     # One lane is the default shape: a second is opt-in, not a list to fill.
     assert Route(route="insights").also is None
-    # Claims are semantic model output, not a hand-maintained verb/number regex.
-    assert Route(route="insights").claims_to_verify == []
+    # Propositions are typed semantic model output, not a verb/number regex.
+    assert Route(route="insights").propositions == []
+    discovery = "How many images are in the dataset?"
     claim = "The system previously removed a duplicate cluster."
-    assert Route(
-        route="insights", claims_to_verify=[claim]
-    ).claims_to_verify == [claim]
+    routed = Route(
+        route="insights",
+        propositions=[
+            {"quote": discovery, "kind": "discovery_request"},
+            {"quote": claim, "kind": "asserted_premise"},
+        ],
+    )
+    assert [item.kind for item in routed.propositions] == [
+        "discovery_request",
+        "asserted_premise",
+    ]
     with pytest.raises(ValidationError):
-        Route(route="insights", claims_to_verify=[claim] * 4)
+        Route(
+            route="insights",
+            propositions=[
+                {"quote": claim, "kind": "asserted_premise"}
+            ] * 4,
+        )
+    with pytest.raises(ValidationError):
+        Route(
+            route="insights",
+            propositions=[{"quote": claim, "kind": "unknown"}],
+        )
     with pytest.raises(ValidationError):
         Route(route="nonsense", brief="x")
     with pytest.raises(ValidationError):
         Route(route="insights", also="nonsense")
     with pytest.raises(ValidationError):       # a lane must be named
         Route(brief="x")
+
+
+def test_synthesis_schema_requires_exactly_one_nonempty_outcome():
+    answer = SynthesisDecision(
+        decision={"outcome": "answer", "answer": "Measured result."}
+    )
+    assert isinstance(answer.decision, AnswerDecision)
+    retry = SynthesisDecision(
+        decision={"outcome": "retry", "retry_feedback": "Use the count tool."}
+    )
+    assert isinstance(retry.decision, RetryDecision)
+
+    for invalid in (
+        {},
+        {"decision": {}},
+        {"decision": {"outcome": "answer", "answer": ""}},
+        {"decision": {"outcome": "answer", "answer": "   "}},
+        {"decision": {"outcome": "retry", "retry_feedback": ""}},
+        {"decision": {"outcome": "retry", "retry_feedback": "   "}},
+    ):
+        with pytest.raises(ValidationError):
+            SynthesisDecision.model_validate(invalid)
 
 
 def test_routing_survives_a_router_that_fails():
@@ -856,6 +918,45 @@ def test_an_internal_note_is_never_served_as_the_answer(note):
     assert "no text answer" in reply
 
 
+def test_synthesizer_failure_preserves_tool_blocks_and_lane_answer():
+    """A failed quality gate must not discard the measured artifact or expose JSON."""
+    from app.api.chat import _build_response
+
+    asked = [HumanMessage("How many images are in the dataset?")]
+    block = blocks.stat(
+        "Corpus size",
+        "COUNT(*) FROM samples",
+        [{"label": "images", "value": "8,000"}],
+    )
+    tool = ToolMessage(
+        content=json.dumps({"blocks": [block.model_dump(mode="json")]}),
+        tool_call_id="overview-1",
+        name="dataset_overview",
+    )
+    result = {
+        "messages": asked + [
+            tool,
+            AIMessage(content="The corpus contains 8,000 images.", name="retrieval"),
+            AIMessage(
+                content=(
+                    "The corpus contains 8,000 images.\n\n"
+                    "(The final review step was unavailable — RuntimeError — "
+                    "so this is the specialist's own answer, unverified.)"
+                ),
+                name="final",
+            ),
+        ],
+        "lanes_ok": ["retrieval"],
+        "lanes_failed": [],
+    }
+
+    response = _build_response(None, asked, result, 1.0)
+
+    assert response.reply.startswith("The corpus contains 8,000 images.")
+    assert response.blocks[0]["kind"] == "stat"
+    assert response.blocks[0]["source"] == "COUNT(*) FROM samples"
+
+
 def test_router_propagates_arbitrary_claims_without_keyword_rules():
     """The structured router can flag any premise, including one with none of
     the verbs or number shapes a handwritten regex would know about."""
@@ -874,12 +975,34 @@ def test_router_propagates_arbitrary_claims_without_keyword_rules():
     assert "Claims requiring tool evidence" in orchestrator.content
 
 
-def test_router_discards_nonquoted_and_duplicate_claim_items():
-    """Only unique, exact, contiguous quotes from the latest user cross the gate."""
+@pytest.mark.parametrize(
+    "message",
+    [
+        "How many images and captions are in the dataset?",
+        "Show me the twelve worst caption matches.",
+    ],
+)
+def test_discovery_requests_never_cross_the_claim_gate(message):
+    """Questions and imperatives request evidence; they do not assert its answer."""
+    result = run(
+        StubModel(["insights"], discoveries=[message]),
+        [RecordingLane("insights")],
+        message=message,
+    )
+
+    assert result["claims_to_verify"] == []
+    assert "could not verify" not in result["messages"][-1].content
+
+
+def test_router_discards_nonquotes_and_duplicate_claims():
+    """Only unique, exact asserted-premise quotes cross the deterministic gate."""
     quoted = "The test split contains 1,000 images."
     contradicted = "The test split contains 2,000 images."
     result = run(
-        StubModel(["insights"], claims=[quoted, contradicted, quoted]),
+        StubModel(
+            ["insights"],
+            claims=[quoted, contradicted, quoted],
+        ),
         [RecordingLane("insights")],
         message=f"Please summarize this premise: {quoted}",
     )
@@ -913,8 +1036,6 @@ def test_unverified_claim_cannot_escape_through_adversarial_synthesis():
 
 
 def test_supported_assessment_requires_an_exact_current_tool_excerpt():
-    from langchain_core.messages import ToolMessage
-
     claim = "The test split contains 1,000 images."
     assessment = ClaimAssessment(
         claim=claim,

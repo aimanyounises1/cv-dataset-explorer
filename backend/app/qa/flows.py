@@ -201,10 +201,15 @@ def similarity_map(pg, ok):
     pg.wait_for_timeout(1500)
     for mode in ("cluster", "split", "agreement", "difficulty"):
         # The colour dial is the app's own listbox, not a native <select>: open
-        # it, then pick the option carrying that mode's value.
+        # it, then pick the option carrying that mode's value. The open list is
+        # portalled to <body> — a dropdown must not be clipped by whatever
+        # scroll container its trigger happens to sit in — so the options are
+        # reached through `.listbox-pop` rather than through the toolbar that
+        # owns the trigger. Only one list is open at a time, so this still
+        # names exactly the dial that was just clicked.
         pg.click(".map-toolbar .listbox-btn")
-        pg.wait_for_selector(".map-toolbar [role='option']")
-        pg.click(f".map-toolbar [role='option'][data-value='{mode}']")
+        pg.wait_for_selector(".listbox-pop [role='option']")
+        pg.click(f".listbox-pop [role='option'][data-value='{mode}']")
         pg.wait_for_timeout(500)
         has_legend = (bool(pg.query_selector(".legend-ramp"))
                       or bool(pg.query_selector(".legend-swatches .legend-swatch")))

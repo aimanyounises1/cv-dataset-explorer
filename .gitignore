@@ -20,6 +20,7 @@ frontend/dist/
 .DS_Store
 *.log
 vite.config.ts.timestamp-*.mjs
+/tmp/
 
 # Working material, not deliverables. requirements.txt is the canonical
 # dependency manifest; uv.lock files here only create a second source of truth.
@@ -31,8 +32,15 @@ docs/REQUIREMENTS.md
 .jbeval/
 .omc/
 .claude/
+.agents/
+.codex/
+skills-lock.json
 
 # Local working notes, not part of the submission
 .handoff/
+# The live Claude/Codex ownership channel. Working material in exactly the same
+# sense as .handoff/ — it records who is editing which file right now, not
+# anything a reader of the submission needs.
+.coordination/
 CLAUDE.md
 CLAUDE.local.md

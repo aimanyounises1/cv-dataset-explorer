@@ -52,6 +52,7 @@ export default function AxisLegend({ signal, onSignal }: {
           are and are not. */}
       {onSignal ? (
         <Listbox
+          inline
           label="Draw which measurement on the frames"
           trigger={signal ? AXIS_META[signal as Axis].label : "No edge"}
           selected={signal ?? ""}

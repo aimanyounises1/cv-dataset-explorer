@@ -16,57 +16,148 @@ probe that names the enabling command, and NO downloads on the request path —
 weights are fetched explicitly or not at all.
 """
 import logging
+import math
 import threading
 import time
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Optional
 
 from .. import config
+from . import providers
+from .providers import ModelSnapshot
 
 logger = logging.getLogger(__name__)
 
 DETECT_MODEL = config.DETECT_MODEL
+DETECT_REVISION = config.DETECT_REVISION
 FETCH_HINT = ("python -c \"from huggingface_hub import snapshot_download; "
-              f"snapshot_download('{DETECT_MODEL}')\"")
+              f"snapshot_download(repo_id={DETECT_MODEL!r}, "
+              f"revision={DETECT_REVISION!r})\"")
 
 _lock = threading.Lock()
 _detector = None
 _failed_at: Optional[float] = None
+_failed_reason: Optional[str] = None
 _RETRY_AFTER_S = 120.0
 
 
-def _weights_cached() -> bool:
-    from huggingface_hub.constants import HF_HUB_CACHE
+@dataclass(frozen=True)
+class DetectorAvailability:
+    ready: bool
+    reason: str | None
+    model: str
+    revision: str | None
+    snapshot: ModelSnapshot | None = None
 
-    return (Path(HF_HUB_CACHE) /
-            f"models--{DETECT_MODEL.replace('/', '--')}").exists()
+
+def _resolve_snapshot(requested_revision: str | None = None) -> ModelSnapshot:
+    """Resolve the configured immutable snapshot without network access."""
+    requested = requested_revision or configured_revision()
+    snapshot = providers.resolve_model_snapshot(
+        DETECT_MODEL,
+        revision=requested,
+        local_files_only=True,
+    )
+    if snapshot.revision != requested:
+        raise RuntimeError(
+            f"resolved detector commit {snapshot.revision} does not match "
+            f"CVDE_DETECT_REVISION={requested}")
+    return snapshot
 
 
-def detect_ready() -> tuple[bool, Optional[str]]:
-    """Cheap probe — no model load, safe on any request path."""
+def configured_revision() -> str:
+    """Return the configured detector commit, rejecting a moving selector."""
+    return providers.require_full_commit_revision(
+        DETECT_REVISION,
+        "CVDE_DETECT_REVISION",
+    )
+
+
+def detector_availability() -> DetectorAvailability:
+    """One truthful, atomic readiness probe with resolved provenance."""
+    if _detector is not None:
+        return DetectorAvailability(
+            True,
+            None,
+            _detector.model_id,
+            _detector.revision,
+        )
+    try:
+        revision = configured_revision()
+    except ValueError as exc:
+        return DetectorAvailability(
+            False,
+            str(exc),
+            DETECT_MODEL,
+            None,
+        )
+    if _failed_at is not None:
+        remaining = _RETRY_AFTER_S - (time.monotonic() - _failed_at)
+        if remaining > 0:
+            return DetectorAvailability(
+                False,
+                _failed_reason
+                or f"detector load failed; retry in {remaining:.0f} seconds",
+                DETECT_MODEL,
+                revision,
+            )
     try:
         import torch  # noqa: F401
         import transformers  # noqa: F401
     except ImportError:
-        return False, "torch/transformers not installed — the base requirements provide them"
-    if not _weights_cached():
-        return False, f"detector weights not downloaded — run: {FETCH_HINT}"
-    return True, None
+        return DetectorAvailability(
+            False,
+            "torch/transformers not installed — the base requirements provide them",
+            DETECT_MODEL,
+            revision,
+        )
+    try:
+        snapshot = _resolve_snapshot(revision)
+    except Exception as exc:  # noqa: BLE001 - the reason is returned, not hidden
+        return DetectorAvailability(
+            False,
+            f"detector snapshot {DETECT_MODEL}@{DETECT_REVISION} is not "
+            f"available locally ({exc}) — run: {FETCH_HINT}",
+            DETECT_MODEL,
+            revision,
+        )
+    return DetectorAvailability(
+        True,
+        None,
+        snapshot.model_id,
+        snapshot.revision,
+        snapshot,
+    )
+
+
+def detect_ready() -> tuple[bool, Optional[str]]:
+    """Compatibility wrapper for callers that only need readiness and reason."""
+    state = detector_availability()
+    return state.ready, state.reason
 
 
 class _Detector:
-    def __init__(self):
+    def __init__(self, snapshot=None):
         import torch
         from transformers import AutoProcessor, GroundingDinoForObjectDetection
 
         from .embedder import _pick_device
 
+        snapshot = snapshot or _resolve_snapshot()
         self.device = _pick_device()
-        logger.info("Loading %s on %s", DETECT_MODEL, self.device)
+        self.model_id = snapshot.model_id
+        self.revision = snapshot.revision
+        model_path = str(snapshot.snapshot_path)
+        logger.info(
+            "Loading %s@%s on %s",
+            self.model_id,
+            self.revision,
+            self.device,
+        )
         self.processor = AutoProcessor.from_pretrained(
-            DETECT_MODEL, local_files_only=True)
+            model_path, local_files_only=True)
         self.model = GroundingDinoForObjectDetection.from_pretrained(
-            DETECT_MODEL, local_files_only=True).to(self.device).eval()
+            model_path, local_files_only=True).to(self.device).eval()
         self._torch = torch
         self._infer = threading.Lock()
 
@@ -89,22 +180,38 @@ class _Detector:
                   or [""] * len(res["boxes"]))
         for (x0, y0, x1, y1), label, score in zip(
                 res["boxes"].tolist(), labels, res["scores"].tolist(), strict=True):
+            coordinates = tuple(float(value) for value in (x0, y0, x1, y1))
+            confidence = float(score)
+            if (
+                not all(math.isfinite(value) for value in coordinates)
+                or not math.isfinite(confidence)
+            ):
+                continue
+            clipped_x0 = min(max(coordinates[0], 0.0), float(W))
+            clipped_y0 = min(max(coordinates[1], 0.0), float(H))
+            clipped_x1 = min(max(coordinates[2], 0.0), float(W))
+            clipped_y1 = min(max(coordinates[3], 0.0), float(H))
+            if clipped_x1 <= clipped_x0 or clipped_y1 <= clipped_y0:
+                continue
             boxes.append({
-                "x": round(max(x0, 0) / W, 4), "y": round(max(y0, 0) / H, 4),
-                "w": round(min(x1 - x0, W) / W, 4),
-                "h": round(min(y1 - y0, H) / H, 4),
-                "label": str(label), "score": round(float(score), 3)})
+                "x": clipped_x0 / W,
+                "y": clipped_y0 / H,
+                "w": (clipped_x1 - clipped_x0) / W,
+                "h": (clipped_y1 - clipped_y0) / H,
+                "label": str(label),
+                "score": round(confidence, 3),
+            })
         boxes.sort(key=lambda b: -b["score"])
         return boxes[:max_boxes]
 
 
 def get_detector() -> Optional[_Detector]:
     """Thread-safe singleton, None when unavailable; failed loads cool down."""
-    global _detector, _failed_at
+    global _detector, _failed_at, _failed_reason
     if _detector is not None:
         return _detector
-    ok, _ = detect_ready()
-    if not ok:
+    availability = detector_availability()
+    if not availability.ready or availability.snapshot is None:
         return None
     with _lock:
         if _detector is not None:
@@ -112,10 +219,12 @@ def get_detector() -> Optional[_Detector]:
         if _failed_at is not None and time.monotonic() - _failed_at < _RETRY_AFTER_S:
             return None
         try:
-            _detector = _Detector()
+            _detector = _Detector(availability.snapshot)
             _failed_at = None
+            _failed_reason = None
         except Exception as exc:                          # noqa: BLE001
             logger.warning("Detector unavailable: %s", exc)
             _failed_at = time.monotonic()
+            _failed_reason = f"detector load failed: {exc}"
             return None
     return _detector

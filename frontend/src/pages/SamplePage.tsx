@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, isStatus } from "../api/client";
 import type { SampleCard, SampleDetail } from "../api/types";
 import AxisBreakdown from "../components/AxisBreakdown";
+import ErrorState from "../components/ErrorState";
 import AxisLegend from "../components/AxisLegend";
 import ImageCard from "../components/ImageCard";
 import ProvenanceBanner from "../components/ProvenanceBanner";
 import RegionSearch from "../components/RegionSearch";
 import TagEditor from "../components/TagEditor";
+import VisionInspector from "../components/VisionInspector";
 import { useNeighbours } from "../hooks/useResultOrder";
 
 /** The 10th percentile of nearest-neighbour similarity across this corpus: for
@@ -47,7 +49,10 @@ export default function SamplePage() {
   const [detail, setDetail] = useState<SampleDetail | null>(null);
   const [similar, setSimilar] = useState<SampleCard[]>([]);
   const [similarError, setSimilarError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The caught error itself, not a string of it: the status is what decides
+  // which sentence to show, and `ErrorState` needs the payload for its
+  // disclosure. Stringifying here threw both away.
+  const [error, setError] = useState<unknown>(null);
   // The active index's own measured floor, fetched once; the SigLIP constant
   // covers the legacy layout and the fetch-failed path. Declared with the
   // other hooks — above every early return — because hook order is identity.
@@ -55,16 +60,21 @@ export default function SamplePage() {
   useEffect(() => { activeSimFloor().then(setMeasuredFloor); }, []);
   const [gapBusy, setGapBusy] = useState(false);
   const [gapError, setGapError] = useState<string | null>(null);
+  const [detectorSuggestion, setDetectorSuggestion] = useState<{
+    query: string;
+    token: number;
+  } | null>(null);
 
   const refresh = useCallback(() => {
     if (!id) return;
-    api.getSample(id).then(setDetail).catch((e) => setError(String(e)));
+    api.getSample(id).then(setDetail).catch(setError);
   }, [id]);
 
   useEffect(() => {
     setDetail(null);
     setSimilar([]);
     setSimilarError(null);
+    setDetectorSuggestion(null);
     refresh();
     if (id) {
       api.similar(id)
@@ -73,6 +83,20 @@ export default function SamplePage() {
     }
     window.scrollTo(0, 0);
   }, [id, refresh]);
+
+  // A pair-comparison proposal can hand one visible noun phrase to this
+  // sample's open-vocabulary detector. The URL keeps that hand-off explicit
+  // and reproducible; RegionSearch still requires the user to run detection,
+  // choose a box, refine the mask, and save the annotation.
+  const detectorFromUrl = searchParams.get("detector");
+  useEffect(() => {
+    const query = detectorFromUrl?.trim().replace(/\s+/g, " ") ?? "";
+    if (query.length < 3 || query.length > 300) return;
+    setDetectorSuggestion((current) => ({
+      query,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }, [detectorFromUrl, id]);
 
   // Sequential triage: step through the result list without returning to it.
   const neighbours = useNeighbours(id);
@@ -95,22 +119,33 @@ export default function SamplePage() {
   }, [neighbours, navigate]);
 
   if (error) {
-    // A raw `Error: 404: {"detail":...}` on an otherwise empty pane reads as
-    // a crash. The missing-sample case gets a human sentence and a way back;
-    // genuinely unexpected errors keep the raw string, which is then a clue.
-    const missing = error.includes("404");
+    // A raw `Error: 404: {"detail":...}` on an otherwise empty pane read as a
+    // crash. Both refusals this route can get are answers rather than faults,
+    // so both are stated as sentences; `ErrorState` keeps the payload behind a
+    // disclosure for whoever wants the status and the body.
+    const missing = isStatus(error, 404);
+    // 422 is the id itself being the wrong shape — a hand-typed or truncated
+    // URL. Saying "does not exist" there would be a claim we never tested.
+    const malformed = isStatus(error, 422);
     return (
       <div>
         <button className="ghost back-btn"
                 onClick={() => window.history.length > 1 ? navigate(-1) : navigate("/")}>
           ← Back
         </button>
-        <div className="error">
-          {missing
-            ? `Sample ${id} does not exist — the id may be mistyped, or the link
-               may predate a re-ingest of the dataset.`
-            : error}
-        </div>
+        <ErrorState
+          error={error}
+          title={missing ? `Sample ${id} does not exist`
+                 : malformed ? `“${id}” is not a sample id`
+                 : "This sample could not be loaded"}
+          hint={missing
+            ? "The id may be mistyped, or the link may predate a re-ingest of the dataset."
+            : malformed
+            ? "Sample ids are whole numbers."
+            : null}
+        >
+          <Link className="primary button-link" to="/">Browse the corpus</Link>
+        </ErrorState>
       </div>
     );
   }
@@ -140,12 +175,16 @@ export default function SamplePage() {
 
   return (
     <div>
-      {/* Screen-reader heading: the visual layout leads with the image, and a
-          visible title would duplicate the stepper's context line. */}
-      <h1 className="sr-only">Sample {detail.id} — {detail.filename}</h1>
       <ProvenanceBanner />
       <div className="detail-nav">
-        <button className="ghost back-btn" onClick={back}>← Back</button>
+        <div className="sample-context">
+          <button className="ghost back-btn" onClick={back}>← Back</button>
+          <div className="sample-identity">
+            <h1>Sample {detail.id}</h1>
+            <span className="sample-filename">{detail.filename}</span>
+            <span className="pill">{detail.split}</span>
+          </div>
+        </div>
         {neighbours.position != null && (
           <div className="detail-stepper">
             <button className="ghost" disabled={neighbours.prev == null}
@@ -169,9 +208,17 @@ export default function SamplePage() {
               text) — rendering a second, unmarkable copy above it only asked
               the reader which of the two identical pictures was the real one. */}
           <RegionSearch sampleId={detail.id} imageUrl={detail.image_url}
-                        alt={detail.captions[0]?.text ?? detail.filename} />
+                        alt={detail.captions[0]?.text ?? detail.filename}
+                        detectorSuggestion={detectorSuggestion} />
         </div>
         <div>
+          <VisionInspector
+            sample={detail}
+            onDetectorQuery={(query) => setDetectorSuggestion((current) => ({
+              query,
+              token: (current?.token ?? 0) + 1,
+            }))}
+          />
           <div className="panel">
             <h3>
               Captions ({detail.captions.length})

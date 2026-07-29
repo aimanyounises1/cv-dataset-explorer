@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { ApiError, api, isStatus } from "../api/client";
 import {
   AlbumSummary, SampleCard, ScenarioGroup, SearchMode, TermStat,
 } from "../api/types";
@@ -458,17 +458,13 @@ function FindingsRow() {
 /** All search/filter state — including pagination depth — lives in the URL:
  * shareable links, working back-button, and "Load more" depth survives
  * navigating to a sample and back. */
-/* A rejected composed request arrives as "422: {json}" from the client. The
- * page shows the validator's own sentence, never the wire payload. */
-const composedProblem = (msg: string): string => {
-  try {
-    const body = JSON.parse(msg.slice(msg.indexOf(":") + 1).trim());
-    const detail = Array.isArray(body.detail) ? body.detail[0]?.msg : body.detail;
-    if (typeof detail === "string" && detail) {
-      return detail.replace(/^Value error, /, "");
-    }
-  } catch { /* fall through to the generic sentence */ }
-  return "The composed query was rejected";
+/* A rejected composed request: the page shows the validator's own sentence,
+ * never the wire payload. `ApiError` has already read `detail` out of the
+ * envelope, so all that is left is Pydantic's own prefix on a custom
+ * validator's message, which is machinery rather than meaning. */
+const composedProblem = (e: unknown): string => {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.replace(/^Value error, /, "") || "The composed query was rejected";
 };
 
 export default function GalleryPage() {
@@ -824,15 +820,15 @@ export default function GalleryPage() {
                       depthLimit: res.depth_limit, depthReached: res.depth_reached });
             return { items: res.items, total: null as number | null, more: res.has_more };
           } catch (e) {
-            if (e instanceof Error && e.message.startsWith("404")) {
+            if (isStatus(e, 404)) {
               // The endpoint ships in a parallel lane: degrade honestly to the
               // text ranking rather than a blank page, and say so.
               fallbackMsg = "Composed search is not available on this backend yet — "
                           + "showing the unsteered ranking; reference chips are kept.";
-            } else if (e instanceof Error && /^4\d\d:/.test(e.message)) {
+            } else if (e instanceof ApiError && e.status >= 400 && e.status < 500) {
               // A rejected request is explained in a sentence, never rendered
               // as the wire payload, and the page still shows a ranking.
-              fallbackMsg = composedProblem(e.message)
+              fallbackMsg = composedProblem(e)
                           + " — showing the unsteered ranking; reference chips are kept.";
             } else { throw e; }
           }
@@ -939,7 +935,7 @@ export default function GalleryPage() {
         groups: [], basis: "", degraded: true,
         // A capability that is absent names the thing that would enable it;
         // any other failure is reported verbatim. Neither is ever silence.
-        message: e instanceof Error && e.message.startsWith("404")
+        message: isStatus(e, 404)
           ? "Grouping is not available on this backend — POST /api/search/scenarios "
             + "is not mounted. Restart the API after updating it."
           : `Could not group these results — ${e instanceof Error ? e.message : String(e)}`,
@@ -986,7 +982,7 @@ export default function GalleryPage() {
       try {
         return { album: await api.createAlbum(name), name };
       } catch (e) {
-        if (!(e instanceof Error && e.message.startsWith("409"))) throw e;
+        if (!isStatus(e, 409)) throw e;
       }
     }
     throw new Error(`“${base}” already exists 20 times over — rename one first`);

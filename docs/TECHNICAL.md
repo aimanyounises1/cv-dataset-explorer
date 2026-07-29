@@ -123,7 +123,9 @@ CREATE TABLE annotations (                -- regions as rows; images stay immuta
 CREATE TABLE annotation_masks (           -- only mask rows pay the BLOB cost
     annotation_id INTEGER PRIMARY KEY REFERENCES annotations(id) ON DELETE CASCADE,
     png BLOB NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
-    model_id TEXT NOT NULL, prompt_json TEXT NOT NULL,
+    model_id TEXT NOT NULL, model_revision TEXT,
+    prompt_json TEXT NOT NULL,
+    proposal_json TEXT,                    -- optional upstream detector evidence
     predicted_iou REAL NOT NULL);
 CREATE TABLE object_labels (               -- explicit application-owned taxonomy
     id INTEGER PRIMARY KEY, name TEXT NOT NULL,
@@ -151,6 +153,19 @@ README rather than hidden.
 luminance, agreement, IDF) behind each score. It is only ever read whole, for one
 sample, to explain a number in the UI. A normalised table would buy queryability
 nobody has asked for and cost a join on every detail view.
+
+**Accepted masks bind model ID and immutable revision.** Grounding DINO and SAM2
+are resolved with Hugging Face Hub's cache API and loaded from the exact returned
+snapshot directory, never from a reconstructed cache path or a moving model ID.
+`model_revision` is nullable only so databases created before this provenance
+field migrate without inventing history; every new mask write supplies the full
+40-character Hub commit. When a reviewer starts from a detector box,
+`proposal_json` also preserves Grounding DINO's exact revision, query, original
+label, canonical proposal label, confidence, and source geometry. The accepted
+taxonomy remains separate, so relabeling records disagreement rather than
+rewriting the model's claim. That evidence is resolved from an authenticated,
+short-lived token issued by the detector endpoint and bound to the sample and
+source box; the acceptance endpoint never trusts client-authored model fields.
 
 **`saved_views.query_string` is opaque.** It stores the URL query string, not a
 parsed filter object. So a saved view keeps working when the UI grows a filter

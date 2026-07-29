@@ -1,7 +1,8 @@
 import {
   KeyboardEvent, PointerEvent, useCallback, useEffect, useId, useRef, useState,
 } from "react";
-import type { DetectBox, SegmentBox } from "../api/types";
+import { Link } from "react-router-dom";
+import type { DetectBox, SegmentAnnotation, SegmentBox } from "../api/types";
 import { useSegmentEditor } from "../hooks/useSegmentEditor";
 import type { SegmentTool } from "../hooks/useSegmentEditor";
 import ComboBox from "./ComboBox";
@@ -13,6 +14,10 @@ interface Props {
   sampleId: number;
   imageUrl: string;
   alt: string;
+  detectorSuggestion?: {
+    query: string;
+    token: number;
+  } | null;
 }
 
 interface Point {
@@ -37,28 +42,129 @@ const rectFrom = (a: Point, b: Point): SegmentBox => ({
 
 const usableBox = (box: SegmentBox) => box.w >= 0.02 && box.h >= 0.02;
 
+function proposalDisplayLabel(
+  proposal: DetectBox,
+  index: number,
+  proposals: DetectBox[],
+) {
+  const peers = proposals.filter((item) => item.label === proposal.label);
+  if (peers.length < 2) return proposal.label;
+  const occurrence = proposals
+    .slice(0, index + 1)
+    .filter((item) => item.label === proposal.label)
+    .length;
+  return `${proposal.label}-${occurrence}`;
+}
+
+const ZIP_SIGNATURE = [80, 75, 3, 4] as const;
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function downloadAnnotationExport(annotation: SegmentAnnotation) {
+  if (!annotation.artifact_package_url) {
+    throw new Error("This accepted mask has no reproducible artifact package.");
+  }
+
+  const packageUrl = new URL(annotation.artifact_package_url, window.location.href);
+  if (packageUrl.origin !== window.location.origin) {
+    throw new Error("The artifact package must resolve to this local application.");
+  }
+
+  const response = await fetch(packageUrl, {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    throw new Error(`The artifact package could not be built (HTTP ${response.status}).`);
+  }
+
+  const mediaType = response.headers.get("content-type")
+    ?.split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+  if (mediaType !== "application/zip") {
+    throw new Error(`Expected a ZIP package, but the server returned ${mediaType || "no media type"}.`);
+  }
+  const packageBytes = await response.arrayBuffer();
+  const signature = new Uint8Array(
+    packageBytes,
+    0,
+    Math.min(ZIP_SIGNATURE.length, packageBytes.byteLength),
+  );
+  if (
+    signature.length !== ZIP_SIGNATURE.length
+    || ZIP_SIGNATURE.some((byte, index) => signature[index] !== byte)
+  ) {
+    throw new Error("The downloaded artifact is not a valid ZIP package.");
+  }
+
+  const baseName = `cvde-sample-${annotation.sample_id}-annotation-${annotation.id}`;
+  downloadBlob(
+    new Blob([packageBytes], { type: mediaType }),
+    `${baseName}.zip`,
+  );
+}
+
 /** Promptable mask editing and the legacy rectangle-retrieval lane share one
  * normalized image stage. When the segmenter is absent, box drawing, detector
  * proposals and region search continue to work without pretending a mask was
  * produced. */
-export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
+export default function RegionSearch({
+  sampleId,
+  imageUrl,
+  alt,
+  detectorSuggestion = null,
+}: Props) {
   const editor = useSegmentEditor(sampleId);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const toolsRef = useRef<HTMLDetailsElement | null>(null);
+  const detectorInputRef = useRef<HTMLInputElement | null>(null);
   const instructionsId = useId();
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [pendingBox, setPendingBox] = useState<SegmentBox | null>(null);
   const [keyboardCursor, setKeyboardCursor] = useState<Point>({ x: 0.5, y: 0.5 });
   const [keyboardBoxStart, setKeyboardBoxStart] = useState<Point | null>(null);
   const [stageFocused, setStageFocused] = useState(false);
+  const [annotationMode, setAnnotationMode] = useState(false);
+  const [imageState, setImageState] = useState<"loading" | "decoded" | "failed">(
+    "loading",
+  );
   const [steer, setSteer] = useState("");
+  const [exportingId, setExportingId] = useState<number | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     setDragStart(null);
     setPendingBox(null);
     setKeyboardBoxStart(null);
     setKeyboardCursor({ x: 0.5, y: 0.5 });
+    setAnnotationMode(false);
+    setImageState("loading");
     setSteer("");
+    setExportingId(null);
+    setExportError(null);
   }, [sampleId]);
+
+  useEffect(() => {
+    if (!detectorSuggestion) return undefined;
+    editor.setDetectQuery(detectorSuggestion.query);
+    if (imageState !== "decoded") return undefined;
+    setAnnotationMode(true);
+    const frame = requestAnimationFrame(() => {
+      detectorInputRef.current?.scrollIntoView({ block: "center" });
+      detectorInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [detectorSuggestion, editor.setDetectQuery, imageState]);
 
   const normalizedPoint = useCallback((clientX: number, clientY: number): Point | null => {
     const stage = stageRef.current;
@@ -78,7 +184,7 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
   }, [editor]);
 
   const handlePointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || editor.busy !== null) return;
+    if (!annotationMode || event.button !== 0 || editor.busy !== null) return;
     const point = normalizedPoint(event.clientX, event.clientY);
     if (!point) return;
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -89,7 +195,7 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
       return;
     }
     editor.addPoint(point.x, point.y, editor.tool === "positive" ? 1 : 0);
-  }, [editor, normalizedPoint]);
+  }, [annotationMode, editor, normalizedPoint]);
 
   const handlePointerMove = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (!dragStart) return;
@@ -140,7 +246,11 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
   }, [editor, keyboardBoxStart, keyboardCursor]);
 
   const handleStageKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget || editor.busy !== null) return;
+    if (
+      !annotationMode
+      || event.target !== event.currentTarget
+      || editor.busy !== null
+    ) return;
     const step = event.shiftKey ? 0.1 : 0.02;
     if (event.key === "ArrowLeft") moveKeyboardCursor(-step, 0);
     else if (event.key === "ArrowRight") moveKeyboardCursor(step, 0);
@@ -156,7 +266,13 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
     else if (event.key === "3") editor.setTool("box");
     else return;
     event.preventDefault();
-  }, [commitKeyboardPrompt, editor, keyboardBoxStart, moveKeyboardCursor]);
+  }, [
+    annotationMode,
+    commitKeyboardPrompt,
+    editor,
+    keyboardBoxStart,
+    moveKeyboardCursor,
+  ]);
 
   const handleTool = useCallback((value: string) => {
     editor.setTool(value as SegmentTool);
@@ -182,6 +298,18 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
     void editor.searchRegion("negative", "");
   }, [editor]);
 
+  const exportAnnotation = useCallback(async (annotation: SegmentAnnotation) => {
+    setExportingId(annotation.id);
+    setExportError(null);
+    try {
+      await downloadAnnotationExport(annotation);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "The annotation export failed.");
+    } finally {
+      setExportingId(null);
+    }
+  }, []);
+
   const boxToDraw = pendingBox
     ?? (keyboardBoxStart ? rectFrom(keyboardBoxStart, keyboardCursor) : editor.box);
   const maskSrc = editor.mask?.mask_data_url ?? editor.mask?.mask_url ?? null;
@@ -195,29 +323,42 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
   const toolOptions = editor.segmentStatus?.ready
     ? TOOL_OPTIONS
     : TOOL_OPTIONS.filter((option) => option.value === "box");
+  const hasAcceptedPreview = Boolean(
+    editor.mask
+    && "preview_token" in editor.mask
+    && editor.mask.preview_token
+    && editor.mask.mask_data_url,
+  );
   const canSave = Boolean(
-    maskSrc && editor.labelName.trim()
+    maskSrc && hasAcceptedPreview && editor.labelName.trim()
     && (editor.points.length > 0 || editor.box)
     && editor.annotationsReady && editor.selectedId == null,
   );
-  const anyBusy = editor.busy !== null;
+  const anyBusy = editor.busy !== null || exportingId !== null;
+  const stageInteractive = annotationMode && imageState === "decoded";
 
   return (
     <section className="region-search" aria-labelledby={`${instructionsId}-title`}>
       <header className="rs-head">
         <div>
-          <h2 id={`${instructionsId}-title`}>Segment and annotate</h2>
+          <h2 id={`${instructionsId}-title`}>
+            {annotationMode ? "Segment and annotate" : "Source image"}
+          </h2>
         </div>
-        <span className={`rs-status${editor.segmentStatus?.ready ? " ready" : ""}`}>
-          {editor.segmentStatus === null
-            ? "checking model…"
-            : editor.segmentStatus.ready
-              ? editor.segmentStatus.model ?? "segmenter ready"
-              : "box search fallback"}
+        <span className={`rs-status${imageState === "decoded" ? " ready" : ""}`}>
+          {imageState === "loading"
+            ? "loading source…"
+            : imageState === "failed"
+              ? "source unavailable"
+              : annotationMode
+                ? editor.segmentStatus?.ready
+                  ? "annotation mode"
+                  : "rectangle mode"
+                : "browser decoded"}
         </span>
       </header>
 
-      {editor.segmentStatus?.ready === false && (
+      {annotationMode && editor.segmentStatus?.ready === false && (
         <div className="notice rs-model-note">
           {editor.segmentStatus.reason
             ?? "Promptable segmentation is unavailable. Draw a box to search by region."}
@@ -231,12 +372,57 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
           and most visits to a sample page are to look at it. Folded, not cut:
           one click reaches the whole toolset, and the disclosure keeps the
           reading order it draws in. */}
-      <details className="caveat rs-tools">
-        <summary>Annotation tools — points, box, and detector</summary>
+      <details
+        className="caveat rs-tools"
+        ref={toolsRef}
+        open={annotationMode}
+        onToggle={(event) => {
+          const open = event.currentTarget.open;
+          setAnnotationMode(open && imageState === "decoded");
+          if (open && imageState !== "decoded") {
+            event.currentTarget.open = false;
+          }
+          if (!open) {
+            setDragStart(null);
+            setPendingBox(null);
+            setKeyboardBoxStart(null);
+            setStageFocused(false);
+          }
+        }}
+      >
+        <summary>
+          {annotationMode
+            ? "Exit annotation mode"
+            : "Enter annotation mode — points, box, and detector"}
+        </summary>
         <p className="rs-note">
-          Guide the local model with keep/remove points or a box. Saved masks
-          remain separate from the source image.
+          Grounding DINO proposes boxes from an open-vocabulary phrase. Choose
+          one instance, then guide SAM2 with keep/remove points or a box. Neither
+          proposal becomes a label until you save it.
         </p>
+
+        <dl className="rs-model-contract">
+          <dt>Ground boxes</dt>
+          <dd>
+            {editor.detectStatus === null
+              ? "checking local detector…"
+              : editor.detectStatus.ready
+                ? `${editor.detectStatus.model}@${
+                  editor.detectStatus.revision?.slice(0, 10) ?? "unknown"
+                }…`
+                : editor.detectStatus.reason ?? "detector unavailable"}
+          </dd>
+          <dt>Refine mask</dt>
+          <dd>
+            {editor.segmentStatus === null
+              ? "checking local segmenter…"
+              : editor.segmentStatus.ready
+                ? `${editor.segmentStatus.model}@${
+                  editor.segmentStatus.revision?.slice(0, 10) ?? "unknown"
+                }…`
+                : "rectangle search only"}
+          </dd>
+        </dl>
 
       <div className="rs-toolbar" role="toolbar" aria-label="Segmentation tools">
         <Segmented
@@ -267,11 +453,12 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
         <div className="rs-detector">
           <label htmlFor={`${instructionsId}-detect`}>Detector query</label>
           <input
+            ref={detectorInputRef}
             id={`${instructionsId}-detect`}
             value={editor.detectQuery}
             onChange={(event) => editor.setDetectQuery(event.target.value)}
             maxLength={300}
-            placeholder="person. dog. cat. horse. bicycle. car."
+            placeholder="e.g. person in a red coat. unusual hand-held object."
           />
           <button type="button" className="ghost" onClick={editor.suggest}
                   disabled={anyBusy || editor.detectQuery.trim().length < 3}>
@@ -290,26 +477,50 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
 
       <div
         ref={stageRef}
-        className={`rs-stage tool-${editor.tool}`}
-        role="group"
-        tabIndex={0}
-        aria-label={`Segmentation editor for sample ${sampleId}`}
-        aria-describedby={instructionsId}
+        className={`rs-stage ${
+          stageInteractive ? `tool-${editor.tool}` : "inspection-only"
+        }`}
+        role={stageInteractive ? "group" : undefined}
+        tabIndex={stageInteractive ? 0 : undefined}
+        aria-label={stageInteractive
+          ? `Segmentation editor for sample ${sampleId}`
+          : undefined}
+        aria-describedby={stageInteractive ? instructionsId : undefined}
         aria-busy={anyBusy}
-        aria-disabled={anyBusy}
+        aria-disabled={stageInteractive ? anyBusy : undefined}
         onFocus={() => setStageFocused(true)}
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
             setStageFocused(false);
           }
         }}
-        onKeyDown={handleStageKeyDown}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
+        onKeyDown={stageInteractive ? handleStageKeyDown : undefined}
+        onPointerDown={stageInteractive ? handlePointerDown : undefined}
+        onPointerMove={stageInteractive ? handlePointerMove : undefined}
+        onPointerUp={stageInteractive ? handlePointerUp : undefined}
+        onPointerCancel={stageInteractive ? handlePointerCancel : undefined}
       >
-        <img className="detail-image" src={imageUrl} alt={alt} draggable={false} />
+        <img
+          className="detail-image"
+          src={imageUrl}
+          alt={alt}
+          draggable={false}
+          onLoad={() => setImageState("decoded")}
+          onError={() => {
+            setImageState("failed");
+            setAnnotationMode(false);
+          }}
+        />
+
+        {imageState === "failed" && (
+          <div className="rs-image-error" role="alert">
+            <strong>Source image could not be decoded.</strong>
+            <span>
+              Sample #{sampleId} stays inspection-only; detection and
+              segmentation were not run.
+            </span>
+          </div>
+        )}
 
         {maskSrc && (
           <div
@@ -322,7 +533,7 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
           />
         )}
 
-        {boxToDraw && boxToDraw.w > 0 && boxToDraw.h > 0 && (
+        {annotationMode && boxToDraw && boxToDraw.w > 0 && boxToDraw.h > 0 && (
           <div className="rs-rect" aria-hidden="true" style={{
             left: `${boxToDraw.x * 100}%`,
             top: `${boxToDraw.y * 100}%`,
@@ -331,7 +542,7 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
           }} />
         )}
 
-        {editor.points.map((point, index) => (
+        {annotationMode && editor.points.map((point, index) => (
           <span
             key={`${point.label}:${point.x}:${point.y}:${index}`}
             className={`rs-point ${point.label === 1 ? "positive" : "negative"}`}
@@ -340,7 +551,7 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
           />
         ))}
 
-        {stageFocused && (
+        {annotationMode && stageFocused && (
           <span
             className={`rs-key-cursor ${keyboardBoxStart ? "anchored" : ""}`}
             aria-hidden="true"
@@ -351,7 +562,13 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
           />
         )}
 
-        {editor.proposals.map((proposal, index) => (
+        {annotationMode && editor.proposals.map((proposal, index) => {
+          const displayLabel = proposalDisplayLabel(
+            proposal,
+            index,
+            editor.proposals,
+          );
+          return (
           <button
             key={`${proposal.label}:${proposal.x}:${proposal.y}:${index}`}
             type="button"
@@ -361,16 +578,21 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
               top: `${proposal.y * 100}%`,
               width: `${proposal.w * 100}%`,
               height: `${proposal.h * 100}%`,
+              // Proposals arrive confidence-sorted. A large low-confidence
+              // region (often "sidewalk" or "background") must not paint over
+              // and intercept the tighter, higher-confidence object button.
+              zIndex: 5 + Math.round(proposal.score * 1_000),
             }}
-            aria-label={`Use ${proposal.label} proposal, ${Math.round(proposal.score * 100)} percent confidence`}
-            title={`${proposal.label} — detector confidence ${Math.round(proposal.score * 100)}%`}
+            aria-label={`Use ${displayLabel} proposal, ${Math.round(proposal.score * 100)} percent confidence`}
+            title={`${displayLabel} — detector confidence ${Math.round(proposal.score * 100)}%`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => chooseProposal(proposal)}
             disabled={anyBusy}
           >
-            <span>{proposal.label} {Math.round(proposal.score * 100)}%</span>
+            <span>{displayLabel} {Math.round(proposal.score * 100)}%</span>
           </button>
-        ))}
+          );
+        })}
 
         {editor.busy === "segment" && (
           <div className="rs-busy" role="status">Refining mask…</div>
@@ -381,6 +603,7 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
         {editor.announcement}
       </div>
       {editor.error && <div className="rs-error" role="alert">{editor.error}</div>}
+      {exportError && <div className="rs-error" role="alert">{exportError}</div>}
 
       {(editor.mask || editor.box) && (
         <div className="rs-workbench">
@@ -422,13 +645,29 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
                   <dd>{maskModel}</dd>
                 </div>
               )}
+              {editor.proposalSource && (
+                <div>
+                  <dt>Detector source</dt>
+                  <dd title={[
+                    editor.proposalSource.model_id,
+                    editor.proposalSource.model_revision,
+                    editor.proposalSource.queries,
+                  ].join("\n")}>
+                    {editor.proposalSource.original_label}
+                    {" · "}
+                    {Math.round(editor.proposalSource.score * 100)}%
+                    {" · "}
+                    {editor.proposalSource.model_revision.slice(0, 10)}…
+                  </dd>
+                </div>
+              )}
             </dl>
           )}
 
           <div className="rs-primary-actions">
             <button type="button" className="primary" onClick={editor.save}
                     disabled={!canSave || anyBusy}>
-              {editor.busy === "save" ? "Saving…" : "Save annotation"}
+              {editor.busy === "save" ? "Saving…" : "Accept & save"}
             </button>
             {editor.selectedId != null && (
               <button type="button" className="ghost"
@@ -453,26 +692,28 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
               <button type="button" className="ghost" onClick={doPositiveRegionSearch}
                       disabled={anyBusy}>
                 {editor.busy === "region-positive"
-                  ? "Searching…" : "Find similar to box"}
+                  ? "Searching…" : "Find images like this crop"}
               </button>
               <button type="button" className="ghost" onClick={doNegativeRegionSearch}
                       disabled={anyBusy}>
                 {editor.busy === "region-negative"
-                  ? "Searching…" : "Search away from box"}
+                  ? "Searching…" : "Exclude this crop concept"}
               </button>
             </div>
           )}
         </div>
       )}
 
+      {(annotationMode || editor.annotations.length > 0) && (
       <section className="rs-saved" aria-labelledby={`${instructionsId}-saved`}>
         <div className="rs-saved-head">
-          <h3 id={`${instructionsId}-saved`}>Saved annotations</h3>
+          <h3 id={`${instructionsId}-saved`}>Accepted annotations</h3>
           <span>{editor.annotations.length}</span>
         </div>
         {editor.annotations.length === 0 ? (
           <p className="rs-empty">
-            No saved masks for this image yet. Prompt a mask, name its class, and save it.
+            No accepted masks for this image yet. Prompt a mask, name its class,
+            then review and accept it.
           </p>
         ) : (
           <ul>
@@ -494,40 +735,80 @@ export default function RegionSearch({ sampleId, imageUrl, alt }: Props) {
                   </span>
                   <span className="rs-ann-score">
                     {annotation.predicted_iou != null
-                      ? `${Math.round(annotation.predicted_iou * 100)}% IoU`
-                      : "saved mask"}
+                      ? `${Math.round(annotation.predicted_iou * 100)}% predicted IoU`
+                      : "accepted mask"}
                   </span>
                 </button>
-                <button type="button" className="ghost"
-                        onClick={() => void editor.searchAnnotation(annotation.id)}
-                        disabled={anyBusy}>
-                  Search
-                </button>
-                <button type="button" className="ghost danger"
-                        onClick={() => confirmDelete(
-                          annotation.id,
-                          annotation.label_name ?? annotation.label ?? "unnamed",
-                        )}
-                        disabled={anyBusy}>
-                  Delete
-                </button>
+                <div className="rs-ann-actions">
+                  <button type="button" className="ghost"
+                          onClick={() => void editor.searchAnnotation(annotation.id)}
+                          disabled={anyBusy}>
+                    Search
+                  </button>
+                  {annotation.cutout_url && (
+                    <a
+                      className="ghost"
+                      href={annotation.cutout_url}
+                      download={`cvde-sample-${annotation.sample_id}-annotation-${annotation.id}-cutout.png`}
+                      aria-disabled={anyBusy}
+                      onClick={(event) => {
+                        if (anyBusy) event.preventDefault();
+                      }}
+                      title="Download the mask-isolated object as a transparent RGBA PNG"
+                    >
+                      Export cutout
+                    </a>
+                  )}
+                  {annotation.artifact_package_url && (
+                    <button
+                      type="button"
+                      className="ghost"
+                      onClick={() => void exportAnnotation(annotation)}
+                      disabled={anyBusy}
+                      title="Download one ZIP containing the accepted mask, transparent object cutout, and SHA-256-linked provenance manifest"
+                    >
+                      {exportingId === annotation.id
+                        ? "Exporting…"
+                        : "Evidence package"}
+                    </button>
+                  )}
+                  <button type="button" className="ghost danger"
+                          onClick={() => confirmDelete(
+                            annotation.id,
+                            annotation.label_name ?? annotation.label ?? "unnamed",
+                          )}
+                          disabled={anyBusy}>
+                    Delete
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
         )}
       </section>
+      )}
 
       {editor.results && (
         <section className="rs-results" aria-labelledby={`${instructionsId}-results`}>
           <div className="rs-results-head">
             <h3 id={`${instructionsId}-results`}>
               {editor.results.role === "annotation"
-                ? "Segment matches"
+                ? "Accepted-mask matches"
                 : editor.results.role === "positive"
-                  ? "Similar regions"
-                  : "Away from this region"}
+                  ? "Crop-similar images"
+                  : "Images unlike this crop"}
             </h3>
-            <span>{editor.results.items.length}</span>
+            <div className="rs-results-actions">
+              <span>{editor.results.items.length}</span>
+              {editor.results.items.length > 0 && (
+                <Link
+                  className="open-all"
+                  to={`/?ids=${editor.results.items.map((sample) => sample.id).join(",")}`}
+                >
+                  Open in gallery
+                </Link>
+              )}
+            </div>
           </div>
           {editor.results.message && <p className="rs-note">{editor.results.message}</p>}
           <div className="grid rs-grid">

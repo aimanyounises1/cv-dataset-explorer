@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { AttributeGroup, TagInfo } from "../api/types";
 import { Listbox, Segmented } from "./controls";
+import { useSplitCounts } from "../lib/activeProvider";
 
 export interface Filters {
   split: string;
@@ -22,6 +23,9 @@ export default function FilterBar({ filters, onChange }: Props) {
   const [vlmTags, setVlmTags] = useState<TagInfo[]>([]);
   const [coverage, setCoverage] = useState<AttributeGroup[]>([]);
   const [failed, setFailed] = useState(false);
+  // Reuses the overview promise the app already has in flight — no request of
+  // its own, so the split sizes cost the rail nothing.
+  const splitCounts = useSplitCounts();
 
   useEffect(() => {
     // Facets that fail to load must be distinguishable from facets that
@@ -39,12 +43,14 @@ export default function FilterBar({ filters, onChange }: Props) {
       <Segmented
         label="Filter by split"
         value={filters.split}
-        options={[
-          { value: "", label: "All" },
-          { value: "train", label: "train" },
-          { value: "validation", label: "validation" },
-          { value: "test", label: "test" },
-        ]}
+        options={["", "train", "validation", "test"].map((value) => ({
+          value,
+          label: value || "All",
+          // Absent until the overview lands, and absent for good if it fails:
+          // the control still filters, it just does not claim a size it has
+          // not been told.
+          figure: splitCounts?.[value]?.toLocaleString(),
+        }))}
         onChange={(split) => onChange({ ...filters, split })}
       />
       {coverage.length > 0 && (

@@ -16,7 +16,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 EXTERNAL = ("http://", "https://", "mailto:", "#")
-SKIP_DIRS = {"node_modules", ".venv", "data", "dist"}
+# Generated data and ignored agent/IDE control planes are not repository
+# documentation. A locally installed skill may contain its own partial link
+# graph; treating that as this project's broken README makes the check depend on
+# one developer's tooling rather than the submitted tree.
+SKIP_DIRS = {
+    "node_modules",
+    ".venv",
+    "data",
+    "dist",
+    ".agents",
+    ".claude",
+    ".codex",
+    ".omc",
+    ".coordination",
+}
 
 
 def main() -> int:

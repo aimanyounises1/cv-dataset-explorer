@@ -76,6 +76,12 @@
 
 /* ---- Axis legend -------------------------------------------------------
    Key for the four-bar difficulty sparkline carried by every image card. */
+/* The row wraps as a group, never mid-phrase. Its children are labels a few
+   words long; as shrinkable flex items they were compressed to 50px and 35px
+   and broke onto three lines each, which turned a 20px strip into an 83px
+   block of ragged text sitting directly above the grid — measured at a 1600px
+   viewport, where there was room for all of it. Anything that is a phrase
+   holds its width below; the group as a whole is what gives way. */
 .axis-legend {
   position: relative;
   display: flex;
@@ -83,7 +89,9 @@
   gap: 10px;
   font-size: 11.5px;
   color: var(--text-faint);
+  flex-wrap: wrap;
 }
+.axis-legend > * { flex-shrink: 0; }
 
 .axis-legend-keys { display: flex; gap: 9px; }
 .axis-legend-key { display: inline-flex; align-items: baseline; gap: 4px; cursor: help; }
@@ -93,14 +101,27 @@
   font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
   color: var(--text-dim);
 }
-.axis-legend-scale { font-family: var(--font-mono); font-size: 10.5px; }
-
-.axis-legend-more {
-  background: none; border: none; padding: 0;
-  color: var(--accent); font-size: 11.5px; font-family: var(--font-sans);
-  cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+.axis-legend-scale {
+  font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap;
 }
-.axis-legend-more:hover { filter: brightness(1.15); }
+
+/* A control, not a sentence with a line under it. It sits in a row of pills
+   and used to be the one item there with no border, no padding and a 13px
+   box — an underlined phrase among buttons reads as body copy that happens to
+   be clickable. Same height and shape as its neighbours; the accent ink is
+   what still says "this opens something". */
+.axis-legend-more {
+  display: inline-flex; align-items: center;
+  height: var(--ctl-h); padding: 0 11px;
+  background: none; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--accent); font-size: 11.5px; font-family: var(--font-sans);
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: border-color var(--t-quick), background var(--t-quick);
+}
+.axis-legend-more:hover { border-color: var(--accent); background: var(--accent-soft); }
+.axis-legend-more[aria-expanded="true"] {
+  border-color: var(--accent); background: var(--accent-soft);
+}
 .axis-legend-more:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Absolutely positioned so opening it costs the grid no vertical space — the

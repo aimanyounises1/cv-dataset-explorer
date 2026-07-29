@@ -6,6 +6,8 @@ and never returns its own source image.
     cd backend && pytest tests/test_region_search.py
 """
 import sys
+import threading
+from contextlib import nullcontext
 from types import ModuleType, SimpleNamespace
 
 import numpy as np
@@ -17,6 +19,7 @@ from app import config, db
 from app.main import app
 from app.ml import index as index_mod
 from app.ml import providers
+from app.schemas import SegmentBox
 from tests.fake_provider import MockEncoder
 
 
@@ -119,12 +122,29 @@ def test_detect_status_names_the_enabling_command(ctx, monkeypatch):
     a named reason with the fetch command, never a 500 or a silent download."""
     client, sids = ctx
     from app.ml import detect as detect_ml
-    monkeypatch.setattr(detect_ml, "_weights_cached", lambda: False)
+
+    def missing_snapshot():
+        raise RuntimeError("snapshot is incomplete")
+
+    monkeypatch.setattr(detect_ml, "_resolve_snapshot", missing_snapshot)
     st = client.get("/api/detect/status").json()
     assert st["ready"] is False and "snapshot_download" in st["reason"]
+    assert st["revision"] == config.DETECT_REVISION
     r = client.post("/api/detect", json={"sample_id": sids[0]})
     assert r.status_code == 503
     assert "snapshot_download" in r.json()["detail"]
+
+
+def test_detector_rejects_a_moving_revision(monkeypatch):
+    from app.ml import detect as detect_ml
+
+    monkeypatch.setattr(detect_ml, "_detector", None)
+    monkeypatch.setattr(detect_ml, "_failed_at", None)
+    monkeypatch.setattr(detect_ml, "DETECT_REVISION", "main")
+    state = detect_ml.detector_availability()
+    assert state.ready is False
+    assert state.revision is None
+    assert "full 40-character Hugging Face commit" in state.reason
 
 
 def test_detect_validates_input(ctx):
@@ -132,9 +152,62 @@ def test_detect_validates_input(ctx):
     assert client.post("/api/detect", json={"sample_id": 0}).status_code == 422
     assert client.post("/api/detect",
                        json={"sample_id": sids[0], "queries": ""}).status_code == 422
+    assert client.post(
+        "/api/detect",
+        json={"sample_id": sids[0], "queries": "   "},
+    ).status_code == 422
 
 
-def test_detector_model_load_is_offline_only(monkeypatch):
+def test_detect_returns_server_bound_proposal_tokens(ctx, monkeypatch):
+    client, sids = ctx
+    from app.ml import detect as detect_ml
+    from app.proposal_tokens import resolve_detection_proposal
+    from app.schemas import SegmentBox
+
+    class FakeDetector:
+        model_id = config.DETECT_MODEL
+        revision = config.DETECT_REVISION
+
+        def detect(self, _image, _queries):
+            return [{
+                "x": 0.1,
+                "y": 0.2,
+                "w": 0.3,
+                "h": 0.4,
+                "label": "a dog",
+                "score": 0.91,
+            }]
+
+    monkeypatch.setattr(detect_ml, "get_detector", lambda: FakeDetector())
+    response = client.post(
+        "/api/detect",
+        json={"sample_id": sids[0], "queries": "a dog."},
+    )
+
+    assert response.status_code == 200
+    box = response.json()["boxes"][0]
+    assert box["proposal_token"].count(".") == 1
+    source = resolve_detection_proposal(
+        box["proposal_token"],
+        sample_id=sids[0],
+        prompt_box=SegmentBox(
+            x=box["x"],
+            y=box["y"],
+            w=box["w"],
+            h=box["h"],
+        ),
+    )
+    assert source.model_revision == config.DETECT_REVISION
+    assert source.queries == "a dog."
+    assert source.original_label == "a dog"
+    assert source.proposed_label == "dog"
+    assert source.score == pytest.approx(0.91)
+
+
+def test_detector_model_load_uses_one_resolved_snapshot_offline(
+    monkeypatch,
+    tmp_path,
+):
     """A request may load cached weights, but must never fetch a checkpoint."""
     from app.ml import detect as detect_ml
 
@@ -163,6 +236,211 @@ def test_detector_model_load_is_offline_only(monkeypatch):
     fake_transformers.AutoProcessor = ProcessorFactory
     fake_transformers.GroundingDinoForObjectDetection = ModelFactory
     monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
-    detect_ml._Detector()
+    snapshot = SimpleNamespace(
+        model_id=config.DETECT_MODEL,
+        revision=config.DETECT_REVISION,
+        snapshot_path=tmp_path,
+    )
+    loaded = detect_ml._Detector(snapshot)
     assert len(calls) == 2
+    assert {call[1] for call in calls} == {str(tmp_path)}
     assert all(call[2]["local_files_only"] is True for call in calls)
+    assert loaded.model_id == config.DETECT_MODEL
+    assert loaded.revision == config.DETECT_REVISION
+
+
+def test_detector_clips_boxes_and_preserves_thin_positive_geometry():
+    """Transformers rescales Grounding DINO boxes but does not clip them."""
+    from app.ml import detect as detect_ml
+
+    class Values:
+        def __init__(self, values):
+            self.values = values
+
+        def tolist(self):
+            return self.values
+
+    class Inputs(dict):
+        def __init__(self):
+            super().__init__(input_ids=[])
+            self.input_ids = self["input_ids"]
+
+        def to(self, _device):
+            return self
+
+    class Processor:
+        def __call__(self, **_kwargs):
+            return Inputs()
+
+        def post_process_grounded_object_detection(self, *_args, **_kwargs):
+            return [{
+                "boxes": Values([
+                    [80.0, 10.0, 120.0, 50.0],
+                    [10.0, 10.0, 10.004, 50.0],
+                    [-10.0, -5.0, 20.0, 30.0],
+                    [120.0, 10.0, 130.0, 20.0],
+                    [float("nan"), 0.0, 10.0, 10.0],
+                ]),
+                "scores": Values([0.9, 0.8, 0.7, 0.6, 0.5]),
+                "text_labels": ["edge", "thin", "clipped", "outside", "nan"],
+            }]
+
+    detector = object.__new__(detect_ml._Detector)
+    detector.device = "cpu"
+    detector.processor = Processor()
+    detector.model = lambda **_kwargs: object()
+    detector._torch = SimpleNamespace(no_grad=lambda: nullcontext())
+    detector._infer = threading.Lock()
+
+    boxes = detector.detect(Image.new("RGB", (100, 100)), "object.")
+
+    assert [box["label"] for box in boxes] == ["edge", "thin", "clipped"]
+    assert boxes[0]["x"] == pytest.approx(0.8)
+    assert boxes[0]["w"] == pytest.approx(0.2)
+    assert boxes[1]["w"] == pytest.approx(0.00004)
+    assert boxes[2]["x"] == 0.0
+    assert boxes[2]["y"] == 0.0
+    for box in boxes:
+        # The model layer emits geometry; the API layer adds taxonomy and the
+        # required server-issued proposal token before validating DetectBoxOut.
+        SegmentBox.model_validate(box)
+
+
+def test_detector_snapshot_resolution_is_commit_bound(monkeypatch, tmp_path):
+    from app.ml import detect as detect_ml
+
+    calls = []
+    expected = SimpleNamespace(
+        model_id=config.DETECT_MODEL,
+        revision=config.DETECT_REVISION,
+        snapshot_path=tmp_path,
+    )
+
+    def resolve(model_id, revision=None, local_files_only=False):
+        calls.append((model_id, revision, local_files_only))
+        return expected
+
+    monkeypatch.setattr(providers, "resolve_model_snapshot", resolve)
+    assert detect_ml._resolve_snapshot() is expected
+    assert calls == [(
+        config.DETECT_MODEL,
+        config.DETECT_REVISION,
+        True,
+    )]
+
+
+def test_detector_rejects_a_resolved_commit_mismatch(monkeypatch, tmp_path):
+    from app.ml import detect as detect_ml
+
+    mismatched = SimpleNamespace(
+        model_id=config.DETECT_MODEL,
+        revision="f" * 40,
+        snapshot_path=tmp_path,
+    )
+    monkeypatch.setattr(
+        providers,
+        "resolve_model_snapshot",
+        lambda *_args, **_kwargs: mismatched,
+    )
+
+    with pytest.raises(RuntimeError, match="does not match CVDE_DETECT_REVISION"):
+        detect_ml._resolve_snapshot()
+
+
+def test_loaded_detector_availability_does_not_probe_snapshot(monkeypatch):
+    from app.ml import detect as detect_ml
+
+    loaded = SimpleNamespace(
+        model_id=config.DETECT_MODEL,
+        revision=config.DETECT_REVISION,
+    )
+    monkeypatch.setattr(detect_ml, "_detector", loaded)
+    monkeypatch.setattr(
+        detect_ml,
+        "_resolve_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("loaded model must not probe cache"),
+    )
+
+    state = detect_ml.detector_availability()
+
+    assert state.ready is True
+    assert state.model == config.DETECT_MODEL
+    assert state.revision == config.DETECT_REVISION
+
+
+def test_detect_status_reports_load_cooldown_without_resolving(monkeypatch):
+    from app.ml import detect as detect_ml
+
+    monkeypatch.setattr(detect_ml, "_detector", None)
+    monkeypatch.setattr(detect_ml, "_failed_at", detect_ml.time.monotonic())
+    monkeypatch.setattr(detect_ml, "_failed_reason", "detector load failed: boom")
+    monkeypatch.setattr(
+        detect_ml,
+        "_resolve_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("cooldown must not probe the snapshot"),
+    )
+
+    state = detect_ml.detector_availability()
+
+    assert state.ready is False
+    assert state.reason == "detector load failed: boom"
+    assert state.revision == config.DETECT_REVISION
+
+
+def test_detect_status_resolves_snapshot_once(monkeypatch, tmp_path):
+    from app.api.detect import detect_status
+    from app.ml import detect as detect_ml
+
+    calls = []
+    snapshot = SimpleNamespace(
+        model_id=config.DETECT_MODEL,
+        revision=config.DETECT_REVISION,
+        snapshot_path=tmp_path,
+    )
+
+    def resolve(revision=None):
+        calls.append(revision)
+        return snapshot
+
+    monkeypatch.setattr(detect_ml, "_detector", None)
+    monkeypatch.setattr(detect_ml, "_failed_at", None)
+    monkeypatch.setattr(detect_ml, "_resolve_snapshot", resolve)
+
+    body = detect_status()
+
+    assert body["ready"] is True
+    assert body["revision"] == config.DETECT_REVISION
+    assert "330 ms" in body["measured"]
+    assert calls == [config.DETECT_REVISION]
+
+
+def test_detect_status_does_not_reuse_measurement_for_an_override(monkeypatch):
+    from app.api import detect as detect_api
+    from app.ml.detect import DetectorAvailability
+
+    monkeypatch.setattr(
+        detect_api.detect_ml,
+        "detector_availability",
+        lambda: DetectorAvailability(
+            ready=True,
+            reason=None,
+            model="example/custom-detector",
+            revision="1" * 40,
+        ),
+    )
+
+    assert detect_api.detect_status()["measured"] == (
+        "not measured for the configured detector artifact"
+    )
+
+
+def test_detector_openapi_exposes_provenance_contract():
+    schema = app.openapi()
+    responses = schema["paths"]["/api/detect"]["post"]["responses"]
+    assert responses["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/DetectResponse")
+    detect_box = schema["components"]["schemas"]["DetectBoxOut"]
+    assert "proposal_token" in detect_box["required"]
+    status_responses = schema["paths"]["/api/detect/status"]["get"]["responses"]
+    assert status_responses["200"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/ModelCapabilityStatus")

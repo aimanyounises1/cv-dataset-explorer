@@ -1,12 +1,13 @@
 import {
   useCallback, useEffect, useRef, useState,
 } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ApiError, api } from "../api/client";
 import {
   AXES, LeakagePair, SampleCard, SegmentAnnotation, SegmentBox,
 } from "../api/types";
 import ImageCard from "../components/ImageCard";
+import VisionComparePanel from "../components/VisionComparePanel";
 import { useActiveProviderName, useCorpusTotal } from "../lib/activeProvider";
 import "../styles/compare.css";
 
@@ -84,7 +85,7 @@ const REST_VIEW: View = { s: 1, tx: 0, ty: 0 };
 
 async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path);
-  if (!r.ok) throw new Error(`${r.status} on ${path}`);
+  if (!r.ok) throw new ApiError(r.status, await r.text());
   return r.json() as Promise<T>;
 }
 
@@ -138,6 +139,7 @@ function idFromParam(raw: string | null): number | null {
 // ------------------------------------------------------------------- the page
 
 export default function ComparePage() {
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const aId = idFromParam(params.get("a"));
   const bId = idFromParam(params.get("b"));
@@ -218,6 +220,10 @@ export default function ComparePage() {
     }, { replace: true });
   }, [setParams]);
 
+  const groundOnSample = useCallback((sampleId: number, term: string) => {
+    navigate(`/samples/${sampleId}?detector=${encodeURIComponent(term)}`);
+  }, [navigate]);
+
   // Keyboard drives the same shared transform. Zoom pivots on the first
   // pane's centre — with no cursor there is no better anchor.
   useEffect(() => {
@@ -260,9 +266,11 @@ export default function ComparePage() {
       {aId == null && bId == null && <PairQueue />}
 
       <div className={`compare-panes${aId == null && bId == null ? " idle" : ""}`}>
-        <Pane slot="a" sample={a.data} error={a.error} view={view} setView={setView}
+        <Pane slot="a" requestedId={aId} sample={a.data} error={a.error}
+          view={view} setView={setView}
           onFill={fill} searching={searching} onSearchRegion={searchRegion} />
-        <Pane slot="b" sample={b.data} error={b.error} view={view} setView={setView}
+        <Pane slot="b" requestedId={bId} sample={b.data} error={b.error}
+          view={view} setView={setView}
           onFill={fill} searching={searching} onSearchRegion={searchRegion} />
       </div>
 
@@ -294,6 +302,13 @@ export default function ComparePage() {
         </section>
       )}
 
+      {a.data && b.data && (
+        <VisionComparePanel
+          aId={a.data.id}
+          bId={b.data.id}
+          onGround={groundOnSample}
+        />
+      )}
       {a.data && b.data && <DiffPanel a={a.data} b={b.data} sim={sim} />}
     </div>
   );
@@ -303,6 +318,7 @@ export default function ComparePage() {
 
 interface PaneProps {
   slot: "a" | "b";
+  requestedId: number | null;
   sample: SampleDetail | null;
   error: string | null;
   view: View;
@@ -316,7 +332,7 @@ interface PaneProps {
 }
 
 function Pane({
-  slot, sample, error, view, setView, onFill, searching, onSearchRegion,
+  slot, requestedId, sample, error, view, setView, onFill, searching, onSearchRegion,
 }: PaneProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<HTMLDivElement | null>(null);
@@ -331,6 +347,8 @@ function Pane({
   const [draft, setDraft] = useState<SegmentBox | null>(null);
   const [steer, setSteer] = useState("");
   const [saved, setSaved] = useState<SegmentAnnotation[]>([]);
+  const [savedError, setSavedError] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
 
   // The layer's layout width and height at scale 1 — the denominator of the
   // magnification readout and what 1:1 solves against. Observed, not assumed:
@@ -344,6 +362,7 @@ function Pane({
   // A new occupant clears the previous one's marks.
   useEffect(() => {
     setDraft(null); setSteer(""); setDrawMode(false);
+    setImageError(null);
   }, [sampleId]);
 
   useEffect(() => {
@@ -363,12 +382,19 @@ function Pane({
   // that screen cannot see, edit or delete.
   useEffect(() => {
     setSaved([]);
+    setSavedError(null);
     if (sampleId == null) return;
     const ctrl = new AbortController();
     api.listSegmentAnnotations(sampleId, ctrl.signal)
       .then((list) => { setSaved(list.filter((x) => x.geometry != null)); })
-      .catch(() => { /* an aborted or unavailable read draws no marks, which
-                        is what "this image has none" already looks like */ });
+      .catch((caught: unknown) => {
+        if (ctrl.signal.aborted) return;
+        setSavedError(
+          caught instanceof Error
+            ? caught.message
+            : "Saved annotation overlays could not be loaded.",
+        );
+      });
     return () => ctrl.abort();
   }, [sampleId]);
 
@@ -498,7 +524,16 @@ function Pane({
           Drop an image here, or pick two in the gallery and press Compare.
         </p>
       )}
-      {!sample && error && <div className="error">{error}</div>}
+      {!sample && error && (
+        <div className="compare-pane-error" role="alert">
+          <strong>
+            Image {slot.toUpperCase()}
+            {requestedId != null ? ` #${requestedId}` : ""} is unavailable
+          </strong>
+          <span>{error}</span>
+          <Link to="/">Choose another image in Browse</Link>
+        </div>
+      )}
       {sample && (
         <>
           <header className="pane-head">
@@ -551,12 +586,34 @@ function Pane({
             <div
               ref={layerRef}
               className="compare-img-layer"
+              // `--ar` is the same ratio as a bare number, which `aspectRatio`
+              // alone cannot give CSS: the stylesheet multiplies it by the
+              // stage height to pick the largest correctly-shaped box that
+              // fits, instead of clamping a full-width box and losing the
+              // shape. Both are set from one pair of fields so they cannot
+              // disagree.
               style={{
                 aspectRatio: `${sample.width} / ${sample.height}`,
+                "--ar": `${sample.width / sample.height}`,
                 transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`,
-              }}
+              } as React.CSSProperties}
             >
-              <img src={sample.image_url} alt={sample.filename} draggable={false} />
+              <img
+                src={sample.image_url}
+                alt={sample.filename}
+                draggable={false}
+                onError={() => setImageError(
+                  `The source pixels for #${sample.id} (${sample.filename}) `
+                  + "could not be loaded.",
+                )}
+              />
+              {imageError && (
+                <div className="compare-image-error" role="alert">
+                  <strong>Source image unavailable</strong>
+                  <span>{imageError}</span>
+                  <Link to={`/samples/${sample.id}`}>Open the sample record</Link>
+                </div>
+              )}
               {saved.map((ann) => (
                 <div key={ann.id} className="region-rect saved" style={pct(ann.geometry)}>
                   {(ann.label_name ?? ann.label)
@@ -566,6 +623,11 @@ function Pane({
               {draft && <div className="region-rect draft" style={pct(draft)} />}
             </div>
           </div>
+          {savedError && (
+            <div className="compare-annotation-error" role="alert">
+              Saved annotation overlays are unavailable: {savedError}
+            </div>
+          )}
           {draft && (
             <div className="region-actions">
               {/* The same steering the composed query takes everywhere else:
@@ -603,7 +665,7 @@ function Pane({
   );
 }
 
-// ------------------------------------------------- shared / different readout
+// ---------------------------------------- stored-signal and embedding readout
 
 interface DiffPanelProps {
   a: SampleDetail;
@@ -634,7 +696,11 @@ function DiffPanel({ a, b, sim }: DiffPanelProps) {
 
   return (
     <section className="panel compare-diff">
-      <h3>Shared &amp; different</h3>
+      <h3>Stored signals &amp; embedding</h3>
+      <p className="compare-sim">
+        Dataset metadata and precomputed scores only. Visible image-content
+        differences are inspected separately above.
+      </p>
       {sim !== null && (
         <p className="compare-sim">
           {sim === "absent"

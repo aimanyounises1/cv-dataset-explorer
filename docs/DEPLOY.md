@@ -79,6 +79,19 @@ An older index without a schema-v2 marker is intentionally not adopted: run the
 ingest command above once to rebuild it. Until then the UI names the problem and
 serves keyword search rather than mixing incompatible vector spaces.
 
+Grounding DINO and SAM2 are also optional, cache-only layers. Compose forwards
+their model IDs and full revision selectors. Populate a new `hf-cache` volume
+with the exact defaults before exposing their controls:
+
+```bash
+docker compose exec backend python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='IDEA-Research/grounding-dino-tiny', revision='a2bb814dd30d776dcf7e30523b00659f4f141c71')"
+docker compose exec backend python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='facebook/sam2.1-hiera-tiny', revision='de431c4043854a71d8101e17995dfe596bf101a5')"
+```
+
+For another checkpoint, set the matching model and full commit together
+(`CVDE_DETECT_MODEL` + `CVDE_DETECT_REVISION`, or `CVDE_SEGMENT_MODEL` +
+`CVDE_SEGMENT_REVISION`). Request handling never downloads or changes a model.
+
 If the host index was built with a non-default model, pass the same selector to
 Compose, for example
 `CVDE_EMBED_MODEL=google/siglip2-so400m-patch14-384 docker compose up`.

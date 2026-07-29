@@ -27,7 +27,7 @@ python3 -m app.ingest           # downloads Flickr8k + SigLIP 2, builds everythi
 python3 -m uvicorn app.main:app --port 8000
 
 # frontend (Node 20+), second terminal from the repository root
-cd frontend && npm install && npx vite --port 5173
+cd frontend && npm ci && npm run dev -- --port 5173
 ```
 
 Open http://localhost:5173. On Windows, activate with
@@ -35,18 +35,47 @@ Open http://localhost:5173. On Windows, activate with
 `python3`. `python3 -m app.ingest --skip-embeddings` skips the
 model download and runs keyword-only; every ML capability is an optional layer
 that reports its own availability and names the command that enables it.
+The Vite development proxy targets `http://localhost:8000` by default. To
+verify against an isolated backend without stopping another local server, start
+Vite with `CVDE_DEV_API=http://127.0.0.1:8001 npx vite --port 5174`.
 
 Optional layers, each honest about its absence:
 
 | Layer | Enable with |
 |---|---|
 | Assistant (local agents) | [Ollama](https://ollama.com) + `ollama pull qwen3:8b`, then `pip install -r requirements-agent.txt` |
+| Local vision inspector | Ollama + explicit `ollama pull gemma4:12b` and/or `ollama pull qwen3.5:9b`; select aliases with `CVDE_VISION_MODELS` |
+| Semantic pair inspector | The capability-tested `qwen3.5:9b` Ollama artifact; bind a revalidated alias, digest, and runtime with `CVDE_VISION_PAIR_MODEL`, `CVDE_VISION_PAIR_MODEL_DIGEST`, and `CVDE_VISION_PAIR_RUNTIME_VERSION` |
 | VLM tag enrichment | `ollama pull qwen2.5vl:7b`, then `python3 -m app.enrich` |
 | Self-QA browser sweep | `pip install -r requirements-qa.txt` (Playwright + real Chrome) |
 | Qwen3-VL retrieval provider | `pip install -r requirements-qwen.txt`, then `python3 -m app.ingest --provider qwen3_vl` |
-| Region suggestions (zero-shot detector) | `python3 -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny')"` |
-| Promptable object masks (SAM 2.1 tiny) | `python3 -c "from huggingface_hub import snapshot_download; snapshot_download('facebook/sam2.1-hiera-tiny')"` |
+| Region suggestions (zero-shot detector) | `python3 -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='IDEA-Research/grounding-dino-tiny', revision='a2bb814dd30d776dcf7e30523b00659f4f141c71')"` |
+| Promptable object masks (SAM 2.1 tiny) | `python3 -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='facebook/sam2.1-hiera-tiny', revision='de431c4043854a71d8101e17995dfe596bf101a5')"` |
 | Container path | `docker compose up --build` — see [docs/DEPLOY.md](docs/DEPLOY.md) |
+
+The detector and segmenter load only those immutable local snapshots. Override
+the model and full commit together with `CVDE_DETECT_MODEL` /
+`CVDE_DETECT_REVISION` or `CVDE_SEGMENT_MODEL` /
+`CVDE_SEGMENT_REVISION`. Every newly accepted mask records both values; legacy
+masks honestly report an unknown revision rather than inheriting the current
+configuration.
+
+Ollama's generic `vision` flag establishes single-image input, not dependable
+two-image comparison. The pair adapter is therefore bound to the exact local
+Qwen digest and Ollama runtime that passed the ordered-frame contract. Pulling
+new weights under the same alias or upgrading the runtime disables the
+capability until the contract is rerun; neither silently inherits the old
+result:
+
+```bash
+backend/.venv/bin/python scripts/validate_pair_vision.py
+```
+
+The probe uses two frozen source images and validates the typed response,
+proposed grounding terms, exact model digest, runtime, and adapter protocol for
+both frames. Add
+`--write backend/data/reports/pair-vision-validation.json` to retain the full
+local evidence record under the gitignored data directory.
 
 ## The model decision, measured
 
@@ -160,23 +189,57 @@ instead of padding. A sample reached from a search says *why* it surfaced.
 Mark a rectangle on the image itself, add keep/remove points, or accept a
 zero-shot Grounding DINO box proposal. SAM 2.1 turns that prompt into a visible,
 refinable mask; the editor keeps the leaf class and explicit parent separate
-(`dog` inside `animal`), and a human click accepts the mask as an annotation
-with model, prompt and predicted-IoU provenance. Search can use that saved
-object rather than the full source frame. Today the masked-object vector and
+(`dog` inside `animal`), and a human click accepts the mask as an annotation.
+Acceptance persists the exact reviewed PNG—SAM is not run a second time—and a
+short-lived server signature binds those bytes to the source-image SHA-256,
+prompt geometry, model revision, predicted IoU, and mask dimensions. Search can
+use that saved object rather than the full source frame. Today the masked-object vector and
 optional leaf-label vector rank the existing full-image index, and the result
 header states that boundary rather than implying an object-patch index.
 Rectangle search **toward or away from the region** remains available as the
 fast fallback. `scripts/bench_detector.py` and `scripts/bench_sam2.py`
 re-measure both optional models.
 
+If the mask began with a detector proposal, the accepted record also preserves
+Grounding DINO's exact revision, full query, original/proposed labels, score and
+source box. The detector evidence reaches acceptance through a short-lived,
+server-authenticated proposal token rather than trusted client JSON. A reviewer
+can relabel without erasing that disagreement. Saved annotations expose
+masked-object search plus one atomic ZIP export. The package contains the
+accepted binary mask, a tight RGBA object cutout whose alpha channel is that
+mask, and a manifest binding the source, mask, and cutout byte lengths and
+SHA-256 values to the annotation, model revisions, and the documented Pillow
+operations that derived it. The source frame is never modified.
+
+The same sample page has a read-only **local vision inspector**. It runs one
+typed task—scene inventory, road-scene triage, caption audit, OCR, or a focused
+image question—against an explicitly configured, already-installed Ollama
+vision model. Results are visibly marked as model proposals and bind the exact
+decoded-source SHA-256/dimensions/mode/byte length, model digest, input SHA-256,
+latency, prompt version and schema version. Proposed
+classes can populate the measured Grounding-DINO → SAM2 workbench, but no result
+creates a label or changes source data. Run a second local model to expose
+disagreement instead of hiding it. The design decisions and deferred
+OWLv2 / Florence-2 / SAM3 evidence are in
+[ADR-0001](docs/adr/0001-local-vision-inspection-workbench.md) and
+[ADR-0002](docs/adr/0002-segmentation-and-dataset-preparation.md).
+
 ### Compare two frames
 
 ![Compare canvas: synchronized zoom, shared/different panel](docs/screenshots/14-compare.png)
 
-`/compare` puts two samples under one loupe — synchronized zoom and pan, a
-counted shared/different panel, and manual rectangle regions (drawn by you, no
-segmentation model) that can be saved as annotations or cropped into an
-image search. Source images are never modified.
+`/compare` puts two samples under one loupe. Synchronized zoom/pan and manual
+rectangle search remain deterministic tools. A separate Inspection Run first
+verifies and decodes both local files, then asks the capability-tested Qwen
+artifact for a typed **semantic difference proposal**. The report keeps visible
+pose/presence/appearance changes separate from embedding cosine, stored
+attributes, dHash duplicate triage, and corruption. Proposed object phrases can
+enter the existing Grounding DINO → SAM2 flow, but only a reviewer can create an
+annotation. Every exported comparison binds both source SHA-256 values, decode
+dimensions, mode and byte length, the exact model digest, provider/runtime
+version, adapter, proposal ID, prompt/schema versions, protocol, and latency.
+Source images are never modified. See
+[ADR-0003](docs/adr/0003-sequential-inspection-runs-and-pair-comparison.md).
 
 ### Curate into albums, and let them leave
 
@@ -193,16 +256,29 @@ by drag or arrow keys, set a cover, edit the summary where you read it. The
 Analyze panel counts what members share and where they split, and computes
 coherence and outliers from the active index; a summary draft from the local
 chat model is generated only on request, edited by you, saved only by you.
+That stored-signal analysis is separate from **Inspect album pixels**: the
+bounded visual run refreshes and freezes the ordered membership, verifies the
+selected model's exact digest, and calls the same documented single-image
+inspection contract sequentially for at most eight members. Progress is visible
+per image; decode or structured-output failures remain beside successful
+proposals; a busy accelerator or timeout stops after the current member.
+Every result links back to source review and, for a scene proposal, into the
+Grounding-DINO → SAM2 path. One JSON manifest exports the frozen snapshot,
+ordered successes/failures, source/model provenance, and unstarted members.
+It is a browser-session run, not a durable scheduler: reload discards the
+on-screen run unless its manifest was downloaded, and no proposal is written
+as a caption or annotation.
 Share stays local-first: copy the URL, compose an email or Teams message
 (nothing is uploaded), or download the slice as JSON/CSV/JSONL with a
 manifest that records the query, model and embedding fingerprint that
 produced it.
 
-### Ask an assistant that shows its work
+### Experimental assistant boundary
 
 ![Assistant conversation with agent trace and rendered blocks](docs/screenshots/11-assistant.png)
 
-An optional LangGraph orchestration over local Ollama: a schema-constrained
+The repository also contains optional LangGraph orchestration over local Ollama:
+a schema-constrained
 orchestrator routes to registered retrieval, insights, visualization or QA
 specialists (at most two cheap lanes in parallel), and a typed synthesizer
 quality-gates the answer. **The graph's own node transitions stream into the UI
@@ -214,6 +290,14 @@ measured signals and outliers. It cannot write dataset state directly: its tag
 tool returns a **proposal**, and the browser sends the tag request only after
 your click. Conversations and generated reports persist locally; conversations
 support rename/reopen/delete.
+
+This assistant is **not part of the verified submission path**. It remains an
+optional, experimental surface: the router and synthesizer use typed structured
+outputs, but the deterministic end-to-end probe is the promotion gate for
+quantitative prose. Until every fixed probe passes repeatedly, confirm numbers
+against the cited tool results and live blocks. The verified product path is the
+gallery, sample workbench, comparison, album inspection, audit, and export
+surfaces, and none of those depend on the assistant.
 
 ![Command palette over every route and action](docs/screenshots/10-palette.png)
 ![The front door, with the rail's local-models card](docs/screenshots/17-models.png)
@@ -262,7 +346,7 @@ frontend/src/
   components/     rail, cards, album shelf/header, share menu, render blocks
   api/            typed client — every route the pages call through
 backend/app/
-  api/            19 routers over one service layer (run_search is the one ranking impl)
+  api/            20 REST routers + one MCP router (run_search is the one ranking impl)
   ml/             providers (SigLIP 2 / Qwen3-VL) · exact index · detector · SAM2 segmenter
   agent/          LangGraph graph, tools, render-block contract
   qa/             flow registry + real-Chrome runner (one definition, three consumers)
@@ -301,8 +385,10 @@ ruff, tsc, the build, the link check and the capabilities contract.
   MRR overall (hybrid MRR 0.6313 → 0.5850), which is why it stays — the figures come from the
   benchmark's own cached run, and the page states the caveat where the number
   appears.
-- The assistant needs Ollama and a ~5 GB model; step transitions stream live,
-  but the reply text itself arrives whole at the end of the run.
+- The experimental assistant needs Ollama and a ~5 GB model. It remains
+  available, but its deterministic quantitative probe—not a prompt-only
+  assertion—is the release gate; the documented CV workbench remains
+  independent of it.
 - SAM 2.1 tiny runs here at 72 ms/mask warm (box-prompt p50; 73 ms by point
   prompt, 1.5 GB peak, 60 interleaved calls with no crash and 2 MB of drift).
   The retrieval benchmark is deliberately modest: background removal changed

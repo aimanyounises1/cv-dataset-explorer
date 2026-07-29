@@ -77,7 +77,7 @@ def dhash(path: str | Path, size: int = 8) -> bytes:
 
 def hamming(a: bytes, b: bytes) -> int:
     """Differing bits between two hashes: 0 identical, ~32 unrelated, 64 inverse."""
-    return sum(bin(x ^ y).count("1") for x, y in zip(a, b))
+    return sum(bin(x ^ y).count("1") for x, y in zip(a, b, strict=True))
 
 
 def null_distance(hashes: list[bytes], samples: int = 200,

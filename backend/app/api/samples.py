@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
+from .. import config
 from ..db import AXES
 from ..ml import providers
 from ..ml.index import get_index
@@ -31,6 +32,18 @@ from .deps import (
 
 router = APIRouter()
 
+# Both endpoints that accept the facet describe it the same way, from here.
+# Naming the provenance is the point: a facet is a per-group argmax over a
+# hand-written prompt bank, not a dataset annotation, and the groups are scored
+# independently — so two of them can label the same image in ways that
+# contradict each other.
+ATTR_FACET_DESC = (
+    "Attribute facet 'group:label'. Repeatable: several are intersected, so "
+    "attr=time_of_day:night&attr=setting:indoor is the images that are both. "
+    "Labels are SigLIP zero-shot argmaxes over the prompt bank in ml/labels.py, "
+    "margin-gated per group; they are review hypotheses, not ground truth."
+)
+
 
 @router.get("/samples", response_model=SampleList)
 def list_samples(
@@ -42,10 +55,7 @@ def list_samples(
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
-    attr: Optional[list[str]] = Query(
-        None, description="Attribute facet 'group:label'. Repeatable: several "
-                          "are intersected, so attr=time_of_day:night&"
-                          "attr=setting:indoor is the images that are both."),
+    attr: Optional[list[str]] = Query(None, description=ATTR_FACET_DESC),
     sort: Optional[str] = Query(None, description="<axis>_asc | <axis>_desc"),
     max_agreement: Optional[float] = Query(
         None, ge=0.0, le=1.0, allow_inf_nan=False,
@@ -139,10 +149,7 @@ def export_subset(
     split: Optional[str] = None,
     tag: Optional[str] = None,
     vlm_tag: Optional[str] = None,
-    attr: Optional[list[str]] = Query(
-        None, description="Attribute facet 'group:label'. Repeatable: several "
-                          "are intersected, so attr=time_of_day:night&"
-                          "attr=setting:indoor is the images that are both."),
+    attr: Optional[list[str]] = Query(None, description=ATTR_FACET_DESC),
     fmt: str = Query("json", alias="format", pattern="^(json|jsonl|csv)$"),
     max_agreement: Optional[float] = Query(
         None, ge=0.0, le=1.0, allow_inf_nan=False,
@@ -208,6 +215,7 @@ def export_subset(
     caps: dict[int, list[str]] = {}
     tag_map: dict[int, list[str]] = {}
     attr_map: dict[int, dict[str, str]] = {}
+    attr_conf_map: dict[int, dict[str, float]] = {}
     agree_map: dict[int, float] = {}
     if ids:
         qmarks = ",".join("?" * len(ids))
@@ -221,9 +229,12 @@ def export_subset(
             tag_map.setdefault(t["sample_id"], []).append(t["name"])
         if scores:
             for a in conn.execute(
-                f"SELECT sample_id, grp, label FROM attributes "
+                f"SELECT sample_id, grp, label, confidence FROM attributes "
                 f"WHERE sample_id IN ({qmarks})", ids):
                 attr_map.setdefault(a["sample_id"], {})[a["grp"]] = a["label"]
+                if a["confidence"] is not None:
+                    attr_conf_map.setdefault(
+                        a["sample_id"], {})[a["grp"]] = a["confidence"]
             for r in conn.execute(
                 f"SELECT sample_id, AVG(agreement) AS m FROM captions "
                 f"WHERE sample_id IN ({qmarks}) AND agreement IS NOT NULL "
@@ -253,6 +264,15 @@ def export_subset(
             out["mean_agreement"] = round(agree_map[r["id"]], 4)
         if r["id"] in attr_map:
             out["attributes"] = attr_map[r["id"]]
+            # The winning probability travels with the label it belongs to. A
+            # slice built on `attr=setting:indoor` is a slice built on a
+            # model's opinion; without the number behind each label a consumer
+            # cannot threshold it, and cannot tell a decisive label from one
+            # that only just cleared the margin gate.
+            conf = attr_conf_map.get(r["id"])
+            if conf:
+                out["attribute_confidence"] = {g: round(c, 4)
+                                               for g, c in conf.items()}
         return out
 
     samples = [record(r) for r in rows]
@@ -274,7 +294,17 @@ def export_subset(
              "ranked_depth": ranked_depth,
              "truncated": truncated,
              "axis_semantics": "0-10 percentile ranks over this corpus; "
-                               "not comparable across datasets"}
+                               "not comparable across datasets",
+             # Says what an `attributes` value is, for the same reason
+             # `axis_semantics` says what an axis is: the file is meant to be
+             # read by someone who did not run the query, and a label that
+             # looks like an annotation but is an argmax will be trained on.
+             "attribute_semantics":
+                 "per-group SigLIP zero-shot argmax over a fixed prompt bank, "
+                 f"recorded only where top1 - top2 >= {config.ATTR_MIN_MARGIN}; "
+                 "`attribute_confidence` is the winner's softmax probability "
+                 "within its group. Groups are scored independently, so two "
+                 "may contradict each other on the same image"}
 
     if fmt == "csv":
         buf = io.StringIO()

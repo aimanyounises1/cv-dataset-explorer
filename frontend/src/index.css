@@ -46,10 +46,21 @@
   --amber-soft: #f7ead8;
   --red: #b65454;
   --red-soft: #f6e3e1;
+  /* The red hairline, at the weight --accent-line already sets for sage: the
+     border a red-soft fill wants beside it. Two rules had hand-mixed this as
+     rgba(182, 84, 84, 0.30) — the same value, spelled so that changing --red
+     would leave them behind. */
+  --red-line: color-mix(in srgb, var(--red) 30%, transparent);
   --success: #216d50;
 
   --radius: 14px;
   --radius-sm: 9px;
+  /* One height for anything that sits in a toolbar row. The gallery's result
+     bar was carrying five: a 33px segmented switch, a 33px listbox, a 20px
+     pill, a 13px underlined word and an 18px glyph, all reading as peers on
+     the same baseline. A row of controls that do not share a height reads as
+     four widgets that happened to land next to each other. */
+  --ctl-h: 30px;
   --shadow: 0 16px 46px rgba(24, 48, 36, 0.10);
   --shadow-sm: 0 5px 18px rgba(24, 48, 36, 0.07);
 
@@ -106,11 +117,35 @@ body {
 :root {
   --rail-l: 240px;
   --rail-r: 300px;
+
+  /* The container ladder. Three rungs, named for what they hold, so a page
+     picks one instead of inventing a number.
+
+     Before this there was no container system at all: `.pane` was unbounded
+     while five pages each hard-coded their own cap, and the gap between the
+     two showed as empty canvas — measured at a 1600px viewport against a
+     1308px content column, /eval's text stopped at 720px (588px empty),
+     /compare's pair queue at 720px, /quality's rows at 1076px. Reading width
+     and table width are different problems and now have different rungs. */
+  --pane-max: 1440px;   /* the chassis: the widest the centre column ever gets */
+  --w-data: 1180px;     /* dense tabular readouts — audit rows, pair queues */
+  --w-prose: 78ch;      /* running text, held to a legible measure */
+
   /* Reading width of the audit lists (caption quality). One value for the
      ranking switch, the scroll frame and the rows, so a change to any of them
      cannot leave the three misaligned. */
-  --audit-w: 1080px;
+  --audit-w: var(--w-data);
 }
+
+/* Running text picks the prose rung rather than stretching to a data width:
+   a 1300px line is not readable, which is why every page had already capped
+   its prose by hand at a different number. */
+.measure { max-width: var(--w-prose); }
+/* A chart is read across, not down a column of text: it takes the data rung.
+   The benchmark's recall panel was pinned to the same 720 as the prose beside
+   it, which spent 460px of the pane on nothing and squeezed five k-values into
+   half the width they had. */
+.panel.chart-wide { max-width: var(--w-data); }
 
 .app {
   min-height: 100vh;
@@ -122,6 +157,7 @@ body {
 .pane {
   padding: 20px 26px 60px;
   min-width: 0;              /* let the grid actually shrink this column */
+  max-width: var(--pane-max);
 }
 
 /* Left rail — navigation, grouped by job. Sticky and self-scrolling so a long
@@ -141,21 +177,102 @@ body {
 .brand-mark { color: var(--accent); }
 .rail-brand-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.rail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px; }
-.rail-groups { min-width: 0; }
-.rail-group + .rail-group { margin-top: 16px; }
-.rail-group-title { padding: 0 6px 5px; }
+/* The scroller says it scrolls.
+   Measured at 1600x1000: 943px of content in a 671px frame — 272px unreachable,
+   including the difficulty axes, which FilterPanel's own docstring calls the
+   reason this tool exists. On macOS overlay scrollbars the gutter is 0px and
+   the thumb only appears while the wheel is moving, so the rail looked like it
+   simply ended after "All attributes". A stable gutter and a persistent thumb
+   turn a hidden third of the panel into an obvious one. */
+.rail-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 0 10px;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+/* WebKit's pseudo-elements, NOT `scrollbar-width`. Measured in this project's
+   own Chrome (150): `::-webkit-scrollbar` + `scrollbar-gutter: stable` reserves
+   a 9px gutter, but adding `scrollbar-width: thin` suppresses the pseudo-element
+   and the gutter collapses back to 0 — the two do not compose, and the standard
+   property wins by doing nothing. */
+.rail-scroll::-webkit-scrollbar { width: 9px; }
+.rail-scroll::-webkit-scrollbar-track { background: transparent; }
+.rail-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 999px;
+  border: 3px solid var(--bg-raised);   /* insets the thumb to a 3px bar */
+}
+.rail-scroll:hover::-webkit-scrollbar-thumb { background: var(--text-faint); }
+/* Engines without the pseudo-element get the standard properties instead. */
+@supports not selector(::-webkit-scrollbar) {
+  .rail-scroll { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+}
+/* Fixed band: never scrolls, so the rail can never nest a second scrollbar in
+   a 240px column. On /stats the sub-view list grows this band by ~110px, and
+   that is exactly the route where FilterPanel returns null (FILTERABLE = ["/"]),
+   so the two bands are never both large. */
+.rail-groups { min-width: 0; flex: 0 0 auto; padding: 0 10px; }
+.rail-group + .rail-group { margin-top: 10px; }
+/* A region header is an object, not a line of text: a small-caps eyebrow, then
+   a hairline running to the panel's right edge. Repeated at every seam it is
+   what turns a column of links into an instrument panel, and it costs less
+   height than the padding it replaces (21px -> 18px). */
+.rail-group-title {
+  display: flex; align-items: center; gap: 8px;
+  height: 18px; padding: 0 6px 0 4px;
+}
+.rail-group-title::after {
+  content: ""; flex: 1 1 auto; height: 1px; background: var(--border);
+}
 .rail-tools-surface, .rail-tools-body { display: contents; }
 .rail-tools-head { display: none; }
 
 .rail-link {
-  display: block; padding: 7px 10px; margin-bottom: 1px;
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 4px 10px; margin-bottom: 0;
   border-radius: var(--radius-sm);
   color: var(--text-dim); text-decoration: none;
-  font-size: 13.5px; font-weight: 500;
+  font-size: 13px; font-weight: 500; line-height: 1.35;
   transition: color var(--t-quick), background var(--t-quick);
 }
+.rail-link-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-link:hover { color: var(--text); background: var(--bg-hover); }
+
+/* One figure column. This stylesheet's own header declares monospace with
+   tabular figures for every number the tool asserts; the rail was the one
+   surface that never adopted it, so its numbers landed at three different x
+   positions. Every figure the rail states now right-aligns on one 44px track. */
+.rail-fig {
+  margin-left: auto; flex-shrink: 0;
+  min-width: 44px; text-align: right;
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 10px; letter-spacing: 0; color: var(--text-faint);
+}
+/* Amber is the one alarm colour this rail already owns (`.models-dot.warn`).
+   It means a measured fault or a standing contamination, never decoration. */
+.rail-fig.flag { color: var(--amber); }
+.rail-l.collapsed .rail-fig { display: none; }
+
+/* ---- Status strip -------------------------------------------------------
+   Three dots and three words: every model's state stays on screen, and the
+   159px card that used to state it in full folds behind them. `.rail-diag`
+   force-opens on a measured fault, so this is a fold of detail, never of bad
+   news. The privacy sentence sits outside the disclosure — a claim the product
+   makes about itself does not go behind a click. */
+.rail-diag > summary {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 6px; margin-bottom: 2px;
+  border-radius: var(--radius-sm);
+  cursor: pointer; list-style: none;
+  font-size: 10.5px; color: var(--text-faint);
+  transition: background var(--t-quick), color var(--t-quick);
+}
+.rail-diag > summary::-webkit-details-marker { display: none; }
+.rail-diag > summary:hover { background: var(--bg-hover); color: var(--text-dim); }
+.rail-diag > summary .models-dot { margin-right: -1px; }
+.rail-diag > summary > span:not(.models-dot) + span:not(.models-dot) { margin-left: 0; }
+.rail-diag[open] > summary { color: var(--text-dim); }
+/* Off, not warn: an un-pulled enrichment model is the documented default. It
+   reads as "not running" rather than as a fault the reader must act on. */
+.models-dot.off { background: var(--border-strong); }
 
 /* A destination's own views, one level in. Indented under their parent with a
    hairline running down the group, so they read as parts of the page above them
@@ -220,7 +337,11 @@ body {
   transition: color var(--t-quick), border-color var(--t-quick);
 }
 .rail-l.collapsed .rail-scroll { padding: 0 8px; }
-.rail-l.collapsed .rail-link { padding: 3px 0; }
+/* Flex on `.rail-link` would make the keycap's `margin: 0 auto` an ambiguous
+   free-space absorber; collapsed, the row is a block with one centred child. */
+.rail-l.collapsed .rail-link { padding: 3px 0; display: block; }
+/* The eyebrow's hairline has no column to run along in a 56px strip. */
+.rail-l.collapsed .rail-group-title::after { display: none; }
 .rail-l.collapsed .rail-link:hover { background: none; }
 .rail-l.collapsed .rail-link:hover .rail-link-min { color: var(--text); border-color: var(--border-strong); }
 .rail-l.collapsed .rail-link.active { background: none; box-shadow: none; }
@@ -310,6 +431,12 @@ body {
    this territory, and a bordered panel whose entire content was a second
    title read as an empty crashed box. */
 .rail-library .saved-views { background: none; border: none; padding: 0 6px; margin-bottom: 4px; }
+/* The shelf joins the same figure column, and is bounded so a growing library
+   cannot push the difficulty axes back under the fold. `contain: layout`
+   because in this codebase a clipped scrolling frame without it still grows
+   its ancestor. */
+.rail-library .album-row { padding: 3px 8px; margin-bottom: 1px; }
+.rail-library .album-shelf { max-height: 124px; overflow-y: auto; contain: layout; }
 
 /* ---- Reference chips + scenario proposals ------------------------------
    The chips ARE the similarity trail: each one is a step the URL remembers,
@@ -399,7 +526,7 @@ body {
   margin-left: auto;
 }
 .view-switch {
-  display: flex; gap: 3px; padding: 3px; flex-shrink: 0;
+  display: flex; gap: 3px; padding: 2px; flex-shrink: 0; height: var(--ctl-h);
   background: var(--bg-inset); border: 1px solid var(--border); border-radius: 999px;
 }
 .view-switch button {
@@ -695,7 +822,8 @@ body {
 
 /* A mode, not a hover affordance — it costs the rail's width. */
 .loupe-toggle {
-  font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
+  font-size: 11.5px; padding: 0 12px; border-radius: 999px;
+  height: var(--ctl-h); flex-shrink: 0;
   border: 1px solid var(--border); background: transparent; color: var(--text-dim);
   cursor: pointer;
 }
@@ -705,7 +833,14 @@ body {
 /* Filters live under the nav in the left rail. Selects go full width — a rail
    is a column, so the horizontal `.controls` flex-wrap that suited a top bar
    would leave ragged half-width gaps here. */
-.rail-filters { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
+/* The rail's three zones — navigation, library, filters — are peers, and are
+   separated as peers. `.rail-tools-surface` carries `display: contents`, so
+   Library and Filters are not siblings of the nav groups and the
+   `.rail-group + .rail-group` rhythm above cannot reach across the boundary:
+   Library rendered flush against "Assistant" with no gap at all while every
+   other seam had 16px. Stated once here for both. */
+.rail-library,
+.rail-filters { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
 .rail-filters select { width: 100%; }
 /* The axis panel drops its card chrome in the rail — the rail is already a
    panel, and a card inside it is a frame within a frame. (It was previously a
@@ -946,12 +1081,24 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   background: var(--bg-raised); overflow: hidden;
 }
 .segmented-opt {
-  flex: 1 1 auto; min-width: 0; padding: 6px 5px; border: none;
+  flex: 1 1 auto; min-width: 0; padding: 5px 5px; border: none;
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
   background: transparent; cursor: pointer;
   font-family: var(--font-sans); font-size: 11.5px; color: var(--text-dim);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: color var(--t-quick), background var(--t-quick);
 }
+.segmented-label {
+  max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* How many images the option selects, in the tool's figure face so the four
+   sizes line up and can be compared by eye. Faint: the label is the control,
+   the count is the evidence for choosing it. */
+.segmented-figure {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  font-size: 9.5px; line-height: 1.3; color: var(--text-faint);
+}
+.segmented-opt.on .segmented-figure { color: var(--accent); }
 .segmented-opt:hover { color: var(--text); }
 .segmented-opt.on {
   background: var(--accent-soft); color: var(--accent-deep); font-weight: 600;
@@ -960,6 +1107,29 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 .segmented-opt:focus-visible { outline-offset: -3px; }
 
 .listbox { position: relative; width: 100%; margin-bottom: 8px; }
+/* In a toolbar the same control is one item in a row, not a stacked field: it
+   takes the width its longest option needs and no more. Without this the
+   trigger stretched to its whole flex line — 319px for the word "Difficulty" —
+   and the legend sharing that line was pushed onto three. */
+/* Portalled to <body>, so it is positioned in viewport coordinates and no
+   longer clipped by `.rail-scroll`'s overflow — which used to show 1 of the
+   attribute picker's 18 options. The in-flow rule above is left alone. */
+.listbox-pop.portal {
+  position: fixed; right: auto; bottom: auto; z-index: 200;
+  max-height: min(360px, 60vh); width: max-content; max-width: 340px;
+}
+.listbox-inline { width: auto; margin-bottom: 0; }
+/* In a row the trigger joins the toolbar's shared height and its pill shape,
+   rather than keeping the rail's stacked-field padding and 14px corner. */
+.listbox-inline .listbox-btn {
+  min-width: 0; height: var(--ctl-h); padding: 0 11px;
+  border-radius: 999px; font-size: 11.5px;
+}
+.listbox-inline .listbox-value { flex: 0 1 auto; }
+/* The popup still has to be readable, so it opens at least as wide as the
+   trigger and grows to fit the longest label rather than inheriting a width
+   the trigger no longer has. */
+.listbox-inline .listbox-pop { min-width: 100%; width: max-content; max-width: 280px; }
 .listbox-btn {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 8px 11px; border-radius: var(--radius);
@@ -1654,13 +1824,13 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
   max-height: 210px; overflow-y: auto;
   background: var(--bg-raised); color: var(--text);
   border: 1px solid var(--border); border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow);
 }
 .combo-list li {
   padding: 7px 10px; border-radius: 6px; cursor: pointer;
   font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.combo-list li.active { background: var(--accent-wash); color: var(--accent-deep); }
+.combo-list li.active { background: var(--accent-soft); color: var(--accent-deep); }
 /* The field carries the focus state, so the input inside it does not also
    draw a ring — one control, one outline. */
 .selection-tray input:focus-visible { outline: none; }
@@ -1800,8 +1970,59 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 }
 .error {
   color: var(--red); padding: 12px 15px; font-size: 13.5px;
-  background: var(--red-soft); border: 1px solid rgba(182, 84, 84, 0.30);
+  background: var(--red-soft); border: 1px solid var(--red-line);
   border-left: 3px solid var(--red); border-radius: var(--radius); margin-bottom: 12px;
+}
+
+/* ---- Error state -------------------------------------------------------
+   A failed request, stated rather than dumped. The pane used to print
+   `String(e)` — for a validation failure, the whole `{"detail":[…]}` document
+   in a red box as the only thing on screen, which reads as a crash. The
+   sentence leads; the status sits beside it as a monospace figure like every
+   other number the tool asserts; the payload waits inside a disclosure,
+   because on this product the reader is an engineer and the body is the clue.
+   Sized as a card rather than a full-bleed strip: an error is an answer about
+   one thing, not a page-wide condition. */
+.error-state {
+  max-width: 62ch;
+  padding: 16px 18px;
+  background: var(--bg-raised);
+  border: 1px solid var(--red-line);
+  border-left: 3px solid var(--red);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 14px;
+}
+.error-state-head { display: flex; align-items: baseline; gap: 9px; }
+.error-state-status {
+  flex-shrink: 0;
+  font-size: 11px; line-height: 1.5;
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--red-soft); color: var(--red);
+}
+.error-state-title {
+  margin: 0; font-size: 14.5px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.01em;
+}
+.error-state-hint {
+  margin: 7px 0 0; font-size: 13px; color: var(--text-dim); line-height: 1.5;
+}
+.error-state-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.error-state-raw { margin-top: 14px; }
+.error-state-raw > summary {
+  cursor: pointer; font-size: 11px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.09em; font-weight: 600;
+  transition: color var(--t-quick);
+}
+.error-state-raw > summary:hover { color: var(--text-dim); }
+.error-state-raw > pre {
+  margin: 9px 0 0; padding: 10px 12px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-dim);
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 220px; overflow-y: auto;
 }
 
 /* Match highlighting */

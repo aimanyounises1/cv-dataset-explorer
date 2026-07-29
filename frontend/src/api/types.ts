@@ -133,6 +133,7 @@ export interface SegmentStatus {
   ready: boolean;
   reason?: string | null;
   model?: string | null;
+  revision?: string | null;
 }
 
 /** A mask is returned either inline or as a same-origin URL. Keeping both
@@ -140,6 +141,10 @@ export interface SegmentStatus {
  * the editor. */
 export interface SegmentResult {
   sample_id: number;
+  /** Server-authenticated identity for these exact displayed mask bytes. */
+  preview_token: string;
+  source_sha256: string;
+  mask_sha256: string;
   prompt: {
     points: SegmentPoint[];
     box?: SegmentBox | null;
@@ -150,6 +155,7 @@ export interface SegmentResult {
   area_fraction: number;
   predicted_iou: number;
   model: string;
+  model_revision: string;
   mask_width: number;
   mask_height: number;
   label_name?: string | null;
@@ -172,13 +178,17 @@ export interface SegmentAnnotation {
   bbox?: SegmentBox | null;
   mask_data_url?: string | null;
   mask_url?: string | null;
+  cutout_url?: string | null;
+  artifact_package_url?: string | null;
   mask_width?: number | null;
   mask_height?: number | null;
   model_id?: string | null;
+  model_revision?: string | null;
   prompt?: {
     points: SegmentPoint[];
     box?: SegmentBox | null;
   } | null;
+  proposal_source?: DetectionProposalSource | null;
   predicted_iou?: number | null;
   provenance?: string | null;
 }
@@ -186,6 +196,9 @@ export interface SegmentAnnotation {
 export interface SegmentAnnotationCreate extends SegmentPrompt {
   label_name: string;
   parent_name?: string | null;
+  preview_token: string;
+  mask_data_url: string;
+  proposal_token?: string | null;
 }
 
 export interface ObjectLabel {
@@ -199,6 +212,7 @@ export interface DetectStatus {
   ready: boolean;
   reason?: string | null;
   model?: string | null;
+  revision?: string | null;
 }
 
 export interface DetectBox extends SegmentBox {
@@ -209,14 +223,259 @@ export interface DetectBox extends SegmentBox {
   parent_name?: string | null;
   label_path?: string[] | null;
   score: number;
+  proposal_token: string;
 }
 
 export interface DetectResponse {
   sample_id: number;
-  model?: string | null;
-  queries?: string | null;
+  model: string;
+  revision: string;
+  queries: string;
   boxes: DetectBox[];
-  note?: string | null;
+  note: string;
+}
+
+export interface DetectionProposalSource {
+  kind: "detector";
+  model_id: string;
+  model_revision: string;
+  queries: string;
+  original_label: string;
+  proposed_label: string;
+  score: number;
+  box: SegmentBox;
+}
+
+// ---- Local vision inspection -----------------------------------------------
+
+export type VisionTask =
+  | "scene"
+  | "road_scene"
+  | "caption_audit"
+  | "ocr"
+  | "question";
+
+export interface VisionModelStatus {
+  name: string;
+  ready: boolean;
+  reason?: string | null;
+  digest?: string | null;
+  family?: string | null;
+  parameter_size?: string | null;
+  quantization_level?: string | null;
+  capabilities: string[];
+}
+
+export interface VisionPairCapabilityStatus {
+  ready: boolean;
+  reason?: string | null;
+  provider: "ollama";
+  model?: string | null;
+  model_digest?: string | null;
+  runtime: "ollama";
+  runtime_version?: string | null;
+  adapter_id: "ollama_sequential_frames";
+  adapter_version: number;
+  protocol?: "sequential_frames_v1" | null;
+}
+
+export interface VisionModelsResponse {
+  default_model?: string | null;
+  models: VisionModelStatus[];
+  pair_comparison: VisionPairCapabilityStatus;
+}
+
+export interface VisionVisibleObject {
+  name: string;
+  attributes: string[];
+  location: "foreground" | "midground" | "background" | "throughout" | "unknown";
+}
+
+export interface VisionSceneProposal {
+  kind: "scene";
+  summary: string;
+  objects: VisionVisibleObject[];
+  setting: "indoor" | "outdoor" | "mixed" | "unknown";
+  lighting:
+    | "daylight"
+    | "low_light"
+    | "artificial_light"
+    | "backlit"
+    | "mixed"
+    | "unknown";
+  surface_conditions: string[];
+  visible_text: string[];
+  uncertainties: string[];
+  search_terms: string[];
+}
+
+export interface VisionRoadActor {
+  category: "pedestrian" | "cyclist" | "motorcyclist" | "vehicle" | "animal" | "other";
+  description: string;
+  location: "road" | "road_edge" | "sidewalk" | "crossing" | "off_road" | "unknown";
+}
+
+export interface VisionRoadSceneProposal {
+  kind: "road_scene";
+  road_scene: boolean;
+  summary: string;
+  actors: VisionRoadActor[];
+  traffic_controls: string[];
+  surface_conditions: string[];
+  visibility_limitations: string[];
+  uncertainties: string[];
+  search_terms: string[];
+}
+
+export interface VisionCaptionAssessment {
+  caption_index: number;
+  status: "supported" | "partly_supported" | "unsupported" | "uncertain";
+  visible_evidence: string;
+}
+
+export interface VisionCaptionAuditProposal {
+  kind: "caption_audit";
+  assessments: VisionCaptionAssessment[];
+  discrepancies: string[];
+  uncertainties: string[];
+  search_terms: string[];
+}
+
+export interface VisionTextRegion {
+  text: string;
+  location:
+    | "top_left"
+    | "top"
+    | "top_right"
+    | "left"
+    | "center"
+    | "right"
+    | "bottom_left"
+    | "bottom"
+    | "bottom_right"
+    | "unknown";
+  legibility: "clear" | "partial" | "uncertain";
+}
+
+export interface VisionOcrProposal {
+  kind: "ocr";
+  regions: VisionTextRegion[];
+  uncertainties: string[];
+  search_terms: string[];
+}
+
+export interface VisionQuestionProposal {
+  kind: "question";
+  answer: string;
+  visible_evidence: string[];
+  uncertainties: string[];
+}
+
+export type VisionProposal =
+  | VisionSceneProposal
+  | VisionRoadSceneProposal
+  | VisionCaptionAuditProposal
+  | VisionOcrProposal
+  | VisionQuestionProposal;
+
+export interface VisionInspectRequest {
+  sample_id: number;
+  model: string;
+  task: VisionTask;
+  question?: string;
+}
+
+export interface VisionInspectResponse {
+  epistemic_status: "model_proposal";
+  sample_id: number;
+  filename: string;
+  task: VisionTask;
+  question?: string | null;
+  model: string;
+  model_digest: string;
+  model_family?: string | null;
+  parameter_size?: string | null;
+  quantization_level?: string | null;
+  prompt_version: number;
+  schema_version: number;
+  input_sha256: string;
+  latency_ms: number;
+  source: VisionSource;
+  proposal: VisionProposal;
+  note: string;
+}
+
+export type VisionPairChange =
+  | "presence"
+  | "count"
+  | "position"
+  | "pose"
+  | "appearance"
+  | "background"
+  | "text"
+  | "other";
+
+export interface VisionPairDifference {
+  subject: string;
+  change_type: VisionPairChange;
+  image_a: string;
+  image_b: string;
+}
+
+export interface VisionPairProposal {
+  kind: "pair_comparison";
+  summary: string;
+  shared: string[];
+  only_a: string[];
+  only_b: string[];
+  differences: VisionPairDifference[];
+  uncertainties: string[];
+  grounding_terms_a: string[];
+  grounding_terms_b: string[];
+}
+
+export interface VisionPairCompareRequest {
+  a_sample_id: number;
+  b_sample_id: number;
+}
+
+export interface VisionSource {
+  sample_id: number;
+  filename: string;
+  split: string;
+  image_sha256: string;
+  decode_status: "decoded";
+  width: number;
+  height: number;
+  mode: string;
+  byte_length: number;
+}
+
+export interface VisionPairSource extends VisionSource {}
+
+export interface VisionPairCompareResponse {
+  epistemic_status: "model_proposal";
+  task: "semantic_difference";
+  image_a: VisionPairSource;
+  image_b: VisionPairSource;
+  model: string;
+  model_digest: string;
+  model_family?: string | null;
+  parameter_size?: string | null;
+  quantization_level?: string | null;
+  provider: "ollama";
+  runtime: "ollama";
+  runtime_version: string;
+  adapter_id: "ollama_sequential_frames";
+  adapter_version: number;
+  protocol: "sequential_frames_v1";
+  prompt_version: number;
+  schema_version: number;
+  request_sha256: string;
+  proposal_id: string;
+  latency_ms: number;
+  proposal: VisionPairProposal;
+  note: string;
 }
 
 export interface StatsOverview {
