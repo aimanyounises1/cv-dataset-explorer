@@ -1,4 +1,4 @@
-/* Dataset profile — page-local subnavigation.
+/* Dataset profile — the view column.
  *
  * /stats used to be one column roughly four screens tall: leakage, duplicate
  * pairs, provenance, corpus counts, four charts, then the zero-shot coverage
@@ -7,65 +7,21 @@
  * addressable, and "look at the caption lengths" could not be sent to anyone.
  *
  * The five views are now selected by `?view=` on /stats and rendered one at a
- * time, so each is a URL. The navigation is page-local on purpose: these are
- * sections of one artifact, not destinations in the app, and promoting them to
- * the library rail would have claimed otherwise. Bare /stats stays valid and
- * means Overview.
+ * time, so each is a URL. Bare /stats stays valid and means Overview.
  *
- * Colours, radii and faces are the custom properties from index.css — sage is
- * the product's hand, so the current view wears the same sage pill as
- * .rail-link.active. This file rides the lazy StatsPage chunk, so its position
- * relative to index.css differs between the dev server and the built bundle;
- * every selector below is therefore profile-local and ties with nothing, and no
- * rule here may depend on cascade order to take effect.
+ * The page-local rail this file used to style is gone: the views are listed in
+ * the library rail under Dataset profile, which is where the rest of the app's
+ * navigation lives. Its six `.profile-nav*` rules — two thirds of this file —
+ * outlived the markup and are deleted here rather than left to read as a
+ * design that still exists.
+ *
+ * This file rides the lazy StatsPage chunk, so its position relative to
+ * index.css differs between the dev server and the built bundle; every
+ * selector below is therefore profile-local and ties with nothing, and no rule
+ * here may depend on cascade order to take effect.
  */
 
 .profile-page { display: flex; gap: 26px; align-items: flex-start; }
-
-/* The rail. Sticky, because switching view from the bottom of the coverage
-   histograms should not require scrolling back up to reach the list. */
-.profile-nav {
-  flex: none; width: 188px;
-  position: sticky; top: 0;
-  border-right: 1px solid var(--border);
-  padding-right: 14px;
-}
-
-.profile-nav-list { list-style: none; margin: 0; padding: 0; }
-
-.profile-nav-link {
-  display: block; padding: 6px 10px; margin-bottom: 1px;
-  border-radius: var(--radius-sm);
-  color: var(--text-dim); text-decoration: none;
-  font-size: 12.5px; font-weight: 500;
-  transition: color var(--t-quick), background var(--t-quick);
-}
-.profile-nav-link:hover { color: var(--text); background: var(--bg-hover); }
-
-/* Same "you are here" grammar as the library rail: sage pill, left edge. */
-.profile-nav-link.active {
-  color: var(--accent-deep); background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
-  font-weight: 600;
-}
-
-/* The way out. The benchmark is a different page, not a sixth view of this
-   one, and it is set as a plain link so it cannot be mistaken for one. */
-.profile-nav-away {
-  margin-top: 14px; padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-.profile-nav-eyebrow {
-  display: block; padding: 0 10px 4px;
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em;
-  font-weight: 600; color: var(--text-faint);
-  white-space: nowrap;
-}
-.profile-nav-out {
-  display: block; padding: 0 10px;
-  color: var(--accent); text-decoration: none; font-size: 12.5px;
-}
-.profile-nav-out:hover { text-decoration: underline; }
 
 .profile-body { flex: 1; min-width: 0; }
 
@@ -73,35 +29,7 @@
    the section rhythm that separated stacked sections would only be a gap here. */
 .profile-view > .section-title:first-child { margin-top: 0; }
 
-/* Phone width: a 176px rail beside recharts leaves the charts unreadable, so
-   the views become a wrapped strip above the content. Wrapped rather than
-   horizontally scrolled — a scroll strip hides the last view behind a gesture
-   with no affordance, and five short labels fit in two rows at 390px. */
 @media (max-width: 760px) {
   .profile-page { flex-direction: column; gap: 10px; }
-  .profile-nav {
-    width: auto; align-self: stretch; min-width: 0;
-    position: static;
-    border-right: none; border-bottom: 1px solid var(--border);
-    padding: 0 0 8px;
-  }
-  .profile-nav-list { display: flex; flex-wrap: wrap; gap: 4px; }
-  .profile-nav-link {
-    margin-bottom: 0; padding: 4px 9px;
-    border: 1px solid var(--border); border-radius: 999px;
-    background: var(--bg-raised); font-size: 12px; white-space: nowrap;
-  }
-  .profile-nav-link.active { border-color: var(--accent); box-shadow: none; }
-  /* Every pixel this strip spends is a pixel of evidence pushed off a 390px
-     screen — the leakage figure and the first judgeable pair are what has to
-     survive. So at phone width the strip carries no rules and no padding of
-     its own: the eyebrow already says the benchmark is somewhere else, which
-     is the only thing the divider was saying. */
-  .profile-nav-away {
-    margin-top: 5px; padding-top: 0; border-top: none;
-    display: flex; align-items: baseline; gap: 8px;
-  }
-  .profile-nav-eyebrow { padding: 0; }
-  .profile-nav-out { padding: 0; }
   .profile-body { align-self: stretch; min-width: 0; }
 }
