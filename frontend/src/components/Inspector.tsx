@@ -30,12 +30,13 @@ const CACHE = new Map<number, SampleDetail>();
  * at the bottom. A rail 300px wide that tries to be the sample page is a worse
  * sample page.
  */
-export default function Inspector({ id }: { id: number }) {
+export default function Inspector({ id }: { id: number | null }) {
   const [detail, setDetail] = useState<SampleDetail | null>(null);
   const [failed, setFailed] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (id == null) return;
     let live = true;
     setFailed(false);
     const cached = CACHE.get(id);
@@ -45,6 +46,21 @@ export default function Inspector({ id }: { id: number }) {
       .catch(() => { if (live) setFailed(true); });
     return () => { live = false; };
   }, [id]);
+
+  // Open, but nothing under the cursor yet. The frame is drawn empty on
+  // purpose: the panel has already claimed its width, so the grid beside it
+  // will not move when the first card arrives.
+  if (id == null) {
+    return (
+      <div className="inspector">
+        <div className="inspector-frame is-empty" />
+        <p className="inspector-note">
+          Move over a card — or press an arrow key with one focused — to see it
+          full size with its five captions.
+        </p>
+      </div>
+    );
+  }
 
   // Only ever render the sample we were asked for. Sweeping the grid with the
   // arrow keys changes `id` faster than the fetches resolve, and showing the

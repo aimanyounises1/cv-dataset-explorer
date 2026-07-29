@@ -18,15 +18,36 @@ import { useSyncExternalStore } from "react";
  * scroll position there is no returning-reader case, so it dies with the page.
  */
 
-let current: number | null = null;
+/** The mode and the cursor travel together, and the mode is the load-bearing
+ *  half. The inspector costs the rail's width, and the rail is a grid column
+ *  that collapses when empty — so if the rail only appeared once a card was
+ *  under the cursor, the grid would reflow on the first hover and carry the
+ *  cards out from under the pointer that summoned it. Opening the mode claims
+ *  the space immediately; from then on the layout is still and only the
+ *  contents change. */
+export interface Cursor { active: boolean; id: number | null }
+
+const IDLE: Cursor = { active: false, id: null };
+let current: Cursor = IDLE;
 const listeners = new Set<() => void>();
 
-/** Publish the cursor. Passing null clears it — do that on unmount, or the
- *  rail keeps a sample from a page that is no longer mounted. */
-export function setInspected(id: number | null): void {
-  if (id === current) return;
-  current = id;
+function publish(next: Cursor): void {
+  if (next.active === current.active && next.id === current.id) return;
+  current = next;
   listeners.forEach((fn) => fn());
+}
+
+/** Open or close the inspector. Closing also drops the cursor: reopening should
+ *  show what you are pointing at now, not what you left behind. */
+export function setInspecting(active: boolean): void {
+  publish(active ? { active: true, id: current.id } : IDLE);
+}
+
+/** Publish the card under the cursor. Ignored while closed, so a stray hover
+ *  cannot open a panel nobody asked for. */
+export function setInspected(id: number | null): void {
+  if (!current.active) return;
+  publish({ active: true, id });
 }
 
 function subscribe(fn: () => void): () => void {
@@ -34,7 +55,7 @@ function subscribe(fn: () => void): () => void {
   return () => { listeners.delete(fn); };
 }
 
-export function useInspected(): number | null {
-  // The server snapshot is null: nothing is under a cursor before there is one.
-  return useSyncExternalStore(subscribe, () => current, () => null);
+export function useCursor(): Cursor {
+  // The server snapshot is idle: there is no cursor before there is a pointer.
+  return useSyncExternalStore(subscribe, () => current, () => IDLE);
 }
