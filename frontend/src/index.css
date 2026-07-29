@@ -623,6 +623,62 @@ body {
 .rail-section-title { margin-bottom: 8px; }
 .rail-export { display: flex; gap: 6px; margin-bottom: 12px; }
 
+/* The inspector — the image under the cursor, at a size you can judge.
+   First in the rail because it is what the reader is looking at right now; the
+   set below it is standing context and must not move under them. */
+.rail-inspector { padding-bottom: 16px; }
+.rail-inspector + .rail-r-head { padding-top: 16px; border-top: 1px solid var(--border); }
+/* A neutral field, and `contain` not `cover`: this is the one place in the app
+   that must not crop. The grid crops to 4:3 so the rows scan evenly, which is
+   right for scanning and wrong for judging — a caption that describes something
+   the crop removed would read here as a caption error that isn't one. The fixed
+   height keeps the captions below it from walking up and down the rail as
+   portrait and landscape frames alternate under the cursor. */
+.inspector-frame {
+  height: 200px; border-radius: 6px; background: var(--bg-inset);
+  border: 1px solid var(--border); overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.inspector-frame img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.inspector-frame.is-loading { opacity: 0.55; }
+.inspector-meta {
+  display: flex; align-items: baseline; gap: 2px;
+  margin-top: 9px; font-size: 11.5px; color: var(--text-faint);
+}
+.inspector-id { color: var(--accent); text-decoration: none; font-weight: 600; padding-right: 7px; }
+.inspector-id:hover { text-decoration: underline; }
+/* The badge leads each caption, so the eye can run down one column of numbers
+   and stop at the suspect one without reading five sentences first. That
+   reverses the sample page's order, where the badge trails the text — hence the
+   margin reset. */
+.inspector-captions { list-style: none; margin: 12px 0 0; padding: 0; font-size: 12px; }
+.inspector-captions li {
+  display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 7px;
+  align-items: start; padding: 5px 0; border-top: 1px solid var(--border);
+  line-height: 1.45;
+}
+.inspector-captions .agree-badge { margin-left: 0; justify-self: start; }
+.inspector-axes { margin: 12px 0 0; font-size: 11.5px; }
+.inspector-axes > div {
+  display: grid; grid-template-columns: minmax(0, 1fr) 46px 16px;
+  gap: 8px; align-items: center; padding: 2px 0;
+}
+.inspector-axes dt { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inspector-axes dd { margin: 0; display: contents; }
+.inspector-axis-track { height: 4px; border-radius: 2px; background: var(--bg-inset); }
+.inspector-axis-bar { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.inspector-axes b { text-align: right; font-variant-numeric: tabular-nums; }
+.inspector-note { margin: 12px 0 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.5; }
+
+/* A mode, not a hover affordance — it costs the rail's width. */
+.loupe-toggle {
+  font-size: 11.5px; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-dim);
+  cursor: pointer;
+}
+.loupe-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.loupe-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* Filters live under the nav in the left rail. Selects go full width — a rail
    is a column, so the horizontal `.controls` flex-wrap that suited a top bar
    would leave ragged half-width gaps here. */

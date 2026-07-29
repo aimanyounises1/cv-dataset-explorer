@@ -19,6 +19,7 @@ import { useActiveProviderName } from "../lib/activeProvider";
 import { useDebounce } from "../hooks/useDebounce";
 import { useSelection } from "../hooks/useSelection";
 import { saveResultOrder } from "../hooks/useResultOrder";
+import { useGridCursor } from "../hooks/useGridCursor";
 
 interface SearchMeta {
   basis?: string | null;
@@ -44,6 +45,7 @@ const PER_PAGE = 60;
 const DENSITY: Record<string, string> = { S: "128px", M: "190px", L: "280px" };
 const DENSITY_KEY = "cvde-density";
 const SIGNAL_KEY = "cvde-grid-signal";
+const LOUPE_KEY = "cvde-loupe";
 
 /* ---- The picked set ------------------------------------------------------
  * Three concerns that used to sit loose in the page body — the picked set,
@@ -523,6 +525,14 @@ export default function GalleryPage() {
      sender's. Empty string = no edge. */
   const [signal, setSignal] = useState<string>(
     () => localStorage.getItem(SIGNAL_KEY) ?? "difficulty");
+  /* The loupe is a mode you enter, not something hover summons. The rail is the
+     third grid column and it is absent when empty, so a panel that appeared on
+     hover would widen the rail, reflow the grid, and move the cards out from
+     under the pointer that opened it. Off by default: the grid at full width is
+     the scanning tool, and this trades two columns for the ability to judge
+     without navigating. */
+  const [loupe, setLoupe] = useState<boolean>(
+    () => localStorage.getItem(LOUPE_KEY) === "1");
   /* An image query cannot live in the URL — the query IS the image — so this
    * is the one result set held in memory instead. The URL stays the boss:
    * any change to it clears the image results, and the shareable artifact is
@@ -663,6 +673,13 @@ export default function GalleryPage() {
   useEffect(() => {
     try { localStorage.setItem(SIGNAL_KEY, signal); } catch { /* non-essential */ }
   }, [signal]);
+
+  useEffect(() => {
+    try { localStorage.setItem(LOUPE_KEY, loupe ? "1" : "0"); } catch { /* non-essential */ }
+  }, [loupe]);
+
+  // Publishes the card under the cursor to the rail. Attached to both grids.
+  const cursor = useGridCursor(loupe);
 
   // Scroll restore for back-nav, keyed by the full query string. The hook owns
   // the whole of it, including the `isConnected` guard the repo's known-traps
@@ -1243,7 +1260,7 @@ export default function GalleryPage() {
               × Clear image query
             </button>
           </div>
-          <div className="grid" data-signal={signal || undefined}
+          <div className="grid" data-signal={signal || undefined} {...cursor}
                style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
             {imageQuery.items.map((s) => (
               <ImageCard key={s.id} sample={s} scoreBasis="cosine"
@@ -1303,6 +1320,18 @@ export default function GalleryPage() {
           {items.some((s) => s.axes) && view === "ranked" && (
             <AxisLegend signal={signal} onSignal={setSignal} />
           )}
+          {/* A mode, because it costs the rail's 300px and therefore two grid
+              columns. Making that trade on hover would reflow the grid out from
+              under the pointer that asked for it. */}
+          <button type="button" className={`loupe-toggle${loupe ? " on" : ""}`}
+                  aria-pressed={loupe} onClick={() => setLoupe((v) => !v)}
+                  title={loupe
+                    ? "Close the inspector and give the grid its columns back"
+                    : "Show the image under the cursor at full size, with its "
+                      + "five captions and their measured agreement, without "
+                      + "leaving the grid"}>
+            Inspector
+          </button>
         </div>
       </div>
 
@@ -1324,7 +1353,7 @@ export default function GalleryPage() {
       )}
 
       {view === "ranked" && (
-      <div className="grid" data-signal={signal || undefined}
+      <div className="grid" data-signal={signal || undefined} {...cursor}
            style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
         {/* Each card links with the query, mode and score that put it here.
             `items` accumulates every page loaded so far, so the array index is

@@ -1,6 +1,8 @@
 import ActiveFilters from "../ActiveFilters";
 import SetSummary from "../SetSummary";
+import Inspector from "../Inspector";
 import { useSelection } from "../../hooks/useSelection";
+import { useInspected } from "../../lib/inspected";
 
 /**
  * The current selection, given a permanent home.
@@ -23,13 +25,27 @@ import { useSelection } from "../../hooks/useSelection";
  */
 export default function SelectionRail() {
   const sel = useSelection();
+  const inspected = useInspected();
 
   // Shown for a search too: its results are a set you can export, even
-  // though a query adds no chip.
-  if (!sel.exportable) return null;
+  // though a query adds no chip. The inspector can also summon the rail on its
+  // own — browsing all 8,000 with the loupe open is a real state, and it is the
+  // one case where the rail has something to say without a selection.
+  if (!sel.exportable && inspected == null) return null;
 
   return (
-    <aside className="rail-r" aria-label="Current selection">
+    <aside className="rail-r"
+           aria-label={inspected != null ? "Inspected sample" : "Current selection"}>
+      {/* First, because it is what the reader is looking at right now. The set
+          below it is the standing context and does not move under them. */}
+      {inspected != null && (
+        <section className="rail-inspector">
+          <Inspector id={inspected} />
+        </section>
+      )}
+
+      {sel.exportable && (
+      <>
       <div className="rail-r-head">
         <div className="eyebrow">The set</div>
         {sel.origin
@@ -75,6 +91,8 @@ export default function SelectionRail() {
             so it cannot live in a rail that only exists once a selection is
             already active. */}
       </section>
+      </>
+      )}
     </aside>
   );
 }
