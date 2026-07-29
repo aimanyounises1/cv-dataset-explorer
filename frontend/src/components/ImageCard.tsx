@@ -143,6 +143,20 @@ export default function ImageCard({ sample, scoreBasis, query, mode, rank,
   return (
     <Link className={`card${selected ? " picked" : ""}`}
           to={search ? `/samples/${sample.id}?${search}` : `/samples/${sample.id}`}
+          data-sample-id={sample.id}
+          /* Each measured axis rides on the card as its own custom property, and
+             the GRID decides which one the edge draws. The card therefore never
+             learns which axis is selected — no prop, no context, no re-render of
+             48 tiles when the choice changes.
+
+             An axis that was never measured is simply absent here. It must stay
+             absent: `var(--ax-x, 0)` downstream would draw "not measured" as
+             "easiest", which is the lie `deps.py` refuses when it keeps a NULL
+             axis distinct from a zero one. */
+          style={Object.fromEntries(
+            AXES.filter((a) => sample.axes?.[a] != null)
+              .map((a) => [`--ax-${a}`, String(sample.axes![a])]),
+          ) as React.CSSProperties}
           /* An anchor drags its URL by default; overriding the payload with
              sample ids is what lets the album shelf receive a drop. The
              custom MIME type keeps a stray drop into a text field from

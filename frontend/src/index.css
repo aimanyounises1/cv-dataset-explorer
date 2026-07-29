@@ -1325,6 +1325,39 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--radius-sm);
   padding: 1px 5px; backdrop-filter: blur(4px); transition: color var(--t-quick), border-color var(--t-quick);
 }
+/* ---- The signal edge --------------------------------------------------
+   One measured axis, drawn on the frame itself, so sweeping the grid shows the
+   hard images as a rhythm instead of 48 tiles that all look equally interesting.
+
+   It hangs off `.card`, NOT off `.card-media`: that element is a
+   `container-type: inline-size` container, and the small-frame container query
+   above hides its children at exactly the density this edge exists to serve.
+   `.card` is already `position: relative; overflow: hidden`, so the bar clips to
+   the rounded corner for free.
+
+   The grid names the axis; each card carries only its own values. Selecting a
+   different axis re-paints 48 tiles with one attribute change and no React
+   render.
+
+   Length carries the value and opacity reinforces it — one sage tone, never a
+   hue ramp. `viz.ts` forbids meaning in hue alone, and painting amber across
+   half a contact sheet would read as damage rather than as a measurement.
+
+   No fallback in the `var()` on purpose: a card with no measured axis leaves
+   `--sig` undefined, the height declaration is dropped, and an empty absolutely
+   positioned box collapses to nothing. "Not measured" must not draw as "easiest". */
+.grid[data-signal] .card::before {
+  content: ""; position: absolute; left: 0; top: 0; z-index: 1;
+  width: 3px; height: calc(var(--sig) * 10%);
+  background: var(--accent);
+  opacity: calc(0.35 + var(--sig) / 18);
+  border-bottom-right-radius: 2px;
+}
+.grid[data-signal="legibility"] .card { --sig: var(--ax-legibility); }
+.grid[data-signal="rarity"]     .card { --sig: var(--ax-rarity); }
+.grid[data-signal="difficulty"] .card { --sig: var(--ax-difficulty); }
+.grid[data-signal="clutter"]    .card { --sig: var(--ax-clutter); }
+
 /* The tile prints no caption.
    Every image here has FIVE, so the one shown was a sample of the least
    informative field on the card — and it cost 48px of every tile, which is two

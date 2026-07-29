@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { AXES } from "../api/types";
+import { AXES, Axis } from "../api/types";
 import AxisSparkline from "./AxisSparkline";
 import { AXIS_META } from "./AxisFilters";
+import { Listbox } from "./controls";
 
 /** A worked example, not a diagram: ascending bars so "taller = harder" is
  * legible from the shape alone, and four distinct heights so each position is
@@ -29,19 +30,46 @@ const INITIAL: Record<string, string> = {
  * has had a free right-hand slot since the export pills moved to the selection
  * rail.
  */
-export default function AxisLegend() {
+export default function AxisLegend({ signal, onSignal }: {
+  /** The axis the grid's frame edges are drawing, or "" for none. */
+  signal?: string;
+  /** Supplied only where the legend also *chooses* the encoding — the gallery.
+   *  Without it this stays what it has always been: a key. The sample page and
+   *  the assistant's image blocks show one card each, where an edge that
+   *  encodes a corpus percentile has nothing to be compared against. */
+  onSignal?: (axis: string) => void;
+}) {
   const [open, setOpen] = useState(false);
 
   return (
     <div className="axis-legend">
       <AxisSparkline axes={EXAMPLE} />
-      <span className="axis-legend-keys">
-        {AXES.map((a) => (
-          <span className="axis-legend-key" key={a} title={AXIS_META[a].hint}>
-            <b>{INITIAL[a]}</b>{AXIS_META[a].label}
-          </span>
-        ))}
-      </span>
+      {/* The key used to spell out L·R·D·C beside the sparkline. It now names one
+          axis at a time, because the frame edge draws one at a time — a legend
+          for four encodings when the grid shows one is a legend for the wrong
+          thing. The sparkline beside it still explains the four-bar chip in the
+          hover strip, and the disclosure below still carries what the numbers
+          are and are not. */}
+      {onSignal ? (
+        <Listbox
+          label="Draw which measurement on the frames"
+          trigger={signal ? AXIS_META[signal as Axis].label : "No edge"}
+          selected={signal ?? ""}
+          options={[
+            { value: "", label: "No edge" },
+            ...AXES.map((a) => ({ value: a, label: AXIS_META[a].label })),
+          ]}
+          onPick={onSignal}
+        />
+      ) : (
+        <span className="axis-legend-keys">
+          {AXES.map((a) => (
+            <span className="axis-legend-key" key={a} title={AXIS_META[a].hint}>
+              <b>{INITIAL[a]}</b>{AXIS_META[a].label}
+            </span>
+          ))}
+        </span>
+      )}
       <span className="axis-legend-scale">taller = harder</span>
       <button className="axis-legend-more" aria-expanded={open}
               onClick={() => setOpen((v) => !v)}

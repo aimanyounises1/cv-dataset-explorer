@@ -43,6 +43,7 @@ const PER_PAGE = 60;
  * and reading a handful of captions closely are different jobs. */
 const DENSITY: Record<string, string> = { S: "128px", M: "190px", L: "280px" };
 const DENSITY_KEY = "cvde-density";
+const SIGNAL_KEY = "cvde-grid-signal";
 
 /* ---- The picked set ------------------------------------------------------
  * Three concerns that used to sit loose in the page body — the picked set,
@@ -515,6 +516,13 @@ export default function GalleryPage() {
      48, measured. A returning user's own choice still wins. */
   const [density, setDensity] = useState<string>(
     () => localStorage.getItem(DENSITY_KEY) ?? "S");
+  /* Which measurement the frame edges draw. Kept out of the URL deliberately,
+     beside density: `useSelection` names the map's colour mode as the precedent
+     — how a set is drawn is the reader's own lens, not part of the set, and a
+     shared link should arrive showing the recipient's preference, not the
+     sender's. Empty string = no edge. */
+  const [signal, setSignal] = useState<string>(
+    () => localStorage.getItem(SIGNAL_KEY) ?? "difficulty");
   /* An image query cannot live in the URL — the query IS the image — so this
    * is the one result set held in memory instead. The URL stays the boss:
    * any change to it clears the image results, and the shareable artifact is
@@ -651,6 +659,10 @@ export default function GalleryPage() {
   useEffect(() => {
     try { localStorage.setItem(DENSITY_KEY, density); } catch { /* non-essential */ }
   }, [density]);
+
+  useEffect(() => {
+    try { localStorage.setItem(SIGNAL_KEY, signal); } catch { /* non-essential */ }
+  }, [signal]);
 
   // Scroll restore for back-nav, keyed by the full query string. The hook owns
   // the whole of it, including the `isConnected` guard the repo's known-traps
@@ -1231,7 +1243,7 @@ export default function GalleryPage() {
               × Clear image query
             </button>
           </div>
-          <div className="grid"
+          <div className="grid" data-signal={signal || undefined}
                style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
             {imageQuery.items.map((s) => (
               <ImageCard key={s.id} sample={s} scoreBasis="cosine"
@@ -1288,7 +1300,9 @@ export default function GalleryPage() {
           {/* The key for the sparkline every card carries. Only shown when the
               cards actually have axes — a legend for an absent encoding is
               noise, and axes are absent until `python -m app.analyze` has run. */}
-          {items.some((s) => s.axes) && view === "ranked" && <AxisLegend />}
+          {items.some((s) => s.axes) && view === "ranked" && (
+            <AxisLegend signal={signal} onSignal={setSignal} />
+          )}
         </div>
       </div>
 
@@ -1310,7 +1324,7 @@ export default function GalleryPage() {
       )}
 
       {view === "ranked" && (
-      <div className="grid"
+      <div className="grid" data-signal={signal || undefined}
            style={{ "--frame-min": DENSITY[density] } as React.CSSProperties}>
         {/* Each card links with the query, mode and score that put it here.
             `items` accumulates every page loaded so far, so the array index is
