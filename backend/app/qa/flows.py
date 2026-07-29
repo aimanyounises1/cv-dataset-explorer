@@ -264,8 +264,13 @@ def statistics(pg, ok):
     pg.goto(url("/stats"), wait_until="domcontentloaded")
     pg.wait_for_selector(".stat-cards")
     pg.wait_for_timeout(1200)
+    # One chart, not two. The image-size histogram was removed deliberately: on
+    # this corpus it reported 8,000 images at 500px+ and ~0 elsewhere, which is a
+    # bar chart of a constant. The assertion follows the design rather than
+    # pinning the count it happened to have — what has to hold is that the view
+    # still draws its chart and its cards, not that it draws exactly N.
     surfaces = len(pg.query_selector_all(".recharts-surface"))
-    ok("overview charts rendered", surfaces >= 2, f"{surfaces} chart surfaces")
+    ok("overview chart rendered", surfaces >= 1, f"{surfaces} chart surfaces")
 
     pg.goto(url("/stats?view=coverage"), wait_until="domcontentloaded")
     pg.wait_for_selector(".recharts-surface")
