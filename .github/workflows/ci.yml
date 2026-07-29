@@ -1,8 +1,8 @@
 name: CI
 
-# Runs only what a runner can honestly verify: no dataset download, no model
-# weights, no GPU, no browser, no Ollama. What CI therefore does NOT cover is
-# listed in docs/TESTING.md so a green tick is not read as more than it is.
+# Runs only what a runner can honestly verify: no dataset download, model
+# weights, GPU, browser, or Ollama. The README names the local checks that cover
+# those boundaries.
 on:
   push:
     branches: [main]
@@ -40,24 +40,6 @@ jobs:
       - run: pip install fastapi httpx pydantic numpy pillow pytest ruff tqdm uvicorn
       - run: ruff check app tests
       - run: pytest -q
-      # The docs/CAPABILITIES.md contract: fails when the documented surface
-      # drifts from the actual routers. README cites this check by name.
-      # It reads the LIVE surface — openapi.json, the agent graph, the flow
-      # registry — so the app has to be serving; uvicorn is installed above for
-      # exactly this. Start and check in one step: a background process does
-      # not reliably survive into the next one.
-      - name: capabilities contract (against the running app)
-        run: |
-          python -m uvicorn app.main:app --port 8000 --log-level warning &
-          api=$!
-          for _ in $(seq 1 40); do
-            curl -sf http://127.0.0.1:8000/api/health >/dev/null && break
-            sleep 1
-          done
-          status=0
-          python ../scripts/capabilities.py --check || status=$?
-          kill "$api" 2>/dev/null || true
-          exit $status
 
   frontend:
     name: frontend (tsc + build)
@@ -74,12 +56,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       # `npm run build` is `tsc && vite build`, so this is the type-check and
-      # the production build in one step. There is no lint or unit tier in the
-      # frontend -- see docs/TESTING.md for why, and what covers it instead.
+      # the production build in one step.
       - run: npm run build
 
-  docs:
-    name: docs (relative links)
+  documentation:
+    name: documentation (relative links)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

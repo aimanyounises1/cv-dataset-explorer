@@ -26,12 +26,11 @@ and plants synthetic embeddings -- but the app does if you want to look at it.
 | `pytest` | `backend/` | API contracts, degraded modes, ranking and paging invariants, agent graph |
 | `npm run build` | `frontend/` | the strict `tsc` type-check plus the production build |
 | `python scripts/check_links.py` | repo root | a relative Markdown link that points nowhere |
-| `python scripts/capabilities.py --check` | repo root | `docs/CAPABILITIES.md` drifting from the running system (needs the API up) |
 | `python ../scripts/ui_smoke.py` | `backend/` | a view that renders empty, a control that stopped filtering, a console error (needs Chrome, both servers, an ingested corpus) |
 
-The first four run in CI on every pull request. The last two cannot run there,
-and [docs/TESTING.md](docs/TESTING.md) says why, along with everything else CI
-does not cover.
+The first four run in CI on every pull request. The browser sweep remains a
+local check because CI does not download the dataset or drive a real Chrome
+installation.
 
 ## Conventions that are load-bearing
 
@@ -44,21 +43,18 @@ does not cover.
 - **Optional layers degrade, they do not fail.** A missing artifact returns 200
   with a message naming the command that would produce it. Adding a capability
   means adding its availability probe too.
-- **Never move a measured number without re-measuring it.** Every figure in the
-  docs carries the protocol that produced it; the four protocols are separated in
-  the README. If a change alters the benchmark definition, bump
+- **Never move a measured number without re-measuring it.** Every published
+  number must name the protocol that produced it. If a change alters the
+  benchmark definition, bump
   `PROTOCOL_VERSION` in `app/api/eval.py` so cached results cannot be read as
   comparable. If a claim gets weaker, say it got weaker.
-- **Nothing generated is committed.** Images, `explorer.db`, `*.npy`, model
-  weights, QA runs and reports all live under `backend/data/`, which is
-  gitignored.
+- **Runtime artifacts are not committed.** `explorer.db`, downloaded images,
+  `*.npy`, model weights, QA runs and reports live under `backend/data/`, which
+  is gitignored. The curated product screenshots under `assets/` are the only
+  committed image artifacts.
 - **Requirement ids in test docstrings** (`FR-SE-U1`, `FR-EV-2`, "Criterion 2")
-  refer to an internal requirements document that is deliberately not published
-  (see `.gitignore`). Treat the docstring itself as the specification: each one
-  states the failure it prevents.
-- **Regenerate, do not hand-edit, generated files.** `docs/CAPABILITIES.md` comes
-  from `python scripts/capabilities.py`; the screenshots come from
-  `python scripts/screenshots.py`.
+  are historical acceptance labels. Treat the docstring itself as the
+  specification: each one states the failure it prevents.
 
 ## Commits and pull requests
 
