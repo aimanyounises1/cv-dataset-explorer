@@ -2,6 +2,7 @@ import {
   useCallback, useEffect, useRef, useState,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { AXES } from "../api/types";
 import { useActiveProviderName, useCorpusTotal } from "../lib/activeProvider";
 import "../styles/compare.css";
 
@@ -20,7 +21,6 @@ import "../styles/compare.css";
 // this lazy chunk does not pull the shelf (and its client) along for one string.
 const DRAG_IDS = "application/x-cvde-ids";
 
-const AXES = ["legibility", "rarity", "difficulty", "clutter"] as const;
 
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 12;

@@ -51,24 +51,10 @@ export const api = {
   /** Composed retrieval: text pulls, reference images pull, negatives push.
    * Scores are only comparable within one response (basis "composed"). */
   composedSearch: (body: ComposedQuery, signal?: AbortSignal) =>
-    fetch("/api/search/composed", {
-      method: "POST", signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then(async (r) => {
-      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-      return r.json() as Promise<SearchResponse>;
-    }),
+    send<SearchResponse>("/search/composed", "POST", body, signal),
   /** At most three explainable groups over the current ranking, on demand. */
   scenarioGroups: (body: ComposedQuery, signal?: AbortSignal) =>
-    fetch("/api/search/scenarios", {
-      method: "POST", signal,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then(async (r) => {
-      if (!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-      return r.json() as Promise<ScenarioResponse>;
-    }),
+    send<ScenarioResponse>("/search/scenarios", "POST", body, signal),
 
   /** Image-to-image retrieval. Raw bytes, not multipart: one file needs no
    * form envelope, and the server carries no form parser. */
