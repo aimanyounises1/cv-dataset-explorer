@@ -133,14 +133,26 @@ def inconsistent_samples(
     rows = conn.execute(
         f"SELECT s.* FROM samples s WHERE s.caption_consistency IS NOT NULL{and_where} "
         "ORDER BY s.caption_consistency ASC LIMIT ?", params + [limit]).fetchall()
+    first_caption: dict[int, str] = {}
+    if rows:
+        sample_ids = [int(row["id"]) for row in rows]
+        qmarks = ",".join("?" * len(sample_ids))
+        first_rows = conn.execute(
+            "SELECT c.sample_id, c.text FROM captions c "
+            "JOIN ("
+            "  SELECT sample_id, MIN(idx) AS first_idx FROM captions "
+            f"  WHERE sample_id IN ({qmarks}) GROUP BY sample_id"
+            ") first ON first.sample_id = c.sample_id AND first.first_idx = c.idx",
+            sample_ids,
+        ).fetchall()
+        first_caption = {int(row["sample_id"]): row["text"] for row in first_rows}
+
     out = []
     for r in rows:
-        first = conn.execute(
-            "SELECT text FROM captions WHERE sample_id = ? ORDER BY idx LIMIT 1",
-            (r["id"],)).fetchone()
+        caption = first_caption.get(int(r["id"]), "")
         out.append(SuspectCaption(
-            caption=first["text"] if first else "",
+            caption=caption,
             agreement=round(r["caption_consistency"], 4),
-            sample=row_to_card(r, caption=first["text"] if first else None),
+            sample=row_to_card(r, caption=caption or None),
         ))
     return out

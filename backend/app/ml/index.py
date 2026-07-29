@@ -36,7 +36,14 @@ class EmbeddingIndex:
         ids_path, embs_path = d / ids_file, d / embs_file
         if not ids_path.exists() or not embs_path.exists():
             return None
-        return cls(np.load(ids_path), np.load(embs_path))
+        try:
+            ids = np.load(ids_path, allow_pickle=False)
+            embeddings = np.load(embs_path, allow_pickle=False)
+            return cls(ids, embeddings)
+        except (AssertionError, EOFError, OSError, ValueError) as exc:
+            logger.warning(
+                "%s embedding index in %s is unreadable: %s", kind, d, exc)
+            return None
 
     @classmethod
     def save(cls, ids: np.ndarray, embeddings: np.ndarray, kind: str = "image",
@@ -122,9 +129,9 @@ class EmbeddingIndex:
         """EVERY near-duplicate pair above `threshold`, sorted by similarity.
 
         Uncapped, deliberately. `duplicate_pairs` truncates to a display limit,
-        which is right for a gallery and wrong for a count: "200 duplicate pairs"
-        when there are 2,458 is not a smaller answer, it is a false one. Counting
-        and listing are different jobs and now have different methods.
+        which is right for a gallery and wrong for a count: returning the display
+        cap as if it were the total is false. Counting and listing are different
+        jobs and therefore have different methods.
 
         Cost is one pass of the full similarity matrix — measured at 0.2 s for
         8,000 x 768 on an M-series Mac, chunked so the matrix is never

@@ -10,26 +10,29 @@ are the night scenes, which captions their own image does not support, which
 300 samples are hardest, whether the held-out split is contaminated by
 near-duplicates of training images. The through-line is **long-tail
 discovery** — rare scenes, coverage gaps, and the annotations that don't hold
-up are what the rarity axis, the coverage dashboard, the similarity floor and
-the caption audit exist to surface. Everything runs on one machine: SQLite for
+up are what the rarity axis, prompt-slice dashboard, similarity floor and
+caption audit exist to surface. Everything runs on one machine: SQLite for
 storage, local embedding models for retrieval, no cloud services, no paid
 APIs, no external vector database.
 
 ## Quick start
 
 ```bash
-# backend (Python 3.11+)
+# backend (Python 3.11+), from the repository root
 cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m app.ingest            # downloads Flickr8k + SigLIP 2, builds everything (~20 min)
-uvicorn app.main:app --port 8000
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 -m app.ingest           # downloads Flickr8k + SigLIP 2, builds everything (~20 min)
+python3 -m uvicorn app.main:app --port 8000
 
-# frontend (Node 20+), second terminal
+# frontend (Node 20+), second terminal from the repository root
 cd frontend && npm install && npx vite --port 5173
 ```
 
-Open http://localhost:5173. `python -m app.ingest --skip-embeddings` skips the
+Open http://localhost:5173. On Windows, activate with
+`.venv\Scripts\Activate.ps1`; after activation, use `python` in place of
+`python3`. `python3 -m app.ingest --skip-embeddings` skips the
 model download and runs keyword-only; every ML capability is an optional layer
 that reports its own availability and names the command that enables it.
 
@@ -38,11 +41,11 @@ Optional layers, each honest about its absence:
 | Layer | Enable with |
 |---|---|
 | Assistant (local agents) | [Ollama](https://ollama.com) + `ollama pull qwen3:8b`, then `pip install -r requirements-agent.txt` |
-| VLM tag enrichment | `ollama pull qwen2.5vl:7b`, then `python -m app.enrich` |
+| VLM tag enrichment | `ollama pull qwen2.5vl:7b`, then `python3 -m app.enrich` |
 | Self-QA browser sweep | `pip install -r requirements-qa.txt` (Playwright + real Chrome) |
-| Qwen3-VL retrieval provider | `pip install -r requirements-qwen.txt`, then `python -m app.ingest --provider qwen3_vl` |
-| Region suggestions (zero-shot detector) | `python -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny')"` |
-| Promptable object masks (SAM 2.1 tiny) | `python -c "from huggingface_hub import snapshot_download; snapshot_download('facebook/sam2.1-hiera-tiny')"` |
+| Qwen3-VL retrieval provider | `pip install -r requirements-qwen.txt`, then `python3 -m app.ingest --provider qwen3_vl` |
+| Region suggestions (zero-shot detector) | `python3 -c "from huggingface_hub import snapshot_download; snapshot_download('IDEA-Research/grounding-dino-tiny')"` |
+| Promptable object masks (SAM 2.1 tiny) | `python3 -c "from huggingface_hub import snapshot_download; snapshot_download('facebook/sam2.1-hiera-tiny')"` |
 | Container path | `docker compose up --build` — see [docs/DEPLOY.md](docs/DEPLOY.md) |
 
 ## The model decision, measured
@@ -51,9 +54,12 @@ Retrieval defaults to **SigLIP 2** because it measures better on this corpus's
 own benchmark — not because it is smaller: parameter count is not quality.
 Qwen3-VL-Embedding-2B runs behind the same provider seam as an explicit
 opt-in (`CVDE_EMBED_PROVIDER=qwen3_vl`); each provider keeps its own index
-directory and manifest, so two embedding spaces can never mix, and the UI
-names whichever provider is actually ranking, with the reason whenever a
-fallback happened.
+directory and schema-v2 commit marker. The marker binds the exact cached
+Hugging Face revision and preprocessing fingerprint to the vector dimensions,
+row counts and ordered sample/caption IDs, and is written atomically only after
+all four arrays are complete. A legacy or mismatched index is refused rather
+than mixed with a live query encoder; the UI names whichever provider is
+actually ranking and why a fallback happened.
 
 Head-to-head on this machine (M4 Max, 64 GB; 1,000-query text→image sample of
 the repository's own protocol; `scripts/bench_providers.py` re-measures it):
@@ -94,9 +100,10 @@ recorded.
 
 ![Zero-shot facet filters with a set description panel open](docs/screenshots/2-describe.png)
 
-Facet filters come from zero-shot attribute classification over the existing
-embeddings; the description panel summarizes any filtered set with counted,
-never generated, statements.
+Facet filters include exploratory zero-shot assignments over hand-authored
+prompt banks. Ambiguous images abstain, and the UI presents each distribution
+as a review hypothesis rather than a ground-truth taxonomy; the description
+panel summarizes any filtered set with counted, never generated, statements.
 
 ### Judge difficulty, not just content
 
@@ -131,7 +138,8 @@ consistency flags images whose five captions disagree with each other.
 ![Dataset profile, split-integrity view: train/test leakage as a threshold ladder with judgeable cross-split pairs](docs/screenshots/7-stats.png)
 ![The self-benchmark table: recall@k for all three modes](docs/screenshots/8-eval.png)
 
-The stats page states the dataset's provenance and known defects. The
+The adapter pins the exact reviewed Flickr8k Hub commit, and the stats page
+states the dataset's provenance and known defects. The
 benchmark page measures the tool's own retrieval (text→image recall@1/5/10
 per mode, the dataset's captions as ground truth) with its protocol and
 caveats stated inline; `GET /api/stats/leakage` reports train/test
@@ -194,15 +202,18 @@ produced it.
 
 ![Assistant conversation with agent trace and rendered blocks](docs/screenshots/11-assistant.png)
 
-An optional LangGraph orchestration over local Ollama: an orchestrator routes
-to retrieval/insights specialists, a synthesizer quality-gates the answer, and
-**the graph's own node transitions stream into the UI as they happen** — the
-progress you watch is the run, not an animation. Agents call the same service
-functions as the REST API — retrieval stays deterministic — and can inspect
-albums: ask about a rare-scenario album and the answer cites its measured
-signals and outliers. The assistant's one mutation is a **proposal**: tagging
-waits for your click, and conversations persist locally with
-rename/reopen/delete.
+An optional LangGraph orchestration over local Ollama: a schema-constrained
+orchestrator routes to registered retrieval, insights, visualization or QA
+specialists (at most two cheap lanes in parallel), and a typed synthesizer
+quality-gates the answer. **The graph's own node transitions stream into the UI
+as they happen** — the progress you watch is the run, not an animation.
+Retrieval tools call the same `run_search` service as the REST API; inspection
+tools make read-only queries against the same SQLite store. The assistant can
+inspect albums: ask about a rare-scenario album and the answer cites its
+measured signals and outliers. It cannot write dataset state directly: its tag
+tool returns a **proposal**, and the browser sends the tag request only after
+your click. Conversations and generated reports persist locally; conversations
+support rename/reopen/delete.
 
 ![Command palette over every route and action](docs/screenshots/10-palette.png)
 ![The front door, with the rail's local-models card](docs/screenshots/17-models.png)
@@ -263,16 +274,16 @@ scripts/        benchmarks, screenshots, capabilities/link checks
 ## Test evidence
 
 ```bash
-cd backend && pytest                  # 383 passed (2026-07-29)
-cd frontend && npx tsc --noEmit && npm run build
-cd backend && python ../scripts/ui_smoke.py   # real-Chrome sweep, 17 workflows
+(cd backend && .venv/bin/python -m pytest)
+(cd frontend && npx tsc --noEmit && npm run build)
+(cd backend && .venv/bin/python ../scripts/ui_smoke.py)
 ```
 
-The last full sweep at this commit: **108/108 checks across 17/17 workflows**
-(run id in `backend/data/qa/`). Re-run rather than quote — the registry grows,
-and every number above is only true of the day it was measured. CI runs the
-light install (no torch/langgraph — those modules skip), ruff, tsc, the build,
-the link check and the capabilities contract.
+The real-Chrome sweep writes its run-specific check and workflow totals under
+`backend/data/qa/`. Use that generated report as the evidence for the checkout
+being reviewed; the registry grows, so this README deliberately does not cache
+the tally. CI runs the light install (no torch/langgraph — those modules skip),
+ruff, tsc, the build, the link check and the capabilities contract.
 
 ## Honest limitations
 
@@ -306,11 +317,13 @@ the link check and the capabilities contract.
   ([docs/DEPLOY.md](docs/DEPLOY.md) states expectations).
 - The dataset copy itself is imperfect and the stats page says how (missing
   ~90 images vs the original distribution, undocumented split assignments, no
-  upstream license).
+  licence metadata on the Hugging Face card; the original Flickr8k terms limit
+  use to non-commercial research and education).
 
 ## Configuration
 
 Everything is environment variables; [.env.example](.env.example) lists each
 one with its default and effect. The ones that matter first:
 `CVDE_DATA_DIR`, `CVDE_EMBED_PROVIDER` (`siglip2` default | `qwen3_vl`),
-`CVDE_EMBED_MODEL`, `CVDE_OLLAMA_URL`, `CVDE_CHAT_MODEL`, `CVDE_VLM_MODEL`.
+`CVDE_EMBED_MODEL`, `CVDE_QWEN_EMBED_MODEL`, `CVDE_OLLAMA_URL`,
+`CVDE_CHAT_MODEL`, `CVDE_VLM_MODEL`.

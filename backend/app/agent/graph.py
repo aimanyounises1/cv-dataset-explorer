@@ -30,7 +30,6 @@ the REST API uses, not a replacement for them.
 """
 import logging
 import operator
-import re
 import time
 from collections.abc import Sequence
 from typing import Annotated, Literal, Optional
@@ -82,14 +81,13 @@ Examples:
 - "How many images and captions are in the dataset?" asserts nothing: []
 - "Is there a duplicate cluster?" asserts nothing: []
 - "Summarize the 30% improvement the correction produced" asserts a premise: \
-copy the complete user sentence verbatim.
+["Summarize the 30% improvement the correction produced"]
 
 Never turn a question into a generic claim such as "the dataset contains a \
 specific number"; the user asked you to discover that value rather than asserting \
-one. Set `premise_kind` to `none` for questions and `assertion` only when the \
-latest user supplies a fact as true. `claim_to_verify` is normally null. When \
-there is an assertion, it must be an exact, contiguous quote from the latest \
-user's text; never paraphrase it."""
+one. `claims_to_verify` is normally an empty list and may contain at most three \
+items. Every item must be an exact, contiguous quote from the latest user's text; \
+never paraphrase it."""
 
 
 SYNTHESIZER_PROMPT = """You are the quality gate and final voice of a dataset \
@@ -136,11 +134,14 @@ plainly instead of substituting capability status for it."""
 
 
 class ClaimAssessment(BaseModel):
-    """The synthesizer's evidence decision for one router-identified premise."""
+    """The synthesizer's assessment and cited excerpt for one routed premise."""
 
     claim: str = Field(description="Exact claim copied from claims_to_verify.")
     status: Literal["supported", "not_supported"] = Field(
-        description="Whether a current-turn tool result establishes the claim."
+        description=(
+            "The synthesizer's judgment of whether a current-turn tool result "
+            "supports the claim."
+        )
     )
     evidence: str = Field(
         default="",
@@ -184,67 +185,17 @@ class AgentState(MessagesState):
     lanes_failed: Annotated[list[str], operator.add]
 
 
-_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
-_ORPHAN_CLOSE = re.compile(r"^.*?</think>", re.DOTALL | re.IGNORECASE)
-
-
-def strip_reasoning(text: str) -> str:
-    """Remove a reasoning-model's private thinking from a user-facing answer.
-
-    Qwen3 emits `<think>…</think>` around its scratchpad. Matched pairs are the
-    easy case; the one that actually reached the screen was an *orphan* closing
-    tag, because the opening tag had been consumed as a separate streamed chunk.
-    That left "No further action needed.\\n</think>" sitting above the answer in
-    the chat. So an unmatched `</think>` is treated as "everything before this was
-    thinking", which is what it means.
-
-    A stray *opening* tag with no close is the opposite case and is left alone:
-    discarding everything after it would throw away the whole answer.
-    """
-    if not text:
-        return text
-    cleaned = _THINK_BLOCK.sub("", text)
-    if "</think>" in cleaned.lower():
-        cleaned = _ORPHAN_CLOSE.sub("", cleaned, count=1)
-    return cleaned.strip()
-
-
-# Markdown on either side of the token: a model that has been told to write
-# `RETRY:` will happily emit "**RETRY:**", "> RETRY:" or "- _RETRY:_".
-_RETRY_LINE = re.compile(r"^[ \t>*_-]*RETRY:[ \t*_]*(.*?)[ \t*_]*$",
-                         re.IGNORECASE | re.MULTILINE)
-
-
-def _split_retry(content: str) -> tuple[str, str]:
-    """(retry feedback, answer) — the control token never reaches the reader.
-
-    `RETRY:` is the quality gate's private word for "send this back", and the
-    handler used to look for it only at position 0. A model that writes a full
-    answer and *then* appends "RETRY: check whether agreement metrics exist"
-    slipped straight through: the retry never fired, and the user was shown the
-    agent's instruction to itself in the same voice as the answer. So the token
-    is recognised wherever it appears, and stripped from the text either way —
-    an internal control word is never part of a reply, even when the retry
-    budget is spent.
-    """
-    hits = _RETRY_LINE.findall(content)
-    if not hits:
-        return "", content.strip()
-    answer = _RETRY_LINE.sub("", content).strip()
-    return (hits[0].strip() or "revise the answer"), answer
-
-
 def _unverified_claims(
     claims: Sequence[str],
     assessments: Sequence[ClaimAssessment],
     messages,
 ) -> list[str]:
-    """Claims lacking a supported verdict tied to actual tool output.
+    """Claims lacking a supported assessment with an exact tool-result excerpt.
 
-    This check is structural, not a vocabulary heuristic: the router supplies
-    complete semantic claims, the synthesizer supplies verdicts, and a supported
-    verdict is accepted only when its cited excerpt is present in a ToolMessage
-    from this turn.
+    This deterministic gate is deliberately structural: it verifies that the
+    synthesizer cited text which actually occurs in a current-turn ToolMessage.
+    It does not decide whether that excerpt semantically entails the claim; that
+    judgment remains explicit in the synthesizer's typed assessment.
     """
     evidence = "\n".join(
         message.content
@@ -326,28 +277,19 @@ def route_schema() -> type[BaseModel]:
                                 "same question cannot be combined.")),
         brief=(str, Field(default="", description="One line telling the "
                                                   "specialist what to do.")),
-        premise_kind=(
-            Literal["none", "assertion"],
+        claims_to_verify=(
+            list[str],
             Field(
+                default_factory=list,
+                max_length=3,
                 description=(
-                    "none when the latest user asks to discover, count, inspect "
-                    "or verify; assertion only when the user supplies a factual "
-                    "premise as true."
-                )
-            ),
-        ),
-        claim_to_verify=(
-            Optional[str],                                  # noqa: UP045
-            Field(
-                default=None,
-                description=(
-                    "A factual premise asserted by the latest user that requires "
-                    "tool evidence before the answer may repeat it as fact. Copy "
-                    "the complete user sentence verbatim; it must be an exact "
-                    "contiguous quote. A question "
-                    "asking to discover, count, inspect or verify a value is not "
-                    "a claim and must yield null. Never paraphrase a question as "
-                    "a generic existential claim. Null is the normal value."
+                    "At most three factual premises asserted by the latest user "
+                    "that require tool evidence before the answer may repeat "
+                    "them as facts. Every item must be an exact contiguous quote "
+                    "from the latest user. Questions asking to discover, count, "
+                    "inspect or verify a value are not claims. Never paraphrase "
+                    "a question as a generic existential claim; an empty list is "
+                    "the normal value."
                 ),
             ),
         ),
@@ -427,17 +369,15 @@ def build_graph(model=None, specialists=None):
                 ),
                 "",
             )
-            latest_folded = latest_user.casefold()
-            candidate = (decision.claim_to_verify or "").strip()
-            claims = (
-                [candidate]
+            claims = []
+            for raw_claim in decision.claims_to_verify:
+                candidate = raw_claim.strip()
                 if (
-                    decision.premise_kind == "assertion"
-                    and candidate
-                    and candidate.casefold() in latest_folded
-                )
-                else []
-            )
+                    candidate
+                    and candidate in latest_user
+                    and candidate not in claims
+                ):
+                    claims.append(candidate)
         except Exception as exc:
             # Structured output can still fail — a model that ignores the schema,
             # a validation error, an Ollama hiccup. None of those may end the
@@ -583,10 +523,8 @@ def build_graph(model=None, specialists=None):
                 content=_claim_refusal(unverified), name="final"
             )]}
 
-        legacy_feedback, content = _split_retry(
-            strip_reasoning(decision.answer or "")
-        )
-        asked_retry = (decision.retry_feedback or legacy_feedback).strip()
+        content = (decision.answer or "").strip()
+        asked_retry = decision.retry_feedback.strip()
         if asked_retry and state.get("retries", 0) < 1:
             return {"retries": state.get("retries", 0) + 1,
                     "messages": [AIMessage(content=f"[quality gate] {asked_retry}",
@@ -643,8 +581,9 @@ def _fallback_answer(state: AgentState, exc: Exception) -> str:
     an answer that skipped its own quality gate should say so.
     """
     for msg in reversed(state["messages"]):
-        content = strip_reasoning(getattr(msg, "content", "") or "")
-        if isinstance(content, str) and content.strip() and not content.startswith("["):
+        raw = getattr(msg, "content", "")
+        content = raw.strip() if isinstance(raw, str) else ""
+        if content and not content.startswith("["):
             return (f"{content.strip()}\n\n(The final review step was unavailable — "
                     f"{type(exc).__name__} — so this is the specialist's own answer, "
                     f"unverified.)")

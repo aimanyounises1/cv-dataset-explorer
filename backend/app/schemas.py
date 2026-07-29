@@ -270,9 +270,11 @@ class EvalResponse(BaseModel):
 
 
 class LeakagePoint(BaseModel):
-    """One rung of the threshold ladder. Reported as a curve because the answer
-    moves violently with the cut: on this corpus 0.80% of held-out images look
-    contaminated at cosine 0.95 and 12.05% at 0.90."""
+    """One rung of the threshold ladder.
+
+    The complete curve keeps the threshold-dependent result explicit instead
+    of baking one corpus/model generation's count into the API contract.
+    """
     threshold: float
     pairs: int
     cross_split: int
@@ -317,7 +319,7 @@ class LeakageContamination(BaseModel):
     slice that can be opened, exported, tagged or excluded.
     """
     threshold: float
-    held_out_split: Optional[str] = None   # None = test + validation together
+    held_out_split: Optional[Literal["test", "validation"]] = None
     total: int                             # before any cap
     ids: list[int]
     # Never a silently short list: a caller that would page has to be told.

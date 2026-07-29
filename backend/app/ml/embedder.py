@@ -16,6 +16,7 @@ copy of the weights costs ~1.5 GB to avoid a wait nobody can perceive.
 """
 import logging
 import threading
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -36,14 +37,37 @@ def _pick_device():
 
 
 class Embedder:
-    def __init__(self, model_name: str = config.EMBED_MODEL, device: Optional[str] = None):
+    def __init__(
+        self,
+        model_path: str | Path,
+        *,
+        model_id: str,
+        revision: str,
+        local_files_only: bool = True,
+        device: Optional[str] = None,
+    ):
         import torch
         from transformers import AutoModel, AutoProcessor
 
+        self.model_id = model_id
+        self.revision = revision
+        self.model_path = Path(model_path)
         self.device = device or _pick_device()
-        logger.info("Loading %s on %s", model_name, self.device)
-        self.model = AutoModel.from_pretrained(model_name).to(self.device).eval()
-        self.processor = AutoProcessor.from_pretrained(model_name)
+        logger.info(
+            "Loading %s@%s from %s on %s",
+            model_id,
+            revision,
+            self.model_path,
+            self.device,
+        )
+        self.model = AutoModel.from_pretrained(
+            self.model_path,
+            local_files_only=local_files_only,
+        ).to(self.device).eval()
+        self.processor = AutoProcessor.from_pretrained(
+            self.model_path,
+            local_files_only=local_files_only,
+        )
         self._torch = torch
         # Guards every forward pass through this module — see the module
         # docstring for the crash this prevents. Held for one batch at a time so
@@ -84,32 +108,3 @@ def _normalize(x: np.ndarray) -> np.ndarray:
     norms = np.linalg.norm(x, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return (x / norms).astype(np.float32)
-
-
-_embedder: Optional[Embedder] = None
-_lock = __import__("threading").Lock()
-_failed_at: Optional[float] = None
-_RETRY_AFTER_S = 120.0  # don't pay a full failed model-load on every request
-
-
-def get_embedder() -> Optional[Embedder]:
-    """Thread-safe singleton, or None if the model stack is unavailable.
-    A failed load is cached briefly so each request doesn't retry a ~GB load."""
-    global _embedder, _failed_at
-    import time
-
-    if _embedder is not None:
-        return _embedder
-    with _lock:
-        if _embedder is not None:
-            return _embedder
-        if _failed_at is not None and time.monotonic() - _failed_at < _RETRY_AFTER_S:
-            return None
-        try:
-            _embedder = Embedder()
-            _failed_at = None
-        except Exception as exc:  # torch missing, no network for weights, etc.
-            logger.warning("Embedding model unavailable: %s", exc)
-            _failed_at = time.monotonic()
-            return None
-    return _embedder

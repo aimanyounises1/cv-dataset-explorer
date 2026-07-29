@@ -39,17 +39,21 @@ def child(provider: str, sample_size: int) -> int:
     from app.ml import providers
 
     out: dict = {"provider": provider}
-    state = providers.resolve()
-    if state.active != provider:
-        out["unavailable"] = state.reasons.get(provider, "did not resolve")
+    t0 = time.perf_counter()
+    runtime = providers.get_retrieval_bundle()
+    out["load_s"] = round(time.perf_counter() - t0, 2)
+    if runtime is None or runtime.provider != provider:
+        state = providers.resolve()
+        out["unavailable"] = (
+            state.reasons.get(provider)
+            or state.fallback_reason
+            or f"resolved {getattr(runtime, 'provider', None)!r}, not {provider!r}"
+        )
         print(json.dumps(out))
         return 0
-
-    t0 = time.perf_counter()
-    encoder = providers.get_encoder()
-    out["load_s"] = round(time.perf_counter() - t0, 2)
-    out["model_id"] = state.model_id
-    out["dim"] = state.dim
+    encoder = runtime.encoder
+    out["model_id"] = runtime.model_id
+    out["dim"] = runtime.manifest["dim"]
 
     conn = db.connect()
     captions = [r["text"] for r in conn.execute(
@@ -93,7 +97,7 @@ def child(provider: str, sample_size: int) -> int:
     else:
         out["recall_unavailable"] = r.get("message")
 
-    emb_dir = config.emb_dir_for(provider)
+    emb_dir = runtime.emb_dir
     out["index_mb"] = round(sum(
         f.stat().st_size for f in emb_dir.glob("*.npy")) / 1e6, 1)
     manifest = providers.read_manifest(emb_dir)
@@ -149,10 +153,10 @@ def main() -> int:
                   f"{r.get('unavailable') or r.get('error')} | — | — | — |")
             continue
 
-        def rk(mode):
-            m = r.get("recall", {}).get(mode)
+        def rk(mode, row=r):
+            m = row.get("recall", {}).get(mode)
             return (f"{m['r1']:.1%}/{m['r5']:.1%}/{m['r10']:.1%}" if m
-                    else r.get("recall_unavailable", "n/a"))
+                    else row.get("recall_unavailable", "n/a"))
         ing = "—"
         if r.get("ingest_image_encode_s") is not None:
             ing = f"{r['ingest_image_encode_s']:.0f}+{r.get('ingest_caption_encode_s') or 0:.0f}"

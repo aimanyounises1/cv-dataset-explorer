@@ -27,7 +27,6 @@ from fastapi import APIRouter, Depends, Query
 
 from .. import config, db
 from ..ml import hubness
-from ..ml.index import get_caption_index, get_index
 from ..schemas import EvalModeResult, EvalResponse
 from . import search as search_api
 from .deps import get_conn
@@ -59,10 +58,17 @@ ENCODE_BATCH = 128
 #      out of the assignment's focus. The three text modes are unchanged, but
 #      the row set differs, so version-7 caches must not be read as this
 #      protocol's results.
-PROTOCOL_VERSION = 8
+#   9: image index, caption index, query encoder and hubness penalty are acquired
+#      from one validated provider generation.
+PROTOCOL_VERSION = 9
 
 
-def _cache_path(sample_size: int):
+def _cache_path(
+    sample_size: int,
+    runtime=None,
+    *,
+    live_encoder: bool | None = None,
+):
     """Key on everything the result actually depends on.
 
     The embeddings drive the semantic path, but the captions table and FTS
@@ -77,7 +83,17 @@ def _cache_path(sample_size: int):
     # Provider-scoped: two providers over the same corpus are two different
     # retrieval environments, so the active provider's artifacts drive the
     # stamp and its name joins the key below.
-    emb_dir = providers.active_emb_dir()
+    provider = (
+        runtime.provider if runtime is not None
+        else providers.active_provider())
+    emb_dir = (
+        runtime.emb_dir if runtime is not None
+        else providers.active_emb_dir())
+    generation = (
+        f"_{runtime.generation[:12]}" if runtime is not None else "")
+    encoder_mode = (
+        f"_{'live' if live_encoder else 'stored'}"
+        if live_encoder is not None else "")
     stamp = 0.0
     for embs in ("image_embeddings.npy", "caption_embeddings.npy"):
         p = emb_dir / embs
@@ -86,7 +102,7 @@ def _cache_path(sample_size: int):
     if config.DB_PATH.exists():
         stamp = max(stamp, config.DB_PATH.stat().st_mtime)
     return (config.CACHE_DIR /
-            f"eval_v{PROTOCOL_VERSION}_{providers.active_provider()}"
+            f"eval_v{PROTOCOL_VERSION}_{provider}{generation}{encoder_mode}"
             f"_{sample_size}_k{config.RRF_K}"
             f"_d{config.SEARCH_DEPTH}"
             # The hubness constants re-rank the semantic path, so they belong in
@@ -166,17 +182,13 @@ def _ranks_of(lists: list[list[int]], target_ids: list[int],
     return ranks
 
 
-def _encode_queries(texts: list[str]) -> np.ndarray | None:
+def _encode_queries(texts: list[str], embedder) -> np.ndarray | None:
     """Query vectors the way `/api/search` produces them, or None if the model
     stack is unavailable.
 
-    Resolved through `search_api` rather than importing the embedder directly:
-    the benchmark's whole claim is that it measures what search does, so the two
-    have to reach the model through one seam. Importing `get_embedder` here
-    would let a caller substitute an embedder for search and silently benchmark
-    a different one.
+    The caller supplies the encoder from the same runtime bundle as both
+    indexes; resolving it here would reopen a provider-flip race.
     """
-    embedder = search_api.get_embedder()
     if embedder is None:
         return None
     prompts = [search_api.normalize_query_text(t) for t in texts]
@@ -185,10 +197,8 @@ def _encode_queries(texts: list[str]) -> np.ndarray | None:
     return np.concatenate(chunks, axis=0)
 
 
-def _bank_encoder():
-    """Encoder for a first-use hubness build, resolved through `search_api` for
-    the same reason `_encode_queries` is: one seam to the model."""
-    embedder = search_api.get_embedder()
+def _bank_encoder(embedder):
+    """Encoder for a first-use hubness build from the bound runtime."""
     return None if embedder is None else search_api._encode_for_bank(embedder)
 
 
@@ -213,14 +223,31 @@ def retrieval_benchmark(
     sample_size: int = Query(1000, ge=50, le=5000),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    img, cap = get_index(), get_caption_index()
-    if img is None or cap is None:
+    indexes = search_api.get_retrieval_index_bundle()
+    if indexes is None:
         return EvalResponse(
             available=False,
             message="Requires image + caption embeddings — run `python -m app.ingest` "
                     "and `python -m app.analyze` first.")
+    try:
+        runtime = search_api.bind_retrieval_bundle(indexes)
+        embedder = runtime.encoder
+        encoder_problem = None
+    except Exception as exc:
+        # The indexes remain a coherent, validated generation. Evaluation can
+        # still run its documented stored-caption baseline without pretending
+        # it exercised the live search encoder.
+        runtime = indexes
+        embedder = None
+        encoder_problem = str(exc)
+    img = indexes.image_index
+    cap = indexes.caption_index
 
-    cache = _cache_path(sample_size)
+    cache = _cache_path(
+        sample_size,
+        runtime,
+        live_encoder=embedder is not None,
+    )
     if cache.exists():
         return EvalResponse(**json.loads(cache.read_text()))
 
@@ -231,7 +258,7 @@ def retrieval_benchmark(
     # build the per-image penalty the semantic path now subtracts, so scoring
     # them would be measuring the correction against its own training text —
     # the same class of mistake as the self-retrieval this file already guards.
-    bank = set(hubness.bank_caption_ids(conn))
+    bank = set(hubness.bank_caption_ids(conn, index=img))
     rows = [r for r in rows if r["id"] not in bank]
     rng = np.random.default_rng(42)
     picked = [rows[i] for i in rng.choice(len(rows), min(sample_size, len(rows)),
@@ -247,10 +274,11 @@ def retrieval_benchmark(
     # stored caption vectors keeps the benchmark available on a machine with no
     # model stack, but those are encodings of the raw caption text, so the
     # response has to say the number is not the shipped path.
-    qvecs = _encode_queries(texts)
+    qvecs = _encode_queries(texts, embedder)
     if qvecs is None:
         qvecs = cap.embeddings[np.array([cap.row_of(r["id"]) for r in picked])]
-        message = ("Embedding model unavailable — queries were taken from the "
+        message = (f"Embedding model unavailable ({encoder_problem}) — "
+                   "queries were taken from the "
                    "stored caption vectors (raw, un-normalized text) instead of "
                    "being encoded the way /api/search encodes them. The semantic "
                    "and hybrid rows understate the shipped path.")
@@ -260,7 +288,11 @@ def retrieval_benchmark(
     # benchmark has to rank the way `index.search` ranks, or it is measuring a
     # path the application does not take.
     scores = qvecs @ img.embeddings.T
-    penalty = hubness.get_penalty(conn, _bank_encoder())
+    penalty = hubness.get_penalty(
+        conn,
+        _bank_encoder(embedder),
+        runtime=runtime,
+    )
     if penalty is not None:
         scores = scores - penalty
     own = scores[np.arange(len(picked)), target_cols]

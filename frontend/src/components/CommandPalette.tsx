@@ -484,19 +484,30 @@ export default function CommandPalette(): JSX.Element | null {
     }
   };
 
-  if (!open) return null;
-
   const loadingSuggestions = suggestions === null && !suggestionsFailed;
 
   return (
-    <div className="cmdk-backdrop" onClick={(e) => { if (e.target === e.currentTarget) closePalette(); }}>
-      <div
-        className="cmdk-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        onKeyDown={handleKeyDown}
+    <>
+      <button
+        className="cmdk-mobile-trigger"
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="cmdk-dialog"
+        onClick={toggle}
       >
+        Search
+      </button>
+      {open && (
+        <div className="cmdk-backdrop" onClick={(e) => { if (e.target === e.currentTarget) closePalette(); }}>
+          <div
+            id="cmdk-dialog"
+            className="cmdk-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Command palette"
+            onKeyDown={handleKeyDown}
+          >
         <div className="cmdk-input-row">
           <span className="cmdk-input-icon" aria-hidden="true">⌘K</span>
           <input
@@ -574,7 +585,9 @@ export default function CommandPalette(): JSX.Element | null {
           <span><span className="pill">↵</span>select</span>
           <span><span className="pill">esc</span>close</span>
         </div>
-      </div>
-    </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

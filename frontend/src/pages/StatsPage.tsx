@@ -20,7 +20,7 @@ import "../styles/profile.css";
 const VIEWS = [
   { id: "overview", label: "Overview" },
   { id: "integrity", label: "Split integrity" },
-  { id: "coverage", label: "Coverage" },
+  { id: "coverage", label: "Prompt slices" },
   { id: "captions", label: "Caption health" },
   { id: "provenance", label: "Provenance" },
 ] as const;
@@ -59,7 +59,7 @@ export default function StatsPage() {
     api.overview().then(setOverview).catch((e) => setError(String(e)));
     api.captionStats().then(setCaptions).catch(fail("caption statistics"));
     api.duplicates().then(setDups).catch(fail("near-duplicates"));
-    api.coverage().then(setCoverage).catch(fail("attribute coverage"));
+    api.coverage().then(setCoverage).catch(fail("zero-shot prompt slices"));
   }, []);
 
   if (error) return <div className="error">{error}</div>;
@@ -199,11 +199,12 @@ export default function StatsPage() {
 
           {view === "coverage" && (
             <section className="profile-view">
-              <div className="section-title tight">Attribute coverage (zero-shot)</div>
+              <div className="section-title tight">Zero-shot prompt distribution</div>
               <p className="meta-line tight">
-                SigLIP label-bank classification over existing embeddings. Small
-                slices are the dataset's long tail — click any bar to open that
-                slice in the gallery.
+                Exploratory SigLIP assignments within each hand-authored prompt
+                bank. These are review hypotheses, not ground-truth labels or an
+                accuracy estimate. Ambiguous images abstain; click a bar to
+                inspect its slice before drawing a long-tail conclusion.
               </p>
               {coverage.length === 0 ? (
                 <div className="empty">
@@ -216,6 +217,10 @@ export default function StatsPage() {
                   {coverage.map((g) => (
                     <div className="panel" key={g.grp}>
                       <h3>{g.grp.replace(/_/g, " ")}</h3>
+                      <p className="meta-line tight">
+                        {g.labelled.toLocaleString()} assigned ·{" "}
+                        {g.abstained.toLocaleString()} abstained
+                      </p>
                       <ResponsiveContainer width="100%" height={Math.max(160, g.labels.length * 34)}>
                         <BarChart data={g.labels} layout="vertical">
                           <CartesianGrid stroke={GRID_STROKE} horizontal={false} />

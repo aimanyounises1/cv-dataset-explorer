@@ -1,13 +1,13 @@
 # Containerised stack for the CV Dataset Explorer. The direct workflow in the
 # README (uvicorn + vite on the host) is unchanged and remains the reference;
-# this is the same application with its dependencies pinned into images.
+# this is the same application with its dependencies installed into images.
 #
 #   docker compose up --build                    # API + UI
 #   docker compose --profile ollama up --build   # ... and a local Ollama
 #
-# The published ports match the host workflow on purpose — API on 8000, UI on
-# 5173 — so every URL in the README and docs/, and the host QA sweep with its
-# CVDE_QA_BASE_URL default, address this stack without being told about it.
+# The published ports match the host workflow and bind only to loopback — API
+# on 8000, UI on 5173 — so the documented URLs and host QA sweep address this
+# local, unauthenticated stack without exposing it to the LAN.
 #
 # See docs/DEPLOY.md for first-run ingest, resource expectations, and what is
 # deliberately left outside the containers.
@@ -19,7 +19,7 @@ services:
       dockerfile: docker/backend.Dockerfile
     image: cvde-backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       # Every piece of state the app owns: explorer.db, images, thumbs,
       # embeddings, caches, QA artifacts, generated reports. Bound to the same
@@ -37,12 +37,48 @@ services:
       # qwen3_vl additionally needs backend/requirements-qwen.txt, which this
       # image does not install (docs/DEPLOY.md says how).
       CVDE_EMBED_PROVIDER: ${CVDE_EMBED_PROVIDER:-siglip2}
+      # A mounted schema-v2 index is valid only with the model identity it
+      # commits. Forward both selectors so a custom host-built index uses its
+      # matching query encoder (or is refused by name).
+      CVDE_EMBED_MODEL: ${CVDE_EMBED_MODEL:-google/siglip2-base-patch16-256}
+      CVDE_EMBED_BATCH: ${CVDE_EMBED_BATCH:-32}
+      CVDE_QWEN_EMBED_MODEL: ${CVDE_QWEN_EMBED_MODEL:-Qwen/Qwen3-VL-Embedding-2B}
+      CVDE_QWEN_EMBED_BATCH: ${CVDE_QWEN_EMBED_BATCH:-8}
+      CVDE_DETECT_MODEL: ${CVDE_DETECT_MODEL:-IDEA-Research/grounding-dino-tiny}
+      CVDE_SEGMENT_MODEL: ${CVDE_SEGMENT_MODEL:-facebook/sam2.1-hiera-tiny}
+
+      # The container and host workflows share one configuration contract.
+      # Every documented tuning knob is forwarded so values in Compose's .env
+      # file or the invoking shell are not silently replaced by code defaults.
+      CVDE_RRF_K: ${CVDE_RRF_K:-60}
+      CVDE_SEARCH_DEPTH: ${CVDE_SEARCH_DEPTH:-300}
+      CVDE_DF_WARN_FRACTION: ${CVDE_DF_WARN_FRACTION:-0.20}
+      CVDE_HUBNESS_BETA: ${CVDE_HUBNESS_BETA:-0.3}
+      CVDE_HUBNESS_T: ${CVDE_HUBNESS_T:-0.02}
+      CVDE_HUBNESS_BANK: ${CVDE_HUBNESS_BANK:-3000}
+      CVDE_HUBNESS_AUTOBUILD: ${CVDE_HUBNESS_AUTOBUILD:-1}
+      CVDE_ATTR_MIN_MARGIN: ${CVDE_ATTR_MIN_MARGIN:-0.10}
+      CVDE_DUP_THRESHOLD: ${CVDE_DUP_THRESHOLD:-0.95}
+
       # Defaults to an Ollama already running on the host, which is the common
       # case on a developer machine. Point it at the container instead with:
       #   CVDE_OLLAMA_URL=http://ollama:11434 docker compose --profile ollama up
       # Absent either, the assistant and VLM enrichment degrade with a message
       # naming what to start — they do not fail the stack.
       CVDE_OLLAMA_URL: ${CVDE_OLLAMA_URL:-http://host.docker.internal:11434}
+      CVDE_CHAT_MODEL: ${CVDE_CHAT_MODEL:-qwen3:8b}
+      CVDE_VLM_MODEL: ${CVDE_VLM_MODEL:-qwen2.5vl:7b}
+      CVDE_OLLAMA_TIMEOUT: ${CVDE_OLLAMA_TIMEOUT:-120}
+      CVDE_OLLAMA_NUM_CTX: ${CVDE_OLLAMA_NUM_CTX:-40960}
+      CVDE_OLLAMA_NUM_PREDICT: ${CVDE_OLLAMA_NUM_PREDICT:-1024}
+      CVDE_AGENT_LANE_TIMEOUT: ${CVDE_AGENT_LANE_TIMEOUT:-90}
+      CVDE_AGENT_TURN_BUDGET: ${CVDE_AGENT_TURN_BUDGET:-150}
+      CVDE_AGENT_RECURSION_LIMIT: ${CVDE_AGENT_RECURSION_LIMIT:-25}
+
+      # Relevant only if requirements-qa.txt is added to a derived image.
+      CVDE_QA_BASE_URL: ${CVDE_QA_BASE_URL:-http://frontend}
+      CVDE_QA_API_URL: ${CVDE_QA_API_URL:-http://backend:8000}
+      CVDE_QA_URL_PREFIX: ${CVDE_QA_URL_PREFIX:-/media/qa}
     extra_hosts:
       # Resolves automatically on Docker Desktop; on a Linux host it does not
       # exist unless mapped, and the host-Ollama default above would fail to
@@ -56,8 +92,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-      # Generous: the first request that touches retrieval loads SigLIP 2, and
-      # on a cold volume that download is the slow part, not the boot.
+      # Generous enough for first-boot SQLite schema creation on a cold mount.
+      # This probe does not load or download a model.
       start_period: 60s
     restart: unless-stopped
 
@@ -68,7 +104,7 @@ services:
     image: cvde-frontend
     ports:
       # 5173 is the Vite dev port, kept so documented URLs stay correct.
-      - "5173:80"
+      - "127.0.0.1:5173:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -81,7 +117,7 @@ services:
     profiles: ["ollama"]
     image: ollama/ollama:latest
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       # Named, not bound: pulled models are large and belong to Ollama, not to
       # this repository's data directory.

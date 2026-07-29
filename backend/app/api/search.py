@@ -28,12 +28,15 @@ from PIL import Image as PILImage
 
 from .. import config, db
 from ..ml import hubness
-from ..ml.index import get_caption_index, get_index
-
-# Provider-aware: the active retrieval provider's encoder (Qwen3-VL or SigLIP)
-# behind the same duck type. eval.py and hubness reach the model through this
-# name, so the whole query path switches provider in one place.
-from ..ml.providers import get_encoder as get_embedder
+from ..ml.providers import (
+    bind_retrieval_bundle as _bind_retrieval_bundle,
+)
+from ..ml.providers import (
+    get_retrieval_bundle,
+)
+from ..ml.providers import (
+    get_retrieval_index_bundle as _get_retrieval_index_bundle,
+)
 from ..schemas import (
     AnnotationSearchRequest,
     ComposedSearchRequest,
@@ -65,6 +68,22 @@ from .deps import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def get_retrieval_index_bundle():
+    """Injectable acquisition seam shared with the retrieval benchmark."""
+    return _get_retrieval_index_bundle()
+
+
+def bind_retrieval_bundle(indexes):
+    """Injectable exact-generation encoder extension used by eval."""
+    return _bind_retrieval_bundle(indexes)
+
+
+def get_embedder():
+    """Compatibility seam for evaluation code; provider-bound by default."""
+    runtime = get_retrieval_bundle()
+    return runtime.encoder if runtime is not None else None
 
 
 def _keyword_ranking(
@@ -201,7 +220,7 @@ def _encode_for_bank(embedder):
 
 
 def _semantic_ranking(conn, q: str, allowed: Optional[set[int]], top_k: int):
-    """Ranked (sample_id, score), the query vector, and the score's basis.
+    """Ranking, query vector, score basis, and its bound provider runtime.
 
     The basis is returned rather than assumed because the hubness correction
     changes what the number means: with a penalty applied it is a cosine minus a
@@ -209,21 +228,35 @@ def _semantic_ranking(conn, q: str, allowed: Optional[set[int]], top_k: int):
     query but is no longer a cosine. Reporting it as one would be a lie the UI
     then prints.
     """
-    index = get_index()
-    embedder = get_embedder() if index is not None else None
-    if index is None or embedder is None:
-        return None, None, None
+    runtime = get_retrieval_bundle()
+    if runtime is None:
+        return None, None, None, None
+    index = runtime.image_index
+    embedder = runtime.encoder
     qvec = embedder.encode_texts([normalize_query_text(q)])[0]
-    penalty = hubness.get_penalty(conn, _encode_for_bank(embedder))
+    penalty = hubness.get_penalty(
+        conn,
+        _encode_for_bank(embedder),
+        runtime=runtime,
+    )
     ranked = index.search(qvec, top_k=top_k, allowed_ids=allowed, penalty=penalty)
-    return ranked, qvec, ("cosine" if penalty is None else "cosine_adj")
+    return (
+        ranked,
+        qvec,
+        ("cosine" if penalty is None else "cosine_adj"),
+        runtime,
+    )
 
 
-def _best_captions_for(conn, sample_ids: list[int], qvec) -> dict[int, str]:
+def _best_captions_for(
+    conn,
+    sample_ids: list[int],
+    qvec,
+    caption_index,
+) -> dict[int, str]:
     """For semantic results: the caption of each sample most similar to the
     query (uses precomputed caption embeddings; cheap dot products)."""
-    cap_index = get_caption_index()
-    if cap_index is None or qvec is None or not sample_ids:
+    if caption_index is None or qvec is None or not sample_ids:
         return {}
     qmarks = ",".join("?" * len(sample_ids))
     rows = conn.execute(
@@ -231,7 +264,7 @@ def _best_captions_for(conn, sample_ids: list[int], qvec) -> dict[int, str]:
         sample_ids).fetchall()
     best: dict[int, tuple[float, str]] = {}
     for r in rows:
-        vec = cap_index.vector_of(r["id"])
+        vec = caption_index.vector_of(r["id"])
         if vec is None:
             continue
         score = float(vec @ qvec)
@@ -287,9 +320,11 @@ def run_search(
     score_basis: Optional[str] = None
     rrf_k: Optional[int] = None
 
-    semantic, qvec, semantic_basis = (None, None, None)
+    semantic, qvec, semantic_basis, semantic_runtime = (
+        None, None, None, None)
     if mode in ("semantic", "hybrid"):
-        semantic, qvec, semantic_basis = _semantic_ranking(conn, q, allowed, depth)
+        semantic, qvec, semantic_basis, semantic_runtime = _semantic_ranking(
+            conn, q, allowed, depth)
         if semantic is None:
             degraded, mode = True, "keyword"
             # Appended, not assigned: a request that degraded more than once
@@ -350,7 +385,15 @@ def run_search(
 
     # Caption lookups are per-page, not per-ranking: only the window is shown.
     if mode in ("semantic", "hybrid"):
-        match_captions = {**_best_captions_for(conn, window, qvec), **match_captions}
+        match_captions = {
+            **_best_captions_for(
+                conn,
+                window,
+                qvec,
+                semantic_runtime.caption_index if semantic_runtime else None,
+            ),
+            **match_captions,
+        }
 
     if not window:
         return SearchResponse(items=[], mode_used=mode, degraded=degraded,
@@ -452,10 +495,11 @@ async def search_by_image(
     (no hubness penalty): the penalty bank is calibrated on text queries, and
     an uploaded image is not one.
     """
-    index = get_index()
-    embedder = get_embedder()
-    if index is None or embedder is None:
+    runtime = get_retrieval_bundle()
+    if runtime is None:
         raise HTTPException(503, "Embeddings not computed yet — run `python -m app.ingest`.")
+    index = runtime.image_index
+    embedder = runtime.encoder
     body = await request.body()
     if not body:
         raise HTTPException(400, "Send the image bytes as the request body")
@@ -489,8 +533,7 @@ def _unit(v: np.ndarray) -> np.ndarray:
 
 
 def _composed_ranking(conn, body: ComposedSearchRequest):
-    """The full composed ranking as (ranked, qvec, None), or (None, None,
-    message) when the embedding stack is down.
+    """Full ranking, query vector, error, and bound provider runtime.
 
     Query vector: the normalized mean of (a) the unit text vector, encoded
     through the same `normalize_query_text` seam every text query uses, and
@@ -506,11 +549,17 @@ def _composed_ranking(conn, body: ComposedSearchRequest):
     never after a window — and there is no keyword lane here to thread them
     into a second time.
     """
-    index = get_index()
-    embedder = get_embedder() if index is not None else None
-    if index is None or embedder is None:
-        return None, None, ("Composed ranking unavailable (embeddings not "
-                            "computed) — run `python -m app.ingest`.")
+    runtime = get_retrieval_bundle()
+    if runtime is None:
+        return (
+            None,
+            None,
+            "Composed ranking unavailable (embeddings not computed) — "
+            "run `python -m app.ingest`.",
+            None,
+        )
+    index = runtime.image_index
+    embedder = runtime.encoder
 
     def vec_of(sid: int, side: str) -> np.ndarray:
         v = index.vector_of(sid)
@@ -556,11 +605,11 @@ def _composed_ranking(conn, body: ComposedSearchRequest):
     order = np.argsort(-scores, kind="stable")
     ranked = [(int(index.ids[i]), float(scores[i])) for i in order
               if np.isfinite(scores[i])]
-    return ranked, qvec, None
+    return ranked, qvec, None, runtime
 
 
 def run_composed(conn: sqlite3.Connection, body: ComposedSearchRequest) -> SearchResponse:
-    ranked, qvec, down = _composed_ranking(conn, body)
+    ranked, qvec, down, runtime = _composed_ranking(conn, body)
     if ranked is None:
         if body.text and body.text.strip():
             # The honest fallback run_search's own degradation uses: rank what
@@ -590,7 +639,8 @@ def run_composed(conn: sqlite3.Connection, body: ComposedSearchRequest) -> Searc
                               score_basis="composed", offset=body.offset,
                               has_more=False, depth_limit=depth,
                               depth_reached=body.offset >= depth)
-    match_captions = _best_captions_for(conn, window, qvec)
+    match_captions = _best_captions_for(
+        conn, window, qvec, runtime.caption_index)
     qmarks = ",".join("?" * len(window))
     rows = {r["id"]: r for r in conn.execute(
         f"SELECT * FROM samples WHERE id IN ({qmarks})", window)}
@@ -628,10 +678,11 @@ def search_by_region(body: RegionSearchRequest,
     `composed`; the negative role ranks by distance, unclamped, and never
     returns the source sample it was told to move away from.
     """
-    index = get_index()
-    embedder = get_embedder()
-    if index is None or embedder is None:
+    runtime = get_retrieval_bundle()
+    if runtime is None:
         raise HTTPException(503, "Embeddings not computed yet — run `python -m app.ingest`.")
+    index = runtime.image_index
+    embedder = runtime.encoder
     row = conn.execute("SELECT filename FROM samples WHERE id = ?",
                        (body.sample_id,)).fetchone()
     if row is None:
@@ -705,11 +756,12 @@ def run_annotation_search(
     mean used by composed region search. This is query-time evidence against the
     existing full-image index, not a precomputed object-patch index.
     """
-    index = get_index()
-    embedder = get_embedder() if index is not None else None
-    if index is None or embedder is None:
+    runtime = get_retrieval_bundle()
+    if runtime is None:
         raise HTTPException(
             503, "Embeddings not computed yet — run `python -m app.ingest`.")
+    index = runtime.image_index
+    embedder = runtime.encoder
     row = conn.execute(
         "SELECT a.sample_id, a.geometry, s.filename, m.png, m.width, m.height, "
         "l.name AS label_name "
@@ -1020,11 +1072,11 @@ def search_scenarios(body: ComposedSearchRequest,
     group names itself first and reserves its leading trait, which is what
     keeps the labels apart.
     """
-    ranked, _qvec, down = _composed_ranking(conn, body)
+    ranked, _qvec, down, runtime = _composed_ranking(conn, body)
     if ranked is None:
         return ScenarioResponse(groups=[], basis=SCENARIO_BASIS,
                                 degraded=True, message=down)
-    index = get_index()
+    index = runtime.image_index
     top = ranked[:min(SCENARIO_DEPTH, len(ranked))]
     n = len(top)
     if n < SCENARIO_MIN_RESULTS:

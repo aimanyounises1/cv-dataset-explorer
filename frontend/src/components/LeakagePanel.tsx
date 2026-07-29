@@ -12,12 +12,11 @@ import type { LeakageContamination, LeakageReport } from "../api/types";
  * CIFAR-100 test images in that state, worth 9-14% relative accuracy.
  *
  * The design decision that matters here is showing a **curve, not a number**.
- * "Near-duplicate" is a threshold on a cosine, not a fact, and on this corpus
- * the answer swings from 0.8% at 0.95 to 12.1% at 0.90. A headline figure at a
- * hard-coded cut would be an arbitrary choice wearing the costume of a
- * measurement. So the slider is the primary control, the whole ladder is always
- * visible, and the pairs are shown large enough to judge — because the only real
- * verification is looking at two images and deciding whether they are the same.
+ * "Near-duplicate" is a threshold on a cosine, not a fact, and the answer can
+ * move substantially as that threshold changes. So the slider is the primary
+ * control, the whole ladder is always visible, and the pairs are shown large
+ * enough to judge — because the only real verification is looking at two
+ * images and deciding whether they are the same.
  */
 export default function LeakagePanel() {
   const [threshold, setThreshold] = useState(0.9);

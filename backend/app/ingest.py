@@ -22,6 +22,7 @@ from tqdm import tqdm
 
 from . import config, db
 from .datasets import get_adapter
+from .ml import providers
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ingest")
@@ -31,9 +32,16 @@ def ingest_samples(conn, dataset_name: str, limit=None) -> int:
     adapter = get_adapter(dataset_name)
     existing = {r["filename"] for r in conn.execute("SELECT filename FROM samples")}
     n_new = 0
+    manifests_invalidated = False
     for sample in tqdm(adapter.iter_samples(limit=limit), desc="Ingesting samples"):
         if sample.filename in existing:
             continue
+        if not manifests_invalidated:
+            # Every provider index is corpus-wide. Remove all commit markers
+            # before the first image or database row changes, even when this
+            # command later skips embeddings or a model load fails.
+            providers.remove_all_provider_manifests()
+            manifests_invalidated = True
         img_path = config.IMAGES_DIR / sample.filename
         sample.image.save(img_path, "JPEG", quality=92)
 
@@ -64,16 +72,25 @@ def ingest_samples(conn, dataset_name: str, limit=None) -> int:
     return n_new
 
 
-def compute_embeddings(conn) -> None:
-    from .ml.embedder import Embedder
-    from .ml.index import EmbeddingIndex
-
+def compute_embeddings(
+    conn,
+) -> tuple[object, providers.ModelSnapshot] | None:
+    """Build SigLIP image vectors under one exact cached model revision."""
     rows = conn.execute("SELECT id, filename FROM samples ORDER BY id").fetchall()
     if not rows:
         logger.warning("No samples in DB; nothing to embed.")
-        return
+        return None
 
-    embedder = Embedder()
+    snapshot = providers.resolve_model_snapshot(
+        config.EMBED_MODEL,
+        local_files_only=False,
+    )
+    embedder = providers.load_encoder_for("siglip2", snapshot=snapshot)
+    emb_dir = config.emb_dir_for("siglip2")
+    # The marker is removed only after the exact model is available, but before
+    # the first array changes. A failed download preserves the previous valid
+    # index; a failed rebuild can never leave it falsely committed.
+    providers.remove_manifest(emb_dir)
     ids, embs = [], []
     batch_ids, batch_imgs = [], []
 
@@ -92,8 +109,13 @@ def compute_embeddings(conn) -> None:
     flush()
 
     embeddings = np.concatenate(embs, axis=0)
-    EmbeddingIndex.save(np.array(ids, dtype=np.int64), embeddings)
+    providers.atomic_save_npy(
+        emb_dir / "sample_ids.npy",
+        np.array(ids, dtype=np.int64),
+    )
+    providers.atomic_save_npy(emb_dir / "image_embeddings.npy", embeddings)
     logger.info("Saved %d embeddings (dim=%d)", len(ids), embeddings.shape[1])
+    return embedder, snapshot
 
 
 def compute_embeddings_provider(conn, provider: str) -> None:
@@ -107,17 +129,20 @@ def compute_embeddings_provider(conn, provider: str) -> None:
     the difficulty axes are deliberately NOT recomputed here: those stored
     signals are SigLIP-derived and documented as such.
     """
-    import hashlib
     import time as _time
-    from datetime import datetime, timezone
 
-    from .ml import providers as prov
-
-    encoder = prov.load_encoder_for(provider)  # raises with the real error
+    snapshot = providers.resolve_model_snapshot(
+        providers.provider_model_id(provider),
+        local_files_only=False,
+    )
+    encoder = providers.load_encoder_for(
+        provider,
+        snapshot=snapshot,
+    )
     emb_dir = config.emb_dir_for(provider)
     emb_dir.mkdir(parents=True, exist_ok=True)
     # A previous manifest must not vouch for arrays about to be replaced.
-    (emb_dir / prov.MANIFEST_NAME).unlink(missing_ok=True)
+    providers.remove_manifest(emb_dir)
 
     rows = conn.execute("SELECT id, filename FROM samples ORDER BY id").fetchall()
     if not rows:
@@ -143,8 +168,9 @@ def compute_embeddings_provider(conn, provider: str) -> None:
     flush()
     embs = np.concatenate(chunks, axis=0)
     image_seconds = _time.perf_counter() - t0
-    prov.atomic_save_npy(emb_dir / "sample_ids.npy", np.array(ids, dtype=np.int64))
-    prov.atomic_save_npy(emb_dir / "image_embeddings.npy", embs)
+    providers.atomic_save_npy(
+        emb_dir / "sample_ids.npy", np.array(ids, dtype=np.int64))
+    providers.atomic_save_npy(emb_dir / "image_embeddings.npy", embs)
 
     cap_rows = conn.execute("SELECT id, text FROM captions ORDER BY id").fetchall()
     cvecs = []
@@ -155,49 +181,29 @@ def compute_embeddings_provider(conn, provider: str) -> None:
     caps = (np.concatenate(cvecs, axis=0) if cvecs
             else np.zeros((0, embs.shape[1]), np.float32))
     caption_seconds = _time.perf_counter() - t1
-    prov.atomic_save_npy(emb_dir / "caption_ids.npy",
-                         np.array([r["id"] for r in cap_rows], dtype=np.int64))
-    prov.atomic_save_npy(emb_dir / "caption_embeddings.npy", caps)
-
-    def _ver(pkg):
-        try:
-            from importlib.metadata import version
-            return version(pkg)
-        except Exception:
-            return None
-
-    prov.write_manifest(
-        emb_dir,
+    providers.atomic_save_npy(
+        emb_dir / "caption_ids.npy",
+        np.array([r["id"] for r in cap_rows], dtype=np.int64),
+    )
+    providers.atomic_save_npy(emb_dir / "caption_embeddings.npy", caps)
+    manifest = providers.finalize_provider_manifest(
+        conn,
+        snapshot,
         provider=provider,
-        model_id=prov.provider_model_id(provider),
-        dim=int(embs.shape[1]),  # measured from the arrays, never assumed
-        prompt_version=prov.PROMPT_VERSION,
-        normalized=True,
-        corpus_count=len(ids),
-        caption_count=len(cap_rows),
-        ids_sha1=hashlib.sha1(np.array(ids, dtype=np.int64).tobytes()).hexdigest()[:12],
-        # Same derivation as the documented SigLIP similarity floor: measured
-        # 10th percentile of each image's self-excluded top-1 cosine.
-        sim_floor_p10=_sim_floor_p10(embs),
-        image_encode_seconds=round(image_seconds, 1),
-        caption_encode_seconds=round(caption_seconds, 1),
-        created_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        versions={p: _ver(p) for p in
-                  ("sentence-transformers", "torch", "transformers")},
-        status="complete",
+        emb_dir=emb_dir,
+        prompt_version=(
+            providers.PROMPT_VERSION if provider == "qwen3_vl" else None),
+        image_encode_seconds=image_seconds,
+        caption_encode_seconds=caption_seconds,
     )
     logger.info("Saved %d image + %d caption embeddings (dim=%d) under %s",
                 len(ids), len(cap_rows), embs.shape[1], emb_dir)
-
-
-def _sim_floor_p10(embs: np.ndarray, chunk: int = 1024) -> float:
-    top1 = np.empty(len(embs), dtype=np.float32)
-    for s in range(0, len(embs), chunk):
-        block = embs[s:s + chunk] @ embs.T
-        for bi in range(block.shape[0]):
-            block[bi, s + bi] = -np.inf
-        top1[s:s + block.shape[0]] = block.max(axis=1)
-    return round(float(np.percentile(top1, 10)), 4)
+    logger.info(
+        "Provider build committed at %s (images %.1fs, captions %.1fs).",
+        manifest["revision"],
+        image_seconds,
+        caption_seconds,
+    )
 
 
 def compute_projection(conn) -> None:
@@ -241,16 +247,24 @@ def main() -> int:
     logger.info("Ingested %d new samples (%d total).", n_new, total)
 
     if args.provider != "siglip2":
-        # Additive provider index; the SigLIP artifacts (and the SigLIP-derived
-        # UMAP/clusters/agreement/axes) are left exactly as they are.
+        # Build only the selected provider. If ingestion added corpus rows, all
+        # old provider commit markers were already invalidated above.
         compute_embeddings_provider(conn, args.provider)
-        logger.info("Activate it with CVDE_EMBED_PROVIDER=%s (the default) and "
+        logger.info("Activate it with CVDE_EMBED_PROVIDER=%s and "
                     "POST /api/admin/reload.", args.provider)
     elif not args.skip_embeddings:
-        compute_embeddings(conn)
+        build = compute_embeddings(conn)
+        if build is None:
+            conn.close()
+            return 1
+        embedder, snapshot = build
         compute_projection(conn)
         from .analyze import run_all
-        run_all(conn)  # caption QA scores + zero-shot attributes
+        run_all(
+            conn,
+            embedder=embedder,
+            snapshot=snapshot,
+        )  # caption QA scores + zero-shot attributes; manifest committed last
     else:
         logger.info("Skipped embeddings (--skip-embeddings).")
 

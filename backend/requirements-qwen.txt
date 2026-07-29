@@ -7,5 +7,6 @@
 #
 #   uv pip install --python .venv/bin/python -r requirements-qwen.txt
 #   python -m app.ingest --provider qwen3_vl   # first run downloads ~4 GB
+transformers>=4.57.0  # Qwen3-VL model card minimum; overrides the SigLIP/SAM2 base floor
 sentence-transformers>=5.4
 torchvision>=0.28  # Qwen3-VL's processor imports its video pipeline through torchvision

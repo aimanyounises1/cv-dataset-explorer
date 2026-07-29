@@ -1,4 +1,4 @@
-"""Zero-shot attribute coverage (dataset composition / long-tail surfacing)."""
+"""Exploratory zero-shot prompt-bank distributions for review slices."""
 import sqlite3
 
 from fastapi import APIRouter, Depends
@@ -14,11 +14,10 @@ def coverage(conn: sqlite3.Connection = Depends(get_conn)):
     """Per-group label counts, plus how much of the corpus the classifier
     declined to label at all.
 
-    The abstention count is the point of this endpoint as much as the
-    histogram: a group where 10% of images were too ambiguous to call is a
-    different research finding from one where every image got a confident
-    label, and a bar chart that silently omits the abstentions reads as the
-    second when it is the first.
+    The values are hypotheses within hand-authored prompt banks, not
+    ground-truth classes or calibrated accuracy estimates. The abstention count
+    is therefore part of the result: omitting images whose top two prompts were
+    too close would make a review heuristic look like exhaustive coverage.
     """
     total = conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0] or 1
     rows = conn.execute(

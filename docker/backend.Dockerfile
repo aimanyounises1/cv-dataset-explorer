@@ -29,8 +29,8 @@ RUN python -m venv "$VIRTUAL_ENV"
 RUN pip install --no-cache-dir \
       --index-url https://download.pytorch.org/whl/cpu "torch>=2.2"
 
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt backend/requirements-agent.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-agent.txt
 
 
 FROM python:3.13-slim
@@ -55,10 +55,8 @@ COPY backend/app ./app
 # checked on the machine that will run it:
 #   docker compose exec backend python -m pytest -q
 # tests/conftest.py repoints CVDE_DATA_DIR before importing app, so this never
-# touches the mounted /data. Note that tests/test_providers.py assumes the
-# optional Qwen stack is installed and so does not pass here — docs/DEPLOY.md
-# records which tests, and why that is a test assumption rather than a fault
-# in this image.
+# touches the mounted /data. Tests that genuinely construct an optional Qwen
+# model skip when requirements-qwen.txt is absent; provider contracts still run.
 COPY backend/tests ./tests
 
 # Both are mount points in compose. Creating them keeps an unmounted
