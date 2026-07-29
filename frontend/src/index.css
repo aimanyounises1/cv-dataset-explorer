@@ -9,19 +9,17 @@
  * No web fonts by design — the app must run with no network (see README).
  */
 :root {
-  /* Luma / "sage orbit" — the identity chosen in the design brainstorm
-     (Calm Canvas direction: warm white, soft sage, images lead, interface
-     recedes). Variable NAMES survive from the previous dark system so the
-     nine hundred usages below keep meaning; every VALUE is the mock's.
-     Two brand voices, deliberately split: sage green is the product — nav,
-     links, curation, focus; indigo (--ai) belongs to the agents alone, so
-     "a person did this" and "a model did this" never share a colour. */
-  --bg: #f5f7f4;             /* canvas */
-  --bg-raised: #ffffff;      /* paper — cards and panels */
-  --bg-hover: #edf3ef;       /* paper-soft */
-  --bg-inset: #eef2ee;
-  --border: #dce5df;
-  --border-strong: #cad7cf;
+  /* Optical Bench: a neutral laboratory chassis around the evidence. The
+     application stays light so long-form analysis and tables remain easy to
+     read; only surfaces used to judge pixels become dark optical stages.
+     Sage remains the product/human hand and indigo remains model authorship,
+     so the established trust boundary does not move with the visual refresh. */
+  --bg: #f3f5f4;             /* lab bench */
+  --bg-raised: #fbfcfb;      /* instrument face */
+  --bg-hover: #edf1ef;       /* selected instrument row */
+  --bg-inset: #ebefed;       /* recessed field */
+  --border: #d4dcd7;
+  --border-strong: #bcc8c1;
 
   /* Ink: deep green-black, two supporting tiers. The faint tier is checked
      at the sizes it is used: 4.9:1 on paper at 10.5px. */
@@ -53,16 +51,26 @@
   --red-line: color-mix(in srgb, var(--red) 30%, transparent);
   --success: #216d50;
 
-  --radius: 14px;
-  --radius-sm: 9px;
+  /* Achromatic pixel surrounds prevent the application chrome from casting
+     green into a colour judgement. Brighter stage variants keep the existing
+     human-green/model-violet trust semantics legible over photography. */
+  --stage-bg: #101719;
+  --stage-raised: #172124;
+  --stage-border: #2d3a3e;
+  --stage-text: #edf3f0;
+  --stage-muted: #96a4a0;
+  --stage-human: #55d6a3;
+
+  --radius: 8px;
+  --radius-sm: 5px;
   /* One height for anything that sits in a toolbar row. The gallery's result
      bar was carrying five: a 33px segmented switch, a 33px listbox, a 20px
      pill, a 13px underlined word and an 18px glyph, all reading as peers on
      the same baseline. A row of controls that do not share a height reads as
      four widgets that happened to land next to each other. */
   --ctl-h: 30px;
-  --shadow: 0 16px 46px rgba(24, 48, 36, 0.10);
-  --shadow-sm: 0 5px 18px rgba(24, 48, 36, 0.07);
+  --shadow: 0 12px 30px rgba(19, 31, 25, 0.10);
+  --shadow-sm: 0 2px 8px rgba(19, 31, 25, 0.07);
 
   /* Motion: one quick tick for feedback, one move for appearance, and the
      mock's ease. The reduced-motion contract at the end flattens all of it. */
@@ -155,7 +163,7 @@ body {
 }
 
 .pane {
-  padding: 20px 26px 60px;
+  padding: 18px 22px 52px;
   min-width: 0;              /* let the grid actually shrink this column */
   max-width: var(--pane-max);
 }
@@ -527,11 +535,12 @@ body {
 }
 .view-switch {
   display: flex; gap: 3px; padding: 2px; flex-shrink: 0; height: var(--ctl-h);
-  background: var(--bg-inset); border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 }
 .view-switch button {
   border: none; background: transparent; color: var(--text-dim); cursor: pointer;
-  padding: 5px 13px; border-radius: 999px;
+  padding: 5px 13px; border-radius: 3px;
   font-family: var(--font-sans); font-size: 12.5px;
   transition: color var(--t-quick), background var(--t-quick), box-shadow var(--t-quick);
 }
@@ -571,7 +580,7 @@ body {
   /* gap, not the label's leading space: a flex line box trims that away. */
   display: inline-flex; align-items: center; justify-content: center; gap: 3px;
   padding: 0 7px; font-size: 10.5px; line-height: 1; cursor: pointer;
-  border: 1px solid var(--border); border-radius: 999px;
+  border: 1px solid var(--border); border-radius: var(--radius);
   /* Slightly translucent, like the pick control beside it: these float on the
      photograph, not on paper. */
   background: rgba(255, 255, 255, 0.92); color: var(--text-dim);
@@ -662,7 +671,7 @@ body {
 .search-settings > summary {
   list-style: none; display: flex; align-items: center; gap: 7px;
   padding: 9px 14px; cursor: pointer; white-space: nowrap;
-  border: 1px solid var(--border); border-radius: 999px;
+  border: 1px solid var(--border); border-radius: var(--radius);
   background: var(--bg-raised); color: var(--text-dim); font-size: 13px;
   transition: color var(--t-quick), border-color var(--t-quick);
 }
@@ -914,7 +923,14 @@ body {
     flex: 0 0 auto; margin: 0 78px 0 auto;
     padding: 0; border-top: none;
   }
-  .rail-corpus, .rail-kbd, .rail-foot .models-card { display: none; }
+  /* Keep the compact header for navigation. The desktop diagnostics summary
+     and privacy sentence otherwise consume ~670px at 1024px, collapsing the
+     route groups to a zero-width flex item and leaving a 300px blank header. */
+  .rail-corpus,
+  .rail-kbd,
+  .rail-diag,
+  .models-foot,
+  .rail-foot .models-card { display: none; }
   .rail-history-btn { align-self: center; margin-top: 0; }
   /* The filter column has no honest home in a horizontal strip: as a flex
      item it stretched the header to ~250px of dead space while itself sitting
@@ -1029,8 +1045,8 @@ body {
 }
 .search-box input::placeholder { color: var(--text-faint); }
 .search-box input:focus { border-color: var(--accent); }
-/* Round, with room on the right for the by-image affordance. */
-.search-box input { border-radius: 999px; padding-right: 40px; }
+/* One precise command field, with room for the by-image affordance. */
+.search-box input { border-radius: var(--radius); padding-right: 40px; }
 
 /* Search-by-image, as an affordance inside the field: drop and paste are the
    primary paths, and this small control is the reminder plus the file picker. */
@@ -1077,7 +1093,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
    grammar as the native elements they replace; only the pixels are ours. */
 .segmented {
   display: flex; width: 100%; margin-bottom: 8px;
-  border: 1px solid var(--border); border-radius: 999px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: var(--bg-raised); overflow: hidden;
 }
 .segmented-opt {
@@ -1119,11 +1135,11 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
   max-height: min(360px, 60vh); width: max-content; max-width: 340px;
 }
 .listbox-inline { width: auto; margin-bottom: 0; }
-/* In a row the trigger joins the toolbar's shared height and its pill shape,
-   rather than keeping the rail's stacked-field padding and 14px corner. */
+/* In a row the trigger joins the toolbar's shared height and compact geometry,
+   rather than keeping the rail's stacked-field padding. */
 .listbox-inline .listbox-btn {
   min-width: 0; height: var(--ctl-h); padding: 0 11px;
-  border-radius: 999px; font-size: 11.5px;
+  border-radius: var(--radius-sm); font-size: 11.5px;
 }
 .listbox-inline .listbox-value { flex: 0 1 auto; }
 /* The popup still has to be readable, so it opens at least as wide as the
@@ -1336,13 +1352,21 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 /* Map colour-by control and its legend. */
 .map-toolbar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 8px; padding: 7px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-raised);
 }
 /* The colour dial is one control in a horizontal toolbar, not a row stacked in
    the rail column: it takes its own width instead of the rail's full width, and
    drops the margin that spaces rail rows apart. */
 .map-toolbar .listbox { width: 264px; margin-bottom: 0; }
 .map-legend { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.map-mode-switch {
+  width: auto;
+  min-width: 132px;
+  margin-left: 2px;
+}
+.map-mode-switch button { min-width: 62px; }
 .legend-ramp {
   display: flex; height: 9px; width: 128px; border-radius: 2px; overflow: hidden;
   border: 1px solid var(--border);
@@ -1379,13 +1403,20 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
    the part a reader needs before their first click. */
 .map-key {
   display: flex; flex-wrap: wrap; gap: 5px 18px; align-items: center;
-  margin-bottom: 10px; font-size: 11.5px; color: var(--text-faint);
+  margin-bottom: 8px; padding: 0 2px;
+  font-size: 11.5px; color: var(--text-faint);
 }
 .map-key-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .map-key-kbd {
   font-family: var(--font-mono); font-size: 10px; padding: 1px 5px;
   border: 1px solid var(--border); border-radius: 4px;
   background: var(--bg-raised); color: var(--text-dim); white-space: nowrap;
+}
+@media (max-width: 700px) {
+  /* Each instruction is one readable row on a phone. Letting the desktop
+     inline strip wrap word-by-word separated its verbs from their controls. */
+  .map-key { display: grid; gap: 4px; }
+  .map-key-item { display: flex; align-items: flex-start; line-height: 1.45; }
 }
 .map-actions-hint { font-size: 12.5px; color: var(--text-faint); }
 
@@ -1545,7 +1576,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
 }
 .card {
   background: var(--bg-raised); border: 1px solid var(--border);
-  border-radius: var(--radius); overflow: hidden; cursor: pointer;
+  border-radius: 6px; overflow: hidden; cursor: pointer;
   transition: border-color var(--t-quick), box-shadow var(--t-quick);
   text-decoration: none; color: inherit; display: block; position: relative;
 }
@@ -1647,7 +1678,7 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
    own surfaces. 9.0:1 against white, so it earns the weight honestly. */
 button.primary, a.primary.button-link {
   background: var(--accent-deep); color: #ffffff; border: none; padding: 10px 22px;
-  border-radius: var(--radius); font-size: 13.5px; font-weight: 650; cursor: pointer;
+  border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 650; cursor: pointer;
   font-family: var(--font-sans); transition: filter var(--t-quick);
 }
 a.primary.button-link {
@@ -1657,7 +1688,7 @@ button.primary:hover:not(:disabled), a.primary.button-link:hover { filter: brigh
 button.primary:disabled { opacity: 0.45; cursor: default; }
 button.ghost {
   background: transparent; color: var(--text-dim); border: 1px solid var(--border);
-  padding: 8px 15px; border-radius: var(--radius); cursor: pointer;
+  padding: 8px 15px; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 13.5px; font-family: var(--font-sans); transition: color var(--t-quick), border-color var(--t-quick);
 }
 button.ghost:hover:not(:disabled) { color: var(--text); border-color: var(--border-strong); }
@@ -1666,8 +1697,8 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 /* Detail page */
 .detail { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 22px; }
 .detail-image {
-  width: 100%; border-radius: var(--radius); border: 1px solid var(--border);
-  background: var(--bg-inset);
+  width: 100%; border-radius: var(--radius); border: 1px solid var(--stage-border);
+  background: var(--stage-bg);
   /* The photograph is what the right column's numbers are about: it rides
      along while reading captions, metadata and axis folds, instead of a black
      hole opening under it whenever the right column runs longer. */
@@ -1675,7 +1706,7 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 }
 .panel {
   background: var(--bg-raised); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 15px; margin-bottom: 14px;
+  border-radius: var(--radius); padding: 14px; margin-bottom: 12px;
 }
 .panel h3 { margin: 0 0 11px; display: flex; align-items: center; }
 .caption-list { margin: 0; padding-left: 17px; }
@@ -1951,13 +1982,28 @@ button.ghost:disabled { opacity: 0.4; cursor: default; }
 /* Map */
 .map-wrap { position: relative; }
 .map-canvas {
-  width: 100%; height: 70vh; border: 1px solid var(--border);
-  border-radius: var(--radius); background: var(--bg-inset); cursor: grab; display: block;
+  /* These three semantic variables are also read by the canvas renderer for
+     its persistent selection aperture. Scoped here, they gain contrast on the
+     optical stage without changing the application's light chassis. */
+  --accent: var(--stage-human);
+  --bg-raised: var(--stage-raised);
+  --text: var(--stage-text);
+  width: 100%; height: 70vh; border: 1px solid var(--stage-border);
+  border-radius: var(--radius-sm); background: var(--stage-bg);
+  box-shadow: inset 0 0 0 1px rgba(237, 243, 240, 0.025);
+  cursor: grab; display: block;
 }
 .map-canvas:active { cursor: grabbing; }
+.map-canvas[data-mode="select"] { cursor: crosshair; }
+.map-canvas:focus-visible {
+  outline-color: var(--stage-human);
+  box-shadow: inset 0 0 0 1px rgba(237, 243, 240, 0.04),
+              0 0 0 2px color-mix(in srgb, var(--stage-human) 32%, transparent);
+}
 .map-tooltip {
-  position: absolute; pointer-events: none; background: var(--bg-raised);
-  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 5px;
+  position: absolute; pointer-events: none; background: var(--stage-raised);
+  border: 1px solid var(--stage-border); border-radius: var(--radius-sm); padding: 5px;
+  color: var(--stage-text);
   box-shadow: var(--shadow); z-index: 10;
 }
 .map-tooltip img { width: 140px; height: 105px; object-fit: cover; border-radius: 4px; display: block; }

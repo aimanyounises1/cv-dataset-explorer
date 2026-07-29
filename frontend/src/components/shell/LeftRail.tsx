@@ -13,8 +13,9 @@ import SavedViews from "../SavedViews";
  * Navigation grouped by the job you came to do, not by the table behind it.
  *
  * The seven routes were a flat list of peers, which made a first-time reader
- * ask "is Quality a kind of Statistics?" — a question the old top bar had no way
- * to answer. Grouping says what each destination is *for*.
+ * ask "is Quality a kind of Statistics?" — a question the old top bar had no
+ * way to answer. The groups follow the investigation itself: explore the
+ * corpus, review cases, measure the system, then ask the optional assistant.
  *
  * **Every path is unchanged.** Only labels and grouping move, so saved views
  * (which store bare query strings), bookmarks and shared links all keep working.
@@ -58,29 +59,29 @@ function railTo(to: string, here: string, search: string): string {
 
 const GROUPS: Group[] = [
   {
-    title: "Find",
+    title: "Explore",
     items: [
       { to: "/", label: "Browse", keycap: "B", end: true,
         hint: "Search and filter the corpus" },
       { to: "/map", label: "Embedding map", keycap: "E",
         hint: "Lasso a region of embedding space" },
+    ],
+  },
+  {
+    title: "Review",
+    items: [
       // Reachable by name, not only by picking two cards. It is the only place
       // a region can be saved as an annotation, and a destination you can get
       // to solely by a side effect of another screen is one most people never
       // find. It opens empty and says how to fill itself.
       { to: "/compare", label: "Compare two", keycap: "Cmp",
         hint: "Two frames under one loupe: synced zoom, shared/different, regions" },
-    ],
-  },
-  {
-    title: "Audit",
-    items: [
       { to: "/quality", label: "Caption quality", keycap: "Q",
         hint: "Rank captions least supported by their image" },
     ],
   },
   {
-    title: "Trust",
+    title: "Measure",
     items: [
       { to: "/stats", label: "Dataset profile", keycap: "D",
         hint: "Composition, coverage, duplicates and leakage",
@@ -101,7 +102,7 @@ const GROUPS: Group[] = [
     ],
   },
   {
-    title: "Ask",
+    title: "Assist",
     items: [
       { to: "/chat", label: "Assistant", keycap: "A",
         hint: "Multi-agent answers rendered as live charts" },
