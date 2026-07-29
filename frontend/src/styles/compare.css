@@ -185,3 +185,40 @@
   .diff-row { grid-template-columns: 104px 64px 1fr; }
   .axis-pair { grid-template-columns: 84px 1fr 80px; }
 }
+
+/* The pair queue: what to compare when you arrived with nothing.
+   Rows, not a grid — this is a list you work down, and two thumbnails side by
+   side already read as "a pair" without a card around them. */
+.pair-queue { margin-top: 18px; max-width: 720px; }
+.pair-queue h3 { margin-top: 0; }
+.pair-queue-list { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.pair-queue-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 10px 5px 5px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-raised);
+  text-decoration: none; color: inherit;
+  transition: border-color var(--t-quick), background var(--t-quick);
+}
+.pair-queue-row:hover { border-color: var(--accent); background: var(--bg-hover); }
+.pair-queue-row img {
+  width: 84px; height: 63px; object-fit: cover;
+  border-radius: 5px; flex-shrink: 0;
+}
+.pair-queue-score {
+  margin-left: auto; font-family: var(--font-mono); font-size: 12px;
+  font-variant-numeric: tabular-nums; color: var(--amber);
+}
+.pair-queue-splits {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint);
+  width: 132px; text-align: right;
+}
+@media (max-width: 700px) {
+  .pair-queue-row img { width: 64px; height: 48px; }
+  .pair-queue-splits { display: none; }
+}
+
+/* Idle bench: the panes are a drop target, not the subject. Full height they
+   spend the top of the screen saying "empty" — the queue above them is what the
+   reader can actually act on. */
+.compare-panes.idle { margin-top: 14px; }
+.compare-panes.idle .compare-pane { min-height: 132px; }
