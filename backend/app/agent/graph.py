@@ -30,6 +30,7 @@ the REST API uses, not a replacement for them.
 """
 import logging
 import operator
+import re
 import time
 from collections.abc import Sequence
 from typing import Annotated, Literal, Optional
@@ -215,6 +216,34 @@ def _unverified_claims(
         ):
             unverified.append(claim)
     return unverified
+
+
+_FIGURE_RE = re.compile(r"\d[\d,]*\.?\d*")
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _answer_without(claims: Sequence[str], answer: str) -> str:
+    """`answer` minus the sentences that restate an unverified claim's figures.
+
+    Refusing a premise should cost the premise, not the turn. The lanes already
+    ran and their grounded findings are what the user asked for; discarding the
+    whole answer to reject one unsupported number threw away work that was paid
+    for and correct.
+
+    Figures are matched as whole numbers with boundaries, not as substrings —
+    a bare `"30" in text` check also fires inside 4301 and 0.302, which makes
+    the filter either inert or indiscriminate depending on the sentence.
+    """
+    figures = {f for claim in claims for f in _FIGURE_RE.findall(claim)}
+    if not figures:
+        return answer.strip()
+    kept = [
+        sentence for sentence in _SENTENCE_RE.split(answer)
+        if sentence.strip()
+        and not any(re.search(rf"(?<!\d){re.escape(f)}(?!\d)", sentence)
+                    for f in figures)
+    ]
+    return " ".join(part.strip() for part in kept).strip()
 
 
 def _claim_refusal(claims: Sequence[str]) -> str:
@@ -519,8 +548,15 @@ def build_graph(model=None, specialists=None):
             claims, decision.claim_assessments, state["messages"]
         )
         if unverified:
+            # Additive, not replacing. The refusal leads — an unverified premise
+            # must be named before anything else is said — but the lanes' own
+            # grounded answer follows it, minus any sentence that repeats the
+            # premise's figures. Returning the refusal alone answered a question
+            # the user did not ask and discarded the retrieval they did.
+            kept = _answer_without(unverified, (decision.answer or "").strip())
+            refusal = _claim_refusal(unverified)
             return {"messages": [AIMessage(
-                content=_claim_refusal(unverified), name="final"
+                content=f"{refusal}\n\n{kept}" if kept else refusal, name="final"
             )]}
 
         content = (decision.answer or "").strip()
