@@ -831,6 +831,18 @@ SCENARIO_MIN_SHARE = 0.5
 # dissolving good labels into "mixed". Chosen against that sweep, not tuned.
 SCENARIO_MIN_LIFT = 1.25
 SCENARIO_MAX_PARTS = 3
+# How much more distinctive a looser trait must be to outrank a tighter one.
+#
+# The three sources are not equally good evidence about what separates a
+# cluster. An attribute label is a corpus-wide facet applied to every image the
+# same way, so "environment:snow" names an axis a researcher can filter, export
+# and reason about. A caption word is one annotator's wording in one of five
+# captions, so "white" can win on lift while naming the snow it was describing —
+# a group titled by a colour term tells you nothing you can act on. At
+# comparable lift the facet is the better description, so each step away from
+# structure must clear this factor to lead a label. Ranking only: the evidence
+# line still quotes the raw counts and shares, unchanged.
+SCENARIO_SOURCE_MARGIN = 1.4
 SCENARIO_BASIS = ("k-means over the top-200 composed ranking; each label names the traits most "
                   "over-represented in its group versus the whole result set — counted, "
                   "never generated")
@@ -943,7 +955,9 @@ def _distinctive_candidates(terms: dict[str, tuple[int, str, str, set[int]]],
         if lift < SCENARIO_MIN_LIFT:
             continue
         cands.append((lift, n_in, p_in, n_bg, p_bg, src, name, facet, value))
-    cands.sort(key=lambda c: (-c[0], -c[1], c[5], c[6]))
+    # Rank on lift discounted by distance from structured data, so a facet leads
+    # unless a caption word is decisively more distinctive than it.
+    cands.sort(key=lambda c: (-c[0] / SCENARIO_SOURCE_MARGIN ** c[5], -c[1], c[5], c[6]))
     return cands
 
 
