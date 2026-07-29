@@ -152,6 +152,14 @@ export function Listbox({ trigger, options, onPick, label, selected }: {
       <button
         type="button"
         className="listbox-btn"
+        // The attribute the pattern is named after. Without it this is a plain
+        // button wearing combobox attributes: `aria-activedescendant` and
+        // `aria-controls` are only defined on a combobox, so a screen reader
+        // had no reason to follow them and the active option went unannounced —
+        // arrow keys moved a highlight nobody was told about. The docstring
+        // above already claimed the select-only combobox pattern; this is the
+        // line that makes the claim true.
+        role="combobox"
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={label}
