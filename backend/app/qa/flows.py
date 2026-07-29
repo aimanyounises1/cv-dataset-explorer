@@ -485,7 +485,17 @@ def set_description(pg, ok):
     pg.wait_for_selector(".grid .card")
     pg.wait_for_timeout(400)
     head = pg.inner_text(".result-bar .meta-line")
-    ok("cluster is filterable", "300" in head, head.strip()[:50])
+    # The invariant is that a cluster is a proper, non-empty subset of the
+    # corpus — not that it holds any particular number. k-means runs at ingest,
+    # so the previous hard-coded 300 asserted one machine's clustering and
+    # failed the moment the index was rebuilt (it became 295).
+    # The corpus size is asked for, not assumed, so this flow survives a corpus
+    # of any size.
+    total = pg.request.get(url("/api/health")).json()["samples"]
+    shown = re.search(r"([\d,]+)", head)
+    n = int(shown.group(1).replace(",", "")) if shown else 0
+    ok("cluster is filterable", 0 < n < total,
+       f"{head.strip()[:40]} — a proper subset of {total:,}")
 
 
 @flow("Train/test leakage", budget_s=90.0)
