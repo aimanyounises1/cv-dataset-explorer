@@ -2024,11 +2024,19 @@ a.tag:hover { filter: brightness(1.15); }
   background: var(--bg-inset);
   display: flex; flex-direction: column; gap: 4px;
 }
-.models-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Role, value, and a state that drops to its own line rather than eating the
+   value's width. As a flex row the non-shrinking "model not pulled" left the
+   name 14px of a 240px rail, so the enrichment model rendered as "q…" on all
+   eight routes — a status line that could not state its own subject. The dot
+   and the fallback chip are small enough to stay on the first line. */
+.models-row {
+  display: grid; grid-template-columns: 78px minmax(0, 1fr) auto;
+  align-items: center; gap: 2px 6px; min-width: 0;
+}
 .models-role {
   /* Wide enough for ENRICHMENT, the longest role, at this size — a narrower
      column runs the label into the value. */
-  width: 78px; flex-shrink: 0;
+  width: auto; flex-shrink: 0;
   font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em;
   font-weight: 600; color: var(--text-faint);
 }
@@ -2037,7 +2045,11 @@ a.tag:hover { filter: brightness(1.15); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim);
 }
-.models-state { flex-shrink: 0; font-size: 10px; color: var(--text-faint); }
+/* Second line, under the value it qualifies — the same indent the reason line
+   below uses, so cause always sits with the thing it explains. */
+.models-state {
+  grid-column: 2 / -1; font-size: 10px; color: var(--text-faint);
+}
 .models-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .models-dot.ok { background: var(--green); }
 .models-dot.warn { background: var(--amber); }

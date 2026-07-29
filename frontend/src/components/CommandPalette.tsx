@@ -204,8 +204,16 @@ function goToFilteredGallery(
   navigate({ pathname: "/", search: `?${params.toString()}` });
 }
 
-function downloadCurrentView(pathname: string, search: string): void {
-  const params = pathname === "/" ? new URLSearchParams(search) : new URLSearchParams();
+function downloadCurrentView(search: string): void {
+  // Every route, not just the gallery. The filter vocabulary lives in the URL
+  // wherever you are — `/map?split=test` narrows the same corpus the gallery
+  // does — so starting from an empty set off `/` made "Export current view"
+  // hand back all 8,000 rows while the rail beside it said 1,001. (The same
+  // ternary in `goToFilteredGallery` above is deliberate and stays: *navigating*
+  // in from elsewhere should arrive fresh rather than inherit. Exporting
+  // describes where you already are.) Only recognised keys are copied below, so
+  // a route's own params — `view`, `a`/`b` on compare — are ignored, not leaked.
+  const params = new URLSearchParams(search);
   const out = new URLSearchParams();
   const q = params.get("q");
   if (q) {
@@ -428,7 +436,7 @@ export default function CommandPalette(): JSX.Element | null {
     actions.push({
       id: "action:export", label: "Export current view (CSV)", indices: [], hint: "Download",
       score: 3900,
-      perform: () => { closePalette(); downloadCurrentView(pathname, search); },
+      perform: () => { closePalette(); downloadCurrentView(search); },
     });
 
     const order: [string, PaletteItem[]][] = [
