@@ -26,5 +26,4 @@ answer only for the interface.
 This project deliberately keeps: local-only operation with no cloud dependency,
 graceful degradation when an optional layer is missing, filters applied inside
 the ranking rather than after it, paging that stops at the ranking horizon, and
-the existing API and export shapes. See
-[docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
+the existing API and export shapes.

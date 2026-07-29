@@ -40,5 +40,4 @@ file and says so, and it can be moved somewhere private.
 ## Not in scope
 
 Hardening this for multi-user or hosted deployment. That is a different system
-with different requirements -- see the production scale path in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+with different authentication, storage, isolation, and operational requirements.

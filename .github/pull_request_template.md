@@ -5,13 +5,12 @@
 ## Verification
 
 Tick only what you actually ran. The first four run in CI on this pull request;
-the rest cannot ([docs/TESTING.md](../docs/TESTING.md) explains why).
+the browser sweep remains local because it needs Chrome and an ingested corpus.
 
 - [ ] `ruff check app tests` (in `backend/`)
 - [ ] `pytest` (in `backend/`)
 - [ ] `npm run build` (in `frontend/` — this is the `tsc` type-check plus the production build)
 - [ ] `python scripts/check_links.py` (repo root)
-- [ ] `python scripts/capabilities.py --check` (repo root, API running)
 - [ ] `python ../scripts/ui_smoke.py` (in `backend/`; needs Chrome, both servers, an ingested corpus)
 - [ ] Not run, and why:
 

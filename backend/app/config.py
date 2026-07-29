@@ -148,7 +148,7 @@ SEARCH_DEPTH = int(os.environ.get("CVDE_SEARCH_DEPTH", "300"))
 #
 # beta = 0 disables it entirely and restores the previous ranking exactly.
 # beta and the temperature were tuned on a dev split that is disjoint from both
-# the bank and the benchmark sample — see docs and `python -m app.ml.hubness`.
+# the bank and the benchmark sample. Rebuild with `python -m app.ml.hubness`.
 # Lineage: QB-Norm (Bogolin et al., CVPR 2022); the numbers here are ours.
 HUBNESS_BETA = float(os.environ.get("CVDE_HUBNESS_BETA", "0.3"))
 HUBNESS_TEMPERATURE = float(os.environ.get("CVDE_HUBNESS_T", "0.02"))

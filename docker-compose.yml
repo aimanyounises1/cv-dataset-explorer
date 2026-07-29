@@ -9,8 +9,8 @@
 # on 8000, UI on 5173 — so the documented URLs and host QA sweep address this
 # local, unauthenticated stack without exposing it to the LAN.
 #
-# See docs/DEPLOY.md for first-run ingest, resource expectations, and what is
-# deliberately left outside the containers.
+# The README contains the first-run ingest commands and the host/container
+# trade-off.
 
 services:
   backend:
@@ -35,7 +35,7 @@ services:
       # siglip2 | qwen3_vl. The default matches the host default and is
       # the provider that measures better on this corpus's own benchmark;
       # qwen3_vl additionally needs backend/requirements-qwen.txt, which this
-      # image does not install (docs/DEPLOY.md says how).
+      # default image deliberately does not install.
       CVDE_EMBED_PROVIDER: ${CVDE_EMBED_PROVIDER:-siglip2}
       # A mounted schema-v2 index is valid only with the model identity it
       # commits. Forward both selectors so a custom host-built index uses its

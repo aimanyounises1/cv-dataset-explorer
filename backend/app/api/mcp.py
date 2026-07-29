@@ -14,8 +14,6 @@ Two hard rules, both load-bearing:
   the app, full stop.
 * **Honest degradation, same as everywhere.** Tools that need embeddings
   report the named reason instead of empty results dressed as answers.
-
-See docs/MCP.md for the handshake, client configuration and examples.
 """
 import json
 import logging
@@ -305,7 +303,6 @@ async def mcp_endpoint(request: Request):
     reads and none writes — there is no mutating intent on this surface at
     all — and each goes through the same service layer as the REST API.
     Failures come back as JSON-RPC error objects, never as an HTTP error body.
-    See docs/MCP.md.
     """
     body = await request.body()
     if len(body) > MAX_BODY:
@@ -331,5 +328,4 @@ def mcp_info():
     """Human-facing hint; the protocol itself runs over POST."""
     return {"protocol": "Model Context Protocol (Streamable HTTP, stateless)",
             "endpoint": "POST /mcp", "tools": sorted(TOOLS),
-            "docs": "docs/MCP.md",
             "note": "SSE streaming is not implemented — plain JSON responses."}
