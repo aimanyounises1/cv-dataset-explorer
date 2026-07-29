@@ -7,6 +7,16 @@ import ImageCard from "../components/ImageCard";
 import InlineMarkdown from "../components/InlineMarkdown";
 
 interface Turn extends ChatMessage {
+  /** What this entry actually is. A transport failure is not something the
+   * assistant said, so it is marked and kept out of the history replayed to the
+   * model. Absent on transcripts stored before the discriminator existed —
+   * those are answers, which is the safe reading. */
+  kind?: "answer" | "error";
+  /** Set on a user turn while its answer is in flight, cleared when one lands.
+   * The persistence effect writes it, so a session reopened after its run was
+   * stopped — or after the tab left the page — says the question was
+   * interrupted instead of ending on silence. */
+  pending?: boolean;
   samples?: SampleCard[];
   trace?: ChatTraceStep[];
   blocks?: Block[];
@@ -28,22 +38,46 @@ interface SessionMeta {
  * reports on the application itself, which is otherwise undiscoverable. */
 interface LiveStep { node: string; label: string; t?: number }
 
+/** A chat endpoint answering with a non-OK status. The status is carried as a
+ * field rather than baked into the message so the 404 fallback can branch on it
+ * while the message stays the server's own sentence — what reaches a reader
+ * should read as a reason, not as a JSON fragment with a code in front. */
+class ChatHttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "ChatHttpError";
+  }
+}
+
+/** fetch() rejects an aborted request with a DOMException named AbortError.
+ * Stopping is a decision, never a failure, so it is never reported as one. */
+const isAbort = (e: unknown): boolean =>
+  (e as { name?: string } | null | undefined)?.name === "AbortError";
+
 /** Consume POST /api/chat/stream: NDJSON step lines (LangGraph's own node
  * transitions), then a final line carrying the exact blocking-endpoint
- * payload. Throws "404: ..." when the endpoint is absent so the caller can
- * fall back to the blocking call. */
+ * payload. Throws a 404 ChatHttpError when the endpoint is absent so the
+ * caller can fall back to the blocking call. `signal` aborts the request and
+ * the body read together, so Stop releases the connection rather than just
+ * hiding its result. */
 async function streamChat(
-  history: ChatMessage[], onStep: (s: LiveStep) => void,
+  history: ChatMessage[], onStep: (s: LiveStep) => void, signal: AbortSignal,
 ): Promise<import("../api/types").ChatResponse> {
   const r = await fetch("/api/chat/stream", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: history }),
   });
   if (!r.ok || !r.body) {
     let detail = "";
-    try { detail = JSON.stringify((await r.json()).detail ?? ""); } catch { /* raw */ }
-    throw new Error(`${r.status}: ${detail || r.statusText}`);
+    try {
+      const raw: unknown = (await r.json()).detail;
+      detail = typeof raw === "string" ? raw : raw == null ? "" : JSON.stringify(raw);
+    } catch {
+      // Not a JSON body: the status line is all the server gave us.
+    }
+    throw new ChatHttpError(r.status, detail || `${r.status} ${r.statusText}`);
   }
   const reader = r.body.getReader();
   const dec = new TextDecoder();
@@ -75,6 +109,16 @@ const SUGGESTIONS = [
   "Show me dogs jumping into water",
   "Which time of day is hardest? Compare the slices",
 ];
+
+/** The disabled opacity the control vocabulary already uses (index.css,
+ * `button.ghost:disabled`), reused so a dimmed row of suggestions reads as the
+ * same kind of "not right now" as a dimmed button rather than as a new state. */
+const DISABLED_OPACITY = 0.4;
+
+/** The gap `.notice` already puts between its stacked lines (index.css,
+ * `.notice div + div`). The error block's action reuses it so the two failure
+ * blocks — degraded and failed — space themselves the same way. */
+const BLOCK_LINE_GAP = 6;
 
 const REGISTRY_KEY = "cvde-chat-sessions";
 /** The pre-sessions single-transcript key. It survives as the namespace prefix
@@ -201,11 +245,20 @@ export default function ChatPage() {
   const [draft, setDraft] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  // The in-flight turn's controller, so Stop, leaving the transcript and
+  // leaving the page all have the same handle on it.
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     api.chatStatus().then(setStatus).catch(() =>
       setStatus({ available: false, model: "?", reason: "Backend unreachable." }));
   }, []);
+
+  // No compute outlives the view that asked for it: unmounting stops the run
+  // instead of leaving a graph burning a local GPU for an answer with nowhere
+  // to land. The question keeps its `pending` marker, which is what tells the
+  // reopened session it was interrupted.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     try {
@@ -231,11 +284,20 @@ export default function ChatPage() {
   // Newest first: the register is a recency list, like the library rail.
   const sorted = [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const landing = active === null && sessions.length > 0;
+  // Waiting on the status probe is not the same as knowing it failed: the
+  // composer stays live until the answer comes back false.
+  const unavailable = status != null && !status.available;
+  // Index of a question still marked in flight, or -1. Only the last turn can
+  // carry the marker: it is set when a question is asked and cleared by
+  // whatever lands after it.
+  const interrupted =
+    turns.length > 0 && turns[turns.length - 1].pending ? turns.length - 1 : -1;
 
   const openSession = (id: string) => {
-    // While a request is in flight the reply appends to the open transcript;
-    // swapping transcripts mid-flight would file it under the wrong session.
-    if (busy) return;
+    // Leaving a transcript ends its run rather than filing the reply under the
+    // session you moved to. Nothing is silently lost: the question keeps its
+    // `pending` marker and offers to be resent.
+    abortRef.current?.abort();
     setActive(id);
     setTurns(loadSessionTurns(id));
     setConfirmDelete(null);
@@ -243,7 +305,7 @@ export default function ChatPage() {
   };
 
   const startNew = () => {
-    if (busy) return;
+    abortRef.current?.abort();
     setActive("new");
     setTurns([]);
     setConfirmDelete(null);
@@ -266,6 +328,8 @@ export default function ChatPage() {
   };
 
   const deleteSession = (id: string) => {
+    // Deleting the transcript a run is writing into ends the run with it.
+    if (active === id) abortRef.current?.abort();
     setSessions((s) => s.filter((m) => m.id !== id));
     try {
       localStorage.removeItem(turnsKey(id));
@@ -279,9 +343,18 @@ export default function ChatPage() {
     }
   };
 
-  const ask = async (text: string) => {
+  /** Clear the in-flight marker: the question has been answered, has failed, or
+   * has been superseded, and in none of those cases is it still waiting. */
+  const settled = (list: Turn[]): Turn[] =>
+    list.map((t) => (t.pending ? { ...t, pending: undefined } : t));
+
+  /** `base` is the transcript the question is asked against. A retry passes the
+   * prefix before the exchange it is replacing, so re-asking replaces the failed
+   * exchange instead of stacking a second copy of the question under the first. */
+  const ask = async (text: string, base?: Turn[]) => {
     const content = text.trim();
-    if (!content || busy) return;
+    if (!content || busy || unavailable) return;
+    const prior = base ?? turns;
     let id = active === null || active === "new" ? null : active;
     if (id === null) {
       // The session is born with its first turn, never empty: the register
@@ -293,34 +366,53 @@ export default function ChatPage() {
       setSessions((s) => [meta, ...s]);
       setActive(id);
     }
-    const history: ChatMessage[] = [...turns.map(({ role, content }) => ({ role, content })),
-                                    { role: "user", content }];
-    setTurns((t) => [...t, { role: "user", content }]);
+    // A failed request is not prior assistant speech. Replaying one would
+    // condition the model on a turn where it announced its own failure, which
+    // is the single thing this app must never put in its mouth.
+    const history: ChatMessage[] = [
+      ...prior.filter((t) => t.kind !== "error")
+              .map(({ role, content }) => ({ role, content })),
+      { role: "user", content },
+    ];
+    setTurns([...prior, { role: "user", content, pending: true }]);
     setInput("");
     setBusy(true);
     setLiveSteps([]);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
       // The live trace is LangGraph's own update stream; a backend without
       // the stream endpoint (404) falls back to the blocking call.
       const res = await streamChat(history, (s) =>
-        setLiveSteps((prev) => [...(prev ?? []), s]))
+        setLiveSteps((prev) => [...(prev ?? []), s]), ctrl.signal)
         .catch(async (e: unknown) => {
-          if (e instanceof Error && e.message.startsWith("404")) {
-            return api.chat(history);
+          if (e instanceof ChatHttpError && e.status === 404) {
+            const blocking = await api.chat(history);
+            // api.chat takes no signal, so on this path Stop drops the answer
+            // rather than the request. Cancelling the request too needs
+            // api/client.ts, which this view does not own.
+            if (ctrl.signal.aborted) throw new DOMException("Stopped.", "AbortError");
+            return blocking;
           }
           throw e;
         });
-      setTurns((t) => [...t, {
-        role: "assistant", content: res.reply, samples: res.samples, trace: res.trace,
+      setTurns((t) => [...settled(t), {
+        role: "assistant", kind: "answer",
+        content: res.reply, samples: res.samples, trace: res.trace,
         blocks: res.blocks, lanes: res.lanes, lanesFailed: res.lanes_failed,
         elapsed: res.elapsed_s,
       }]);
     } catch (e) {
-      setTurns((t) => [...t, {
-        role: "assistant",
-        content: `⚠️ ${e instanceof Error ? e.message : String(e)}`,
-      }]);
+      // Stopped on purpose: the question keeps its `pending` marker, and that
+      // marker is what renders the interrupted notice and its Resend button.
+      if (!isAbort(e)) {
+        setTurns((t) => [...settled(t), {
+          role: "assistant", kind: "error",
+          content: e instanceof Error ? e.message : String(e),
+        }]);
+      }
     } finally {
+      if (abortRef.current === ctrl) abortRef.current = null;
       const stamp = new Date().toISOString();
       setSessions((s) => s.map((m) => (m.id === id ? { ...m, updatedAt: stamp } : m)));
       setBusy(false);
@@ -328,32 +420,17 @@ export default function ChatPage() {
     }
   };
 
+  /** Re-ask the user turn at `at`, dropping it and everything after it. */
+  const reask = (at: number) => {
+    const q = turns[at];
+    if (!q || q.role !== "user") return;
+    void ask(q.content, turns.slice(0, at));
+  };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     void ask(input);
   };
-
-  if (status && !status.available) {
-    return (
-      <div className="panel" style={{ maxWidth: 720, margin: "40px auto" }}>
-        <h1 className="sr-only">Dataset assistant</h1>
-        <h3>Assistant unavailable</h3>
-        <p style={{ color: "var(--text-dim)", lineHeight: 1.6 }}>{status.reason}</p>
-        <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
-          The assistant is an optional layer — a Fugu-style multi-agent
-          orchestration (LangGraph) running entirely locally via Ollama with
-          model <code>{status.model}</code>. Everything else in the app works
-          without it.
-        </p>
-        <button className="ghost" onClick={() => {
-          setStatus(null);
-          api.chatStatus().then(setStatus).catch(() => undefined);
-        }}>
-          Re-check
-        </button>
-      </div>
-    );
-  }
 
   return (
     <div className="chat-page">
@@ -362,7 +439,9 @@ export default function ChatPage() {
           assistive tech; the in-flow titles below stay non-headings. */}
       <h1 className="sr-only">Dataset assistant</h1>
       <aside className="chat-sessions" aria-label="Conversations">
-        <button className="ghost chat-sessions-new" onClick={startNew} disabled={busy}>
+        {/* The register stays navigable while a run is in flight — leaving a
+            transcript stops its run rather than being forbidden by it. */}
+        <button className="ghost chat-sessions-new" onClick={startNew}>
           New chat
         </button>
         {sorted.length === 0 && (
@@ -400,7 +479,6 @@ export default function ChatPage() {
                     <button
                       className="chat-session-open"
                       onClick={() => openSession(m.id)}
-                      disabled={busy}
                       title={m.title}
                       aria-label={when ? `Open "${m.title}" — ${when}` : `Open "${m.title}"`}
                       aria-current={isActive ? "true" : undefined}
@@ -428,7 +506,6 @@ export default function ChatPage() {
                         <button
                           className="chat-session-act" title="Delete"
                           aria-label={`Delete "${m.title}"`}
-                          disabled={busy && isActive}
                           onClick={() => setConfirmDelete(m.id)}
                         >
                           ×
@@ -492,14 +569,33 @@ export default function ChatPage() {
                   topology drawn from the running registry.
                 </p>
               )}
-              <div className="chip-row">
+              {/* The suggestions stay legible with the model down — they are
+                  the clearest statement of what the lanes can do — but they
+                  are dimmed and inert, so nothing invites a click that would
+                  do nothing. */}
+              <div className="chip-row"
+                   style={unavailable ? { opacity: DISABLED_OPACITY } : undefined}>
                 {SUGGESTIONS.map((s) => (
-                  <button key={s} className="chip" onClick={() => void ask(s)}>{s}</button>
+                  <button key={s} className="chip" disabled={unavailable}
+                          onClick={() => void ask(s)}>{s}</button>
                 ))}
               </div>
             </div>
           )}
           {turns.map((t, i) => (
+            t.kind === "error" ? (
+              /* Not a bubble and not the assistant's voice: a failed request
+                 gets its own block, announced as an alert, so no reader — and
+                 no later turn — mistakes it for something the model said. */
+              <div key={i} className="error" role="alert">
+                <div>The request failed. {t.content}</div>
+                <button className="ghost" type="button" disabled={busy}
+                        style={{ marginTop: BLOCK_LINE_GAP }}
+                        onClick={() => reask(i - 1)}>
+                  Retry
+                </button>
+              </div>
+            ) : (
             <div key={i} className={`chat-turn ${t.role}`}>
               <div className="chat-bubble">
                 {t.trace && t.trace.length > 0 && (
@@ -546,7 +642,24 @@ export default function ChatPage() {
                 )}
               </div>
             </div>
+            )
           ))}
+          {/* A question whose run was stopped — here or by leaving the page —
+              says so and offers to be asked again, instead of leaving the
+              transcript ending on a question nobody answered. */}
+          {!busy && interrupted >= 0 && (
+            <div className="notice" role="status">
+              <div>
+                This question was interrupted before an answer arrived — the run
+                was stopped, or the page was left while it was still working.
+              </div>
+              <div>
+                <button className="ghost" type="button" onClick={() => reask(interrupted)}>
+                  Resend
+                </button>
+              </div>
+            </div>
+          )}
           {busy && (
             <div className="chat-turn assistant">
               <div className="chat-bubble">
@@ -571,23 +684,56 @@ export default function ChatPage() {
           )}
           <div ref={bottomRef} />
         </div>
+        {/* The model being down takes the composer away, not the register: the
+            transcripts are localStorage and need nothing running to be read.
+            The reason and its remedy stand where the input would be. */}
+        {unavailable ? (
+          <div className="chat-input">
+            <div className="notice" role="status" style={{ flex: 1, marginBottom: 0 }}>
+              <div><strong>Assistant unavailable.</strong> {status?.reason}</div>
+              <div>
+                The assistant is an optional layer — a Fugu-style multi-agent
+                orchestration (LangGraph) running entirely locally via Ollama with
+                model <code>{status?.model}</code>. Everything else in the app works
+                without it, and the conversations above stay readable.
+              </div>
+              <div>
+                <button className="ghost" type="button" onClick={() => {
+                  setStatus(null);
+                  api.chatStatus().then(setStatus).catch(() => undefined);
+                }}>
+                  Re-check
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
         <form className="chat-input" onSubmit={submit}>
           <input
             aria-label="Ask the dataset assistant"
             placeholder="Ask about the dataset, search for images, audit captions…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={busy}
           />
-          <button className="primary" type="submit" disabled={busy || !input.trim()}>
-            Send
-          </button>
+          {/* Send becomes Stop for the length of the run: a question that is
+              taking two minutes and is going the wrong way can be taken back
+              without abandoning the conversation to get out of it. */}
+          {busy ? (
+            <button className="ghost" type="button" onClick={() => abortRef.current?.abort()}>
+              Stop
+            </button>
+          ) : (
+            <button className="primary" type="submit" disabled={!input.trim()}>
+              Send
+            </button>
+          )}
           {turns.length > 0 && (
-            <button className="ghost" type="button" disabled={busy} onClick={startNew}>
+            <button className="ghost" type="button" onClick={startNew}>
               New chat
             </button>
           )}
         </form>
+        )}
       </div>
     </div>
   );

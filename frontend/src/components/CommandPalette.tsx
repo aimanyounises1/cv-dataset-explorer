@@ -40,6 +40,10 @@ function loadSuggestions(): Promise<SuggestionData> {
   return suggestionPromise;
 }
 
+// Written by three call sites that must agree: the option element's id, the
+// input's aria-activedescendant, and the scroll-into-view lookup.
+const optionId = (index: number) => `cmdk-option-${index}`;
+
 let savedViewsPromise: Promise<SavedView[] | null> | null = null; // resolves null when the router is absent (404)
 
 function loadSavedViews(): Promise<SavedView[] | null> {
@@ -457,6 +461,17 @@ export default function CommandPalette(): JSX.Element | null {
     if (activeIndex > flatItems.length - 1) setActiveIndex(Math.max(0, flatItems.length - 1));
   }, [flatItems.length, activeIndex]);
 
+  // The list scrolls, so the keyboard's idea of "active" has to stay the eye's
+  // idea of it: aria-activedescendant would otherwise announce a row that a
+  // sighted user cannot see, and Enter would fire it blind. "nearest" scrolls
+  // only when the row is actually out of view, which is what keeps mouse-hover
+  // selection (onMouseEnter, below) from yanking the list under the cursor.
+  // Re-run on the result set too, not just the index: a query change resets the
+  // index to 0, and when it was already 0 that is not a change this could see.
+  useEffect(() => {
+    document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex, flatItems]);
+
   const moveActive = (delta: number) => {
     setActiveIndex((i) => {
       if (flatItems.length === 0) return 0;
@@ -527,7 +542,7 @@ export default function CommandPalette(): JSX.Element | null {
             aria-controls="cmdk-listbox"
             aria-haspopup="listbox"
             aria-autocomplete="list"
-            aria-activedescendant={flatItems.length > 0 ? `cmdk-option-${activeIndex}` : undefined}
+            aria-activedescendant={flatItems.length > 0 ? optionId(activeIndex) : undefined}
             aria-label="Search commands, samples, tags, and attributes"
             placeholder="Search or jump to…"
             value={query}
@@ -570,7 +585,7 @@ export default function CommandPalette(): JSX.Element | null {
                   return (
                     <div
                       key={item.id}
-                      id={`cmdk-option-${idx}`}
+                      id={optionId(idx)}
                       role="option"
                       aria-selected={idx === activeIndex}
                       className={idx === activeIndex ? "cmdk-item active" : "cmdk-item"}

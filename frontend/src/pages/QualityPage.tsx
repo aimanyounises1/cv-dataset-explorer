@@ -23,6 +23,26 @@ function defaultThreshold(summary: QASummary): number {
   return summary.max_agreement ?? 1;
 }
 
+/** A bin with no captions in it still gets a hairline, so the column stays
+ * hoverable (its title carries the count) and a hole in the distribution reads
+ * as a measured zero rather than as something the chart forgot to draw. */
+const EMPTY_BIN_PCT = 2;
+
+/** Bar height is log(1 + count), not count.
+ *
+ * Measured on this corpus: the mode bin holds 4,057 captions while the region
+ * the review line actually cuts holds 2 to 200 — a 2,000:1 range. On a linear
+ * height every bin below ~0.09 agreement collapsed onto the same 2% floor, so
+ * dragging the line from 0.021 to 0.096 changed nothing on screen and the panel
+ * could not answer the one question it exists for: is this cutoff in the tail,
+ * or already inside the bulk? A log height resolves that range and keeps a bin
+ * of one distinguishable from a bin of none. Because areas under it are no
+ * longer proportional to counts, the panel head says so in words. */
+function barHeightPct(count: number, peak: number): number {
+  if (count <= 0) return EMPTY_BIN_PCT;
+  return (Math.log1p(count) / Math.log1p(peak)) * 100;
+}
+
 /** One suspect per line: thumb, caption, figures. A reviewer triages this list
  * by the hundred, so the unit of reading is the row, not a card — the caption
  * ellipsizes rather than wraps and the full text rides on the title. */
@@ -163,6 +183,20 @@ export default function QualityPage() {
     () => (threshold == null ? 0
       : hist.filter((b) => b.hi <= threshold).reduce((n, b) => n + b.count, 0)),
     [hist, threshold]);
+  /** Which bar the review line falls in front of.
+   *
+   * The bars are flex children with a gap between them, so an offset expressed
+   * as a percentage of the container drifts by the accumulated gap — 78px of
+   * the 1,114px chart at 40 bins, nearly two bins wide at the right-hand end.
+   * The mark is therefore spliced into the same flex row as a zero-width item,
+   * which lands it exactly on the boundary the opacity break already draws: a
+   * bin counts as selected when `b.hi <= threshold`, so the cut belongs in
+   * front of the first bin the threshold does not fully cover. */
+  const cutAt = useMemo(() => {
+    if (threshold == null) return 0;
+    const i = hist.findIndex((b) => b.hi > threshold);
+    return i < 0 ? hist.length : i;
+  }, [hist, threshold]);
   const exact = selection != null && selection.max_agreement === threshold;
   const belowCount = exact ? selection!.captions : binnedBelow;
   const totalScored = summary?.scored_captions ?? 0;
@@ -202,9 +236,13 @@ export default function QualityPage() {
           <div className="dist-head">
             <div>
               <div className="eyebrow">Agreement distribution</div>
+              {/* The height transform is named where the chart is named. It
+                  belongs here rather than on .dist-axis, which labels the
+                  agreement scale — the log is on the other axis — and which is
+                  a single non-wrapping line already 330px wide at 390. */}
               <div className="meta-line" style={{ marginBottom: 0, marginTop: 4 }}>
                 {totalScored.toLocaleString()} scored captions · mean{" "}
-                {summary.mean_agreement?.toFixed(3)}
+                {summary.mean_agreement?.toFixed(3)} · bar height on a log(1+count) scale
               </div>
             </div>
             <div className="dist-readout">
@@ -213,49 +251,99 @@ export default function QualityPage() {
             </div>
           </div>
 
-          <div className="dist-bars" role="img"
-               aria-label={`Agreement histogram; threshold at ${threshold.toFixed(3)} selects `
-                           + `${belowCount} of ${totalScored} captions`}>
-            {hist.map((b) => {
-              const inRange = b.hi <= threshold;
-              return (
-                <div
-                  key={b.lo}
-                  className={`dist-bar ${inRange ? "" : "out"}`}
+          {/* The cut, drawn. Until now the only trace of the review line in the
+              chart was the `.dist-bar.out` opacity step, which in the tail
+              falls between two bars of equal height and reads as nothing at
+              all. The line a reviewer is asked to place is now a mark they can
+              see, carrying the value it stands for; the count it selects is on
+              the readout one line above, so it is not repeated here. */}
+          {(() => {
+            const cutMark = (
+              <div
+                key="cut"
+                className="dist-cut"
+                style={{
+                  flex: "0 0 auto", width: 0, alignSelf: "stretch",
+                  position: "relative", pointerEvents: "none",
+                  borderLeft: "2px solid var(--accent)",
+                }}
+              >
+                {/* Anchored away from the nearer edge so the label always
+                    opens into the chart and never out of the panel. */}
+                <span
+                  className="dist-readout"
                   style={{
-                    height: `${Math.max(2, (b.count / peak) * 100)}%`,
-                    // Colour by position on the scale, not by selection state —
-                    // opacity carries selection, so the two do not compete.
-                    background: sequential(
-                      (b.lo - (summary.min_agreement ?? 0)) /
-                      Math.max(1e-6, (summary.max_agreement ?? 1) - (summary.min_agreement ?? 0))),
+                    position: "absolute", top: 0,
+                    ...(cutAt * 2 <= hist.length ? { left: 0 } : { right: 0 }),
+                    background: "var(--bg-raised)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "0 4px",
                   }}
-                  title={`${b.lo.toFixed(3)}–${b.hi.toFixed(3)}: ${b.count.toLocaleString()} captions`}
-                />
-              );
-            })}
-          </div>
+                >
+                  ≤ {threshold.toFixed(3)}
+                </span>
+              </div>
+            );
+            return (
+              <div className="dist-bars" role="img"
+                   aria-label={`Agreement histogram, bar height on a log of one plus bin count scale; `
+                               + `threshold at ${threshold.toFixed(3)} selects `
+                               + `${belowCount} of ${totalScored} captions`}>
+                {hist.flatMap((b, i) => {
+                  const inRange = b.hi <= threshold;
+                  const bar = (
+                    <div
+                      key={b.lo}
+                      className={`dist-bar ${inRange ? "" : "out"}`}
+                      style={{
+                        height: `${barHeightPct(b.count, peak)}%`,
+                        // Colour by position on the scale, not by selection state —
+                        // opacity carries selection, so the two do not compete.
+                        background: sequential(
+                          (b.lo - (summary.min_agreement ?? 0)) /
+                          Math.max(1e-6, (summary.max_agreement ?? 1) - (summary.min_agreement ?? 0))),
+                      }}
+                      title={`${b.lo.toFixed(3)}–${b.hi.toFixed(3)}: ${b.count.toLocaleString()} captions`}
+                    />
+                  );
+                  return i === cutAt ? [cutMark, bar] : [bar];
+                })}
+                {cutAt >= hist.length && cutMark}
+              </div>
+            );
+          })()}
           <div className="dist-axis">
             <span>{summary.min_agreement?.toFixed(3)}</span>
             <span>worse ← agreement → better</span>
             <span>{summary.max_agreement?.toFixed(3)}</span>
           </div>
 
-          <div className="dist-control">
+          {/* The brush now spans exactly the chart it brushes. As a flex item
+              between its label and its readout the track measured 885px against
+              the bars' 1,114px at 1440, and 129px against 330px at 390 — so the
+              thumb and the cut it was setting could sit ~120px apart, and on a
+              phone the right two thirds of the histogram had no track under it
+              at all. Wrapping the track onto its own row makes it a full-width
+              child of the same panel as `.dist-bars`, which is the whole of the
+              alignment; what remains is the native thumb's own half-width,
+              which no layout can remove without replacing the control. */}
+          <div className="dist-control"
+               style={{ flexWrap: "wrap", justifyContent: "space-between" }}>
             <label className="eyebrow" htmlFor="qa-threshold">Review below</label>
+            <span className="dist-readout" style={{ color: SURFACE.textDim }}>
+              {listLoading ? "updating…"
+                : `${Math.min(shownSuspects, suspects.length)} of ${suspects.length} listed`}
+            </span>
             <input
               id="qa-threshold"
               type="range"
+              style={{ flexBasis: "100%" }}
               min={summary.min_agreement ?? 0}
               max={summary.max_agreement ?? 1}
               step={0.001}
               value={threshold}
               onChange={(e) => { touched.current = true; setThreshold(Number(e.target.value)); }}
             />
-            <span className="dist-readout" style={{ color: SURFACE.textDim }}>
-              {listLoading ? "updating…"
-                : `${Math.min(shownSuspects, suspects.length)} of ${suspects.length} listed`}
-            </span>
           </div>
 
           {/* A brush that only redraws its own page is a setting, not a
