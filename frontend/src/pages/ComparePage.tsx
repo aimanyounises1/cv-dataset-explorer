@@ -2,7 +2,11 @@ import {
   useCallback, useEffect, useRef, useState,
 } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AXES } from "../api/types";
+import { api } from "../api/client";
+import {
+  AXES, LeakagePair, SampleCard, SegmentAnnotation, SegmentBox,
+} from "../api/types";
+import ImageCard from "../components/ImageCard";
 import { useActiveProviderName, useCorpusTotal } from "../lib/activeProvider";
 import "../styles/compare.css";
 
@@ -15,19 +19,41 @@ import "../styles/compare.css";
  * holding it right now — the same reason image-query results stay in memory.
  * One transform drives both panes, so "look at the third dog from the left"
  * means the same crop on each side.
+ *
+ * Two things this page deliberately does NOT own. Retrieval: a region drawn
+ * here is searched through the same `/search/by-region` the sample page calls,
+ * so one rectangle has one ranking whichever screen drew it. Annotation: the
+ * saved outlines are read-only here — they are made, labelled and deleted on
+ * /samples/:id, which has the taxonomy, the masks and the delete.
  */
 
 // Must match AlbumShelf's DRAG_IDS. Declared locally rather than imported so
-// this lazy chunk does not pull the shelf (and its client) along for one string.
+// this lazy chunk does not pull the shelf along for one string.
 const DRAG_IDS = "application/x-cvde-ids";
 
 
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 12;
 
+/** How many neighbours a region query returns. One strip's worth: the point of
+ * searching a crop here is "is this thing rare?", which the first screenful
+ * answers — the gallery is where a full ranking gets paged. */
+const REGION_TOP_K = 24;
+
+/** Where the pair queue cuts, and how many it offers.
+ *
+ * 0.90 is the split-integrity panel's own default threshold, so the queue and
+ * the count a reader just saw there describe the same pairs — a different cut
+ * here would quietly be a different population. Ten is one screenful: this is a
+ * way in, not a worklist, and the integrity view owns the full set. */
+const LEAKAGE_THRESHOLD = 0.9;
+const PAIR_QUEUE_N = 10;
+
 const STAGE_TITLE =
   "Wheel zooms toward the cursor, drag pans, double-click resets — both panes "
-  + "move together. Keyboard: + / - zoom, arrow keys pan, 0 resets.";
+  + "move together. Keyboard: + / - zoom, arrow keys pan, 0 resets. The "
+  + "magnification in each pane header is a button: it snaps to 1:1, one "
+  + "source pixel per screen pixel.";
 
 interface SampleDetail {
   id: number;
@@ -42,15 +68,17 @@ interface SampleDetail {
   cluster: number | null;
   axes: Record<string, number | object | null>;
 }
-interface SimilarCard {
-  id: number;
-  thumb_url: string;
-  caption: string | null;
-  score: number | null;
-}
-interface RectGeom { x: number; y: number; w: number; h: number }
-interface Annotation { kind: string; geometry: RectGeom; label?: string | null }
 interface View { s: number; tx: number; ty: number }
+
+/** What one region query produced. `scoreBasis` travels with the items because
+ * a score is uninterpretable without it — the same rule the gallery follows. */
+interface RegionResult {
+  fromId: number;
+  role: "positive" | "negative";
+  items: SampleCard[];
+  scoreBasis: string | null;
+  message: string | null;
+}
 
 const REST_VIEW: View = { s: 1, tx: 0, ty: 0 };
 
@@ -75,26 +103,15 @@ function axisValue(sample: SampleDetail, axis: string): number | null {
   return typeof v === "number" ? v : null;
 }
 
-/** Crop the ORIGINAL image (not the thumbnail — the region may be small, and
- * the embedder deserves the pixels) and return it as a JPEG blob. */
-async function cropRegion(imageUrl: string, r: RectGeom): Promise<Blob> {
-  const img = new Image();
-  img.src = imageUrl;
-  await img.decode();
-  const sw = Math.max(1, Math.round(r.w * img.naturalWidth));
-  const sh = Math.max(1, Math.round(r.h * img.naturalHeight));
-  const canvas = document.createElement("canvas");
-  canvas.width = sw;
-  canvas.height = sh;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("no 2d canvas context");
-  ctx.drawImage(img,
-    Math.round(r.x * img.naturalWidth), Math.round(r.y * img.naturalHeight),
-    sw, sh, 0, 0, sw, sh);
-  const blob = await new Promise<Blob | null>(
-    (res) => canvas.toBlob(res, "image/jpeg", 0.92));
-  if (!blob) throw new Error("cropping produced no image");
-  return blob;
+/** The view that shows actual pixels: one source pixel on one CSS pixel, with
+ * the layer's centre back where it sits at rest. With transform-origin 0 0 a
+ * layer point p lands at t + s·p, so the centre holds when
+ * t = (1 − s)·(layer size / 2) — the same algebra as `zoomedView`, pivoting on
+ * the middle. `layerW` is the layout width, which is viewport-dependent: that
+ * is exactly why the scale that means 1:1 cannot be a constant. */
+function actualPixelView(layerW: number, layerH: number, sourceW: number): View {
+  const s = clamp(sourceW / layerW, MIN_SCALE, MAX_SCALE);
+  return { s, tx: (1 - s) * layerW / 2, ty: (1 - s) * layerH / 2 };
 }
 
 function useSample(id: number | null) {
@@ -139,7 +156,7 @@ export default function ComparePage() {
     if (aId == null || bId == null) { setSim(null); return; }
     let live = true;
     setSim(null);
-    getJSON<SimilarCard[]>(`/api/samples/${aId}/similar?top_k=60`)
+    getJSON<SampleCard[]>(`/api/samples/${aId}/similar?top_k=60`)
       .then((cards) => {
         if (!live) return;
         const i = cards.findIndex((c) => c.id === bId);
@@ -150,29 +167,36 @@ export default function ComparePage() {
     return () => { live = false; };
   }, [aId, bId]);
 
-  // The annotations API shipped. Probed, not assumed: a 404
-  // disables Save (with the reason in its title) while region search keeps
-  // working. Anything else leaves the button live and lets the POST speak.
-  const [annApiUp, setAnnApiUp] = useState<boolean | null>(null);
-  const onAnnApi = useCallback((up: boolean) => { setAnnApiUp(up); }, []);
-
-  const [regionHits, setRegionHits] =
-    useState<{ fromId: number; cards: SimilarCard[] } | null>(null);
+  const [regionHits, setRegionHits] = useState<RegionResult | null>(null);
   const [searching, setSearching] = useState(false);
   const [regionErr, setRegionErr] = useState<string | null>(null);
 
-  const searchRegion = useCallback(async (sample: SampleDetail, rect: RectGeom) => {
+  /** One region, one ranking implementation. The geometry goes to the server,
+   * which crops the ORIGINAL file — the same `/search/by-region` the sample
+   * page uses. Cropping in a canvas here instead would re-encode the pixels
+   * before embedding them, and the same rectangle would score differently
+   * depending on which screen it was drawn on. */
+  const searchRegion = useCallback(async (
+    sample: SampleDetail, rect: SegmentBox,
+    role: "positive" | "negative", text: string,
+  ) => {
     setSearching(true);
     setRegionErr(null);
     try {
-      const blob = await cropRegion(sample.image_url, rect);
-      const r = await fetch("/api/search/by-image?top_k=24", {
-        method: "POST",
-        headers: { "Content-Type": "image/jpeg" },
-        body: blob,
+      const resp = await api.searchByRegion({
+        sample_id: sample.id, ...rect, role, top_k: REGION_TOP_K,
+        // Steering text blends into the crop's vector on the positive path
+        // only; sending it with a negative role would imply an effect the
+        // ranking does not have.
+        text: role === "positive" && text.trim() ? text.trim() : undefined,
       });
-      if (!r.ok) throw new Error(`region search failed: ${r.status}`);
-      setRegionHits({ fromId: sample.id, cards: (await r.json()) as SimilarCard[] });
+      setRegionHits({
+        fromId: sample.id,
+        role,
+        items: resp.items,
+        scoreBasis: resp.score_basis ?? null,
+        message: resp.message ?? null,
+      });
     } catch (e: unknown) {
       setRegionHits(null);
       setRegionErr(String(e));
@@ -229,13 +253,17 @@ export default function ComparePage() {
       <div className="eyebrow">Compare &amp; focus</div>
       <h1 className="section-title compare-title">Two frames, one loupe</h1>
 
-      <div className="compare-panes">
+      {/* With nothing loaded the bench is two empty rectangles asking the reader
+          to already know two ids. The queue leads in that state and the panes
+          shrink to a drop target beneath it; once a pair is open the panes are
+          the whole point again and the queue is gone. */}
+      {aId == null && bId == null && <PairQueue />}
+
+      <div className={`compare-panes${aId == null && bId == null ? " idle" : ""}`}>
         <Pane slot="a" sample={a.data} error={a.error} view={view} setView={setView}
-          annApiUp={annApiUp} onAnnApi={onAnnApi} onFill={fill}
-          onSearchRegion={searchRegion} />
+          onFill={fill} searching={searching} onSearchRegion={searchRegion} />
         <Pane slot="b" sample={b.data} error={b.error} view={view} setView={setView}
-          annApiUp={annApiUp} onAnnApi={onAnnApi} onFill={fill}
-          onSearchRegion={searchRegion} />
+          onFill={fill} searching={searching} onSearchRegion={searchRegion} />
       </div>
 
       {regionErr && <div className="error">{regionErr}</div>}
@@ -243,23 +271,25 @@ export default function ComparePage() {
         <section className="panel region-results">
           <h3>
             Region search
-            {regionHits && !searching
-              && ` — region of #${regionHits.fromId}, nearest ${regionHits.cards.length} by image embedding`}
+            {regionHits && !searching && (regionHits.role === "positive"
+              ? ` — nearest ${regionHits.items.length} to a region of #${regionHits.fromId},`
+                + " cropped from the original"
+              : ` — the ${regionHits.items.length} frames farthest from a region of `
+                + `#${regionHits.fromId}`)}
           </h3>
           {searching
             ? <div className="loading">Embedding the crop and ranking the corpus…</div>
-            : (
-              <div className="region-strip">
-                {regionHits && regionHits.cards.map((c) => (
-                  <Link key={c.id} to={`/samples/${c.id}`} className="region-hit"
-                    title={c.caption ?? undefined}>
-                    <img src={c.thumb_url} alt={`sample ${c.id}`} loading="lazy" />
-                    <span className="mono">
-                      #{c.id}{c.score != null && ` · ${c.score.toFixed(3)}`}
-                    </span>
-                  </Link>
-                ))}
-              </div>
+            : regionHits && (
+              <>
+                {/* The server's own sentence about what this ranking is,
+                    verbatim — the same line the sample page shows. */}
+                {regionHits.message && <p className="compare-sim">{regionHits.message}</p>}
+                <div className="grid">
+                  {regionHits.items.map((c) => (
+                    <ImageCard key={c.id} sample={c} scoreBasis={regionHits.scoreBasis} />
+                  ))}
+                </div>
+              </>
             )}
         </section>
       )}
@@ -277,14 +307,16 @@ interface PaneProps {
   error: string | null;
   view: View;
   setView: React.Dispatch<React.SetStateAction<View>>;
-  annApiUp: boolean | null;
-  onAnnApi: (up: boolean) => void;
   onFill: (slot: "a" | "b", ids: number[]) => void;
-  onSearchRegion: (sample: SampleDetail, rect: RectGeom) => void;
+  searching: boolean;
+  onSearchRegion: (
+    sample: SampleDetail, rect: SegmentBox,
+    role: "positive" | "negative", text: string,
+  ) => void;
 }
 
 function Pane({
-  slot, sample, error, view, setView, annApiUp, onAnnApi, onFill, onSearchRegion,
+  slot, sample, error, view, setView, onFill, searching, onSearchRegion,
 }: PaneProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const layerRef = useRef<HTMLDivElement | null>(null);
@@ -296,37 +328,49 @@ function Pane({
 
   const [over, setOver] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
-  const [draft, setDraft] = useState<RectGeom | null>(null);
-  const [label, setLabel] = useState("");
-  const [saved, setSaved] = useState<Annotation[]>([]);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<SegmentBox | null>(null);
+  const [steer, setSteer] = useState("");
+  const [saved, setSaved] = useState<SegmentAnnotation[]>([]);
+
+  // The layer's layout width and height at scale 1 — the denominator of the
+  // magnification readout and what 1:1 solves against. Observed, not assumed:
+  // the same 500px-wide photograph lays out at 565 CSS px on a 1440 desktop
+  // and 356 on a 390 phone, so `view.s === 1` is not the same magnification
+  // twice.
+  const [layerBox, setLayerBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
 
   const sampleId = sample ? sample.id : null;
 
   // A new occupant clears the previous one's marks.
   useEffect(() => {
-    setDraft(null); setLabel(""); setDrawMode(false); setSaveErr(null);
+    setDraft(null); setSteer(""); setDrawMode(false);
   }, [sampleId]);
 
-  // Existing saved regions, drawn as thin sage outlines. A 404 means the
-  // annotations API is not mounted (yet) — skipped silently, by contract.
+  useEffect(() => {
+    const el = layerRef.current;
+    if (!el) { setLayerBox({ w: 0, h: 0 }); return; }
+    const read = () => setLayerBox({ w: el.offsetWidth, h: el.offsetHeight });
+    read();
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [sampleId]);
+
+  // The marks the sample page owns, shown here read-only: accepted segment
+  // annotations, outlined by their bounding boxes. Compare does not annotate —
+  // the label taxonomy, the mask, the delete and search-by-annotation all live
+  // on /samples/:id, and a second, weaker annotator here would only write rows
+  // that screen cannot see, edit or delete.
   useEffect(() => {
     setSaved([]);
     if (sampleId == null) return;
-    let live = true;
-    fetch(`/api/samples/${sampleId}/annotations`).then(async (r) => {
-      if (!live) return;
-      if (r.status === 404) { onAnnApi(false); return; }
-      if (!r.ok) return;
-      onAnnApi(true);
-      const list = (await r.json()) as Annotation[];
-      if (live && Array.isArray(list)) {
-        setSaved(list.filter((x) => x.kind === "rect" && x.geometry != null));
-      }
-    }).catch(() => { /* optional layer; its absence is not an error */ });
-    return () => { live = false; };
-  }, [sampleId, onAnnApi]);
+    const ctrl = new AbortController();
+    api.listSegmentAnnotations(sampleId, ctrl.signal)
+      .then((list) => { setSaved(list.filter((x) => x.geometry != null)); })
+      .catch(() => { /* an aborted or unavailable read draws no marks, which
+                        is what "this image has none" already looks like */ });
+    return () => ctrl.abort();
+  }, [sampleId]);
 
   // Wheel must be a native non-passive listener: React delegates wheel as
   // passive, so preventDefault (keeping the page still under the loupe) would
@@ -428,29 +472,12 @@ function Pane({
     } catch { /* some other drag's payload — not ours to interpret */ }
   };
 
-  const save = async () => {
-    if (!sample || !draft) return;
-    setSaving(true);
-    setSaveErr(null);
-    try {
-      const r = await fetch(`/api/samples/${sample.id}/annotations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "rect", geometry: draft, label: label || null }),
-      });
-      if (r.status === 404) { onAnnApi(false); return; }
-      if (!r.ok) throw new Error(`save failed: ${r.status}`);
-      setSaved((s) => [...s, { kind: "rect", geometry: draft, label: label || null }]);
-      setDraft(null);
-      setLabel("");
-    } catch (e: unknown) {
-      setSaveErr(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
+  // Displayed pixels per source pixel — the number a loupe exists to make
+  // answerable ("is that blocking eight source pixels wide, or two?").
+  // `view.s` cannot answer it: at rest it is 1 whatever the layout did.
+  const mag = sample && layerBox.w > 0 ? (layerBox.w * view.s) / sample.width : null;
 
-  const pct = (r: RectGeom): React.CSSProperties => ({
+  const pct = (r: SegmentBox): React.CSSProperties => ({
     left: `${r.x * 100}%`,
     top: `${r.y * 100}%`,
     width: `${r.w * 100}%`,
@@ -480,11 +507,32 @@ function Pane({
               {sample.filename}
             </Link>
             <span className="pill">{sample.split}</span>
+            {/* The magnification is the readout and the control at once: it
+                states the ratio at rest, and clicking it snaps to 1:1. It
+                borrows `.legend-pick`, which exists for exactly this — a
+                fact first, a control second, its border arriving on hover. */}
+            {mag != null && (
+              <button
+                type="button"
+                className="pane-id legend-pick"
+                title={`${mag.toFixed(2)} screen pixels per source pixel of the `
+                  + `${sample.width}×${sample.height} original. Click for 1:1 — `
+                  + "actual pixels, recentred. Both panes share one transform, "
+                  + "so the other lands at its own ratio."}
+                onClick={() => setView(
+                  actualPixelView(layerBox.w, layerBox.h, sample.width))}
+              >
+                {mag.toFixed(2)}×
+              </button>
+            )}
             <button
               type="button"
               className={`ghost draw-toggle${drawMode ? " select-on" : ""}`}
               aria-pressed={drawMode}
-              title="Drag on the image to mark a rectangle — drawn by you, no segmentation model involved; search it or save it"
+              title={"Drag on the image to mark a rectangle — drawn by you, no "
+                + "segmentation model involved — and search the corpus with it. "
+                + "Sage outlines already on the image are saved segment annotations, "
+                + "which are made and edited on the sample page."}
               onClick={() => setDrawMode((d) => !d)}
             >
               Draw region
@@ -509,9 +557,10 @@ function Pane({
               }}
             >
               <img src={sample.image_url} alt={sample.filename} draggable={false} />
-              {saved.map((ann, i) => (
-                <div key={i} className="region-rect saved" style={pct(ann.geometry)}>
-                  {ann.label && <span className="region-label">{ann.label}</span>}
+              {saved.map((ann) => (
+                <div key={ann.id} className="region-rect saved" style={pct(ann.geometry)}>
+                  {(ann.label_name ?? ann.label)
+                    && <span className="region-label">{ann.label_name ?? ann.label}</span>}
                 </div>
               ))}
               {draft && <div className="region-rect draft" style={pct(draft)} />}
@@ -519,35 +568,35 @@ function Pane({
           </div>
           {draft && (
             <div className="region-actions">
+              {/* The same steering the composed query takes everywhere else:
+                  the crop's vector averaged with this text. Empty means the
+                  crop alone. */}
               <input
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="label (optional)"
-                aria-label={`Label for the region on sample ${sample.id}`}
+                value={steer}
+                onChange={(e) => setSteer(e.target.value)}
+                placeholder="steer with text (optional)"
+                aria-label={`Steering text for the region on sample ${sample.id}`}
               />
-              <button type="button" className="primary"
-                onClick={() => onSearchRegion(sample, draft)}>
+              <button type="button" className="primary" disabled={searching}
+                title={"Rank the corpus by closeness to this region — the server crops "
+                  + "the original, so the same rectangle gives the same answer here and "
+                  + "on the sample page"}
+                onClick={() => onSearchRegion(sample, draft, "positive", steer)}>
                 Search this region
               </button>
-              <button
-                type="button"
-                className="ghost"
-                disabled={annApiUp === false || saving}
-                title={annApiUp === false
-                  ? "annotations API not up yet — region search still works"
-                  : "Save this rectangle as an annotation"}
-                onClick={() => { void save(); }}
-              >
-                {saving ? "Saving…" : "Save region"}
+              <button type="button" className="ghost" disabled={searching}
+                title={"Rank by distance from this region — what the corpus has least "
+                  + "of. Steering text does not apply to this ranking."}
+                onClick={() => onSearchRegion(sample, draft, "negative", steer)}>
+                Away
               </button>
               <button type="button" className="ghost region-clear"
                 title="Discard this rectangle"
-                onClick={() => { setDraft(null); setLabel(""); }}>
+                onClick={() => { setDraft(null); setSteer(""); }}>
                 ✕
               </button>
             </div>
           )}
-          {saveErr && <div className="error region-save-err">{saveErr}</div>}
         </>
       )}
     </section>
@@ -652,6 +701,72 @@ function DiffPanel({ a, b, sim }: DiffPanelProps) {
           {corpusTotal != null ? (corpusTotal - 1).toLocaleString() : ""} frames
           in the corpus.
         </p>
+      </div>
+    </section>
+  );
+}
+
+/** What to compare, when you arrived with nothing.
+ *
+ * An empty bench is not a starting point — it asks the reader to already know
+ * two ids, which nobody does. The split-integrity view ends on "cross-split
+ * pairs — judge these yourself" and then offers nowhere to judge them; this is
+ * that queue, on the screen built for the judging. Same endpoint, same cached
+ * pair list, same cosine: no second ranking implementation.
+ *
+ * The pairs are the highest-cosine cross-split ones because those are the pairs
+ * with consequences — a held-out image that repeats a training image is the
+ * case where a reported score is partly memorisation.
+ */
+function PairQueue() {
+  const [pairs, setPairs] = useState<LeakagePair[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    api.leakage(LEAKAGE_THRESHOLD, ctrl.signal)
+      .then((r) => setPairs(r.examples.filter((p) => p.cross_split).slice(0, PAIR_QUEUE_N)))
+      .catch((e) => {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        // The bench still works by drag or by ?a=&b= — say the queue is
+        // unavailable rather than rendering an empty list that looks like
+        // "no pairs found".
+        setFailed(e instanceof Error ? e.message : String(e));
+      });
+    return () => ctrl.abort();
+  }, []);
+
+  if (failed) {
+    return (
+      <section className="panel pair-queue">
+        <div className="notice">Pair queue unavailable — {failed}</div>
+      </section>
+    );
+  }
+  if (!pairs) return <div className="loading">Finding pairs worth comparing…</div>;
+  if (!pairs.length) return null;
+
+  return (
+    <section className="panel pair-queue">
+      <h3>Start from a confusable pair</h3>
+      <p className="meta-line">
+        The {pairs.length} highest-cosine cross-split pairs — one side held out,
+        one side in training. Open one to judge whether it is the same
+        photograph or only a similar scene; the{" "}
+        <Link to="/stats?view=integrity">split-integrity view</Link> is where the
+        counts live.
+      </p>
+      <div className="pair-queue-list">
+        {pairs.map((p) => (
+          <Link key={`${p.a_id}-${p.b_id}`} className="pair-queue-row"
+                to={`/compare?a=${p.a_id}&b=${p.b_id}`}
+                title={`Open #${p.a_id} (${p.a_split}) beside #${p.b_id} (${p.b_split})`}>
+            <img src={p.a_thumb} alt="" loading="lazy" />
+            <img src={p.b_thumb} alt="" loading="lazy" />
+            <span className="pair-queue-score">{p.score.toFixed(3)}</span>
+            <span className="pair-queue-splits">{p.a_split} ↔ {p.b_split}</span>
+          </Link>
+        ))}
       </div>
     </section>
   );
