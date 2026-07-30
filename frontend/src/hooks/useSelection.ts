@@ -44,7 +44,48 @@ export const SCALARS = ["split", "tag", "vlm_tag", "ids", "max_agreement",
  * returned only the first, and the gallery filtered by one facet while the
  * address bar promised two. Nothing errored — the user simply got 392 images
  * where they had asked for 99. */
-const REPEATABLE = ["attr"] as const;
+export const REPEATABLE = ["attr"] as const;
+
+/** The ranked-slice depth every export path has always requested. */
+const EXPORT_RANKED_TOP_K = 500;
+
+/** Serialize the selection vocabulary found in a raw query string into
+ * `/api/export` parameters. The ONE builder behind every export path — the
+ * rail's pills and the palette's "Download current view" — so the two can
+ * never drift: a hand-copied list is how `cluster` once went missing and
+ * 8,000 rows shipped labelled as a slice. Reads the raw string rather than
+ * hook state so it serves any route without the hook mounted; only
+ * recognised keys are copied, so a route's own params (`view`, `a`/`b` on
+ * compare) are ignored, not leaked. */
+export function buildExportParams(
+  search: string, format: "csv" | "jsonl" | "json",
+): URLSearchParams {
+  const params = new URLSearchParams(search);
+  const out = new URLSearchParams();
+  const q = params.get("q");
+  if (q) {
+    out.set("q", q);
+    out.set("mode", params.get("mode") || "hybrid");
+    out.set("top_k", String(EXPORT_RANKED_TOP_K));
+  }
+  for (const k of SCALARS) {
+    const v = params.get(k);
+    if (v) out.set(k, v);
+  }
+  // `getAll`: an intersection of repeatable facets must survive into the
+  // export, or the file is a wider set than the screen it was pressed on.
+  for (const k of REPEATABLE) {
+    for (const v of params.getAll(k)) if (v) out.append(k, v);
+  }
+  for (const axis of AXES) {
+    for (const suffix of ["_min", "_max"] as const) {
+      const v = params.get(`${axis}${suffix}`);
+      if (v) out.set(`${axis}${suffix}`, v);
+    }
+  }
+  out.set("format", format);
+  return out;
+}
 
 export interface Selection {
   /** Query parameters describing the set, ready to spread into an API call. */
@@ -201,16 +242,10 @@ export function useSelection(): Selection {
     setParams(updates);   // the query and mode survive: those are not filters
   }, [setParams]);
 
-  const exportHref = useCallback((format: "csv" | "jsonl" | "json") => {
-    const p = new URLSearchParams();
-    if (query) { p.set("q", query); p.set("mode", mode); p.set("top_k", "500"); }
-    for (const [k, v] of Object.entries(params)) {
-      if (Array.isArray(v)) for (const one of v) p.append(k, one);
-      else p.set(k, String(v));
-    }
-    p.set("format", format);
-    return `/api/export?${p.toString()}`;
-  }, [query, mode, params]);
+  const exportHref = useCallback(
+    (format: "csv" | "jsonl" | "json") =>
+      `/api/export?${buildExportParams(searchParams.toString(), format).toString()}`,
+    [searchParams]);
 
   return {
     params, chips, active: chips.length > 0,

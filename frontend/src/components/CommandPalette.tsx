@@ -1,9 +1,9 @@
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { AXES, AttributeGroup, TagInfo } from "../api/types";
+import { AttributeGroup, TagInfo } from "../api/types";
 import { useHotkey } from "../hooks/useHotkey";
-import { SCALARS } from "../hooks/useSelection";
+import { buildExportParams } from "../hooks/useSelection";
 
 type NavigateFn = ReturnType<typeof useNavigate>;
 
@@ -215,34 +215,11 @@ function downloadCurrentView(search: string): void {
   // hand back all 8,000 rows while the rail beside it said 1,001. (The same
   // ternary in `goToFilteredGallery` above is deliberate and stays: *navigating*
   // in from elsewhere should arrive fresh rather than inherit. Exporting
-  // describes where you already are.) Only recognised keys are copied below, so
-  // a route's own params — `view`, `a`/`b` on compare — are ignored, not leaked.
-  const params = new URLSearchParams(search);
-  const out = new URLSearchParams();
-  const q = params.get("q");
-  if (q) {
-    out.set("q", q);
-    out.set("mode", params.get("mode") || "hybrid");
-    out.set("top_k", "500");
-  }
-  // The selection's own vocabulary, not a copy: a hand-maintained list here
-  // silently dropped `cluster`, exporting the whole corpus labelled as a slice.
-  for (const k of SCALARS) {
-    const v = params.get(k);
-    if (v) out.set(k, v);
-  }
-  // `getAll`: an intersection of attribute facets must survive into the export,
-  // or the CSV is a wider set than the gallery the user pressed the button on.
-  for (const v of params.getAll("attr")) if (v) out.append("attr", v);
-  for (const axis of AXES) {
-    for (const suffix of ["_min", "_max"] as const) {
-      const v = params.get(`${axis}${suffix}`);
-      if (v) out.set(`${axis}${suffix}`, v);
-    }
-  }
-  out.set("format", "csv");
+  // describes where you already are.) Serialization lives in
+  // `buildExportParams` — the same builder the rail's export pills use, so the
+  // two paths cannot drift.
   const a = document.createElement("a");
-  a.href = `/api/export?${out.toString()}`;
+  a.href = `/api/export?${buildExportParams(search, "csv").toString()}`;
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
