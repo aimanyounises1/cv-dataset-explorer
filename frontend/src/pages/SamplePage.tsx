@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, isStatus } from "../api/client";
 import type { SampleCard, SampleDetail } from "../api/types";
+import AgreementBadge from "../components/AgreementBadge";
 import AxisBreakdown from "../components/AxisBreakdown";
 import ErrorState from "../components/ErrorState";
 import AxisLegend from "../components/AxisLegend";
@@ -30,17 +31,6 @@ const activeSimFloor = () => {
     .catch(() => DEFAULT_SIM_FLOOR);
   return floorPromise;
 };
-
-function AgreementBadge({ value }: { value?: number | null }) {
-  if (value == null) return null;
-  const cls = value < 0.05 ? "warn" : value < 0.09 ? "mid" : "ok";
-  return (
-    <span className={`agree-badge ${cls}`}
-          title="SigLIP image-caption agreement (low = suspect caption)">
-      {value.toFixed(3)}
-    </span>
-  );
-}
 
 export default function SamplePage() {
   const { id } = useParams<{ id: string }>();
