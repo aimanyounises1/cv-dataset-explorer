@@ -131,7 +131,7 @@ def ensure_object_label(
         path=([*parent.path, label_name] if parent else [label_name]))
 
 
-def _row_out(conn: sqlite3.Connection, r: sqlite3.Row) -> AnnotationOut:
+def annotation_out(conn: sqlite3.Connection, r: sqlite3.Row) -> AnnotationOut:
     try:
         geometry = json.loads(r["geometry"])
     except ValueError:
@@ -194,7 +194,7 @@ def list_annotations(sample_id: PathId, conn: sqlite3.Connection = Depends(get_c
     _require_sample(conn, sample_id)
     rows = conn.execute(
         "SELECT * FROM annotations WHERE sample_id = ? ORDER BY id", (sample_id,))
-    return [_row_out(conn, r) for r in rows]
+    return [annotation_out(conn, r) for r in rows]
 
 
 @router.post("/samples/{sample_id}/annotations", response_model=AnnotationOut,
@@ -348,7 +348,7 @@ def _accepted_mask_artifacts(
         cutout.save(cutout_file, "PNG")
         return _AcceptedMaskArtifacts(
             row=row,
-            annotation=_row_out(conn, row),
+            annotation=annotation_out(conn, row),
             source_bytes=source_bytes,
             source_width=source_width,
             source_height=source_height,

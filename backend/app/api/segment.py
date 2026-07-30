@@ -31,7 +31,7 @@ from ..schemas import (
 from .annotations import (
     MAX_PER_SAMPLE,
     _require_sample,
-    _row_out,
+    annotation_out,
     canonical_object_name,
     ensure_object_label,
     lookup_object_label,
@@ -229,7 +229,7 @@ def list_segment_annotations(
     rows = conn.execute(
         "SELECT * FROM annotations WHERE sample_id = ? AND kind = 'mask' ORDER BY id",
         (sample_id,))
-    return [_row_out(conn, row) for row in rows]
+    return [annotation_out(conn, row) for row in rows]
 
 
 @router.post("/samples/{sample_id}/segment-annotations",
@@ -330,7 +330,7 @@ def accept_segment_annotation(
         raise
     row = conn.execute(
         "SELECT * FROM annotations WHERE id = ?", (annotation_id,)).fetchone()
-    return _row_out(conn, row)
+    return annotation_out(conn, row)
 
 
 @router.delete("/segment-annotations/{annotation_id}")

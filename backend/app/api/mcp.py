@@ -97,7 +97,7 @@ def _t_similar(conn, args: dict) -> dict:
 
 
 def _t_annotations(conn, args: dict) -> dict:
-    from .annotations import _row_out
+    from .annotations import annotation_out
 
     sid = int(args["sample_id"])
     if conn.execute("SELECT 1 FROM samples WHERE id = ?", (sid,)).fetchone() is None:
@@ -112,7 +112,7 @@ def _t_annotations(conn, args: dict) -> dict:
         "LIMIT ? OFFSET ?",
         (sid, limit, offset),
     )
-    annotations = [_row_out(conn, row).model_dump() for row in rows]
+    annotations = [annotation_out(conn, row).model_dump() for row in rows]
     next_offset = offset + len(annotations)
     return {
         "sample_id": sid,

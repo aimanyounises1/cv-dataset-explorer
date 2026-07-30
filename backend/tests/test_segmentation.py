@@ -479,7 +479,7 @@ def test_export_manifest_uses_one_sqlite_snapshot(ctx, monkeypatch):
     annotation_id = annotation["id"]
     reader = db.connect()
     writer = db.connect()
-    original_row_out = annotations_api._row_out
+    originalannotation_out = annotations_api.annotation_out
     deleted = False
 
     def delete_between_pixel_and_manifest_reads(conn, row):
@@ -491,11 +491,11 @@ def test_export_manifest_uses_one_sqlite_snapshot(ctx, monkeypatch):
             )
             writer.commit()
             deleted = True
-        return original_row_out(conn, row)
+        return originalannotation_out(conn, row)
 
     monkeypatch.setattr(
         annotations_api,
-        "_row_out",
+        "annotation_out",
         delete_between_pixel_and_manifest_reads,
     )
     try:

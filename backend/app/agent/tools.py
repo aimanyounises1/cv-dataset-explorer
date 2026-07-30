@@ -112,7 +112,7 @@ def list_annotations(
     """List the human-saved regions and object masks for one sample, including
     explicit object-label ancestry and mask URLs. Results are paginated; limit
     is capped at 50. This tool never writes."""
-    from ..api.annotations import _row_out
+    from ..api.annotations import annotation_out
 
     conn = db.connect()
     try:
@@ -131,7 +131,7 @@ def list_annotations(
             "LIMIT ? OFFSET ?",
             (sample_id, page_size, start),
         )
-        annotations = [_row_out(conn, row).model_dump() for row in rows]
+        annotations = [annotation_out(conn, row).model_dump() for row in rows]
         next_offset = start + len(annotations)
         return json.dumps({
             "sample_id": sample_id,
