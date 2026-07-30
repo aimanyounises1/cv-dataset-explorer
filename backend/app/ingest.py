@@ -191,8 +191,7 @@ def compute_embeddings_provider(conn, provider: str) -> None:
         snapshot,
         provider=provider,
         emb_dir=emb_dir,
-        prompt_version=(
-            providers.PROMPT_VERSION if provider == "qwen3_vl" else None),
+        prompt_version=providers.PROVIDERS[provider].prompt_version,
         image_encode_seconds=image_seconds,
         caption_encode_seconds=caption_seconds,
     )
@@ -232,7 +231,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="Cap sample count (dev runs)")
     parser.add_argument("--skip-embeddings", action="store_true",
                         help="Skip SigLIP embeddings (disables semantic search/map)")
-    parser.add_argument("--provider", choices=["siglip2", "qwen3_vl"], default="siglip2",
+    parser.add_argument("--provider", choices=list(providers.PROVIDERS), default="siglip2",
                         help="Retrieval provider to embed for. qwen3_vl builds an "
                              "additive index under data/embeddings/qwen3_vl/ and "
                              "leaves the SigLIP index untouched.")

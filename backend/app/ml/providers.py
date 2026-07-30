@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -397,8 +397,7 @@ def _validate_provider_artifact_uncached(
     model_id: str,
     prompt_version: str | None = None,
 ) -> tuple[str | None, dict | None, ModelSnapshot | None]:
-    rebuild_hint = (
-        _SIGLIP_INGEST_HINT if provider == "siglip2" else _QWEN_INGEST_HINT)
+    rebuild_hint = PROVIDERS[provider].ingest_hint
     if not _index_files_present(emb_dir):
         return f"index not built — run `{rebuild_hint}`", None, None
     manifest, manifest_problem = _read_manifest(emb_dir)
@@ -571,7 +570,7 @@ def remove_all_provider_manifests() -> None:
     previous provider manifest stale, including providers that are not being
     rebuilt in the current command.
     """
-    for provider in ("siglip2", "qwen3_vl"):
+    for provider in PROVIDERS:
         remove_manifest(config.emb_dir_for(provider))
     with _validation_lock:
         _validated_artifacts.clear()
@@ -731,7 +730,7 @@ def validated_provider_snapshot(provider: str) -> ModelSnapshot:
         emb_dir,
         provider=provider,
         model_id=model_id,
-        prompt_version=(PROMPT_VERSION if provider == "qwen3_vl" else None),
+        prompt_version=PROVIDERS[provider].prompt_version,
     )
     if problem is not None:
         raise RuntimeError(problem)
@@ -746,13 +745,13 @@ def validated_siglip_snapshot() -> ModelSnapshot:
 
 def validated_provider_artifact(provider: str) -> ValidatedProviderArtifact:
     """Return a provider's cached, generation-bound artifact contract."""
-    if provider not in {"siglip2", "qwen3_vl"}:
+    if provider not in PROVIDERS:
         raise ValueError(f"unknown provider {provider!r}")
     artifact, problem = _validated_provider_artifact(
         config.emb_dir_for(provider),
         provider=provider,
         model_id=provider_model_id(provider),
-        prompt_version=(PROMPT_VERSION if provider == "qwen3_vl" else None),
+        prompt_version=PROVIDERS[provider].prompt_version,
     )
     if problem is not None:
         raise RuntimeError(problem)
@@ -763,8 +762,7 @@ def validated_provider_artifact(provider: str) -> ValidatedProviderArtifact:
 # -- per-provider descriptors -------------------------------------------------
 
 def provider_model_id(name: str) -> str:
-    return {"qwen3_vl": config.QWEN_EMBED_MODEL,
-            "siglip2": config.EMBED_MODEL}[name]
+    return PROVIDERS[name].model_id()
 
 
 def _weights_cached(model_id: str) -> bool:
@@ -792,20 +790,82 @@ def _qwen_stack_problem() -> str | None:
     return None
 
 
+def _siglip_probe(emb_dir: Path) -> Optional[str]:
+    return siglip_manifest_problem(emb_dir, config.EMBED_MODEL)
+
+
+def _qwen_probe(emb_dir: Path) -> Optional[str]:
+    stack_problem = _qwen_stack_problem()
+    if stack_problem is not None:
+        return stack_problem
+    if not _weights_cached(config.QWEN_EMBED_MODEL):
+        return (f"model weights not downloaded — run `{_QWEN_INGEST_HINT}` "
+                "(first run downloads ~4 GB, local afterwards)")
+    return manifest_problem(emb_dir, config.QWEN_EMBED_MODEL)
+
+
+def _siglip_encoder(bound_snapshot: ModelSnapshot):
+    from .embedder import Embedder
+
+    return Embedder(
+        bound_snapshot.snapshot_path,
+        model_id=bound_snapshot.model_id,
+        revision=bound_snapshot.revision,
+        local_files_only=True,
+    )
+
+
+def _qwen_encoder(bound_snapshot: ModelSnapshot):
+    return QwenEncoder(bound_snapshot)
+
+
+@dataclass(frozen=True)
+class ProviderDescriptor:
+    """Everything provider-specific this module dispatches on, in one row.
+
+    Mirrors the dataset adapter registry (app/datasets): adding a retrieval
+    provider is one descriptor here — model id, prompt pinning, ingest hint,
+    availability probe, encoder constructor — consumed by the probe, the
+    manifest validators, ingest's CLI choices, and the agent's system
+    diagram, instead of string-literal branches at each of those sites.
+    """
+    name: str
+    display_name: str
+    model_id: Callable[[], str]   # read config at call time, not import time
+    prompt_version: Optional[str]
+    ingest_hint: str
+    probe: Callable[[Path], Optional[str]]
+    make_encoder: Callable[[ModelSnapshot], Any]
+
+
+PROVIDERS: dict[str, ProviderDescriptor] = {
+    "siglip2": ProviderDescriptor(
+        name="siglip2",
+        display_name="SigLIP 2",
+        model_id=lambda: config.EMBED_MODEL,
+        prompt_version=None,
+        ingest_hint=_SIGLIP_INGEST_HINT,
+        probe=_siglip_probe,
+        make_encoder=_siglip_encoder,
+    ),
+    "qwen3_vl": ProviderDescriptor(
+        name="qwen3_vl",
+        display_name="Qwen3-VL",
+        model_id=lambda: config.QWEN_EMBED_MODEL,
+        prompt_version=PROMPT_VERSION,
+        ingest_hint=_QWEN_INGEST_HINT,
+        probe=_qwen_probe,
+        make_encoder=_qwen_encoder,
+    ),
+}
+
+
 def _probe(name: str) -> Optional[str]:
     """Cheap availability check — no model load, safe on any request path."""
-    emb_dir = config.emb_dir_for(name)
-    if name == "siglip2":
-        return siglip_manifest_problem(emb_dir, config.EMBED_MODEL)
-    if name == "qwen3_vl":
-        stack_problem = _qwen_stack_problem()
-        if stack_problem is not None:
-            return stack_problem
-        if not _weights_cached(config.QWEN_EMBED_MODEL):
-            return (f"model weights not downloaded — run `{_QWEN_INGEST_HINT}` "
-                    "(first run downloads ~4 GB, local afterwards)")
-        return manifest_problem(emb_dir, config.QWEN_EMBED_MODEL)
-    return f"unknown provider {name!r}"
+    desc = PROVIDERS.get(name)
+    if desc is None:
+        return f"unknown provider {name!r}"
+    return desc.probe(config.emb_dir_for(name))
 
 
 def _chain(preferred: str) -> list[str]:
@@ -916,7 +976,7 @@ def load_encoder_for(
 ):
     """Force-load a specific provider's encoder (ingest / benchmarks).
     Raises on failure — callers there want the real error, not a fallback."""
-    if name not in {"siglip2", "qwen3_vl"}:
+    if name not in PROVIDERS:
         raise ValueError(f"unknown provider {name!r}")
     if snapshot is not None and snapshot.model_id != provider_model_id(name):
         raise ValueError(
@@ -932,17 +992,7 @@ def load_encoder_for(
     with _lock:
         if cache_key in _encoders:
             return _encoders[cache_key]
-        if name == "qwen3_vl":
-            enc = QwenEncoder(bound_snapshot)
-        else:
-            from .embedder import Embedder
-
-            enc = Embedder(
-                bound_snapshot.snapshot_path,
-                model_id=bound_snapshot.model_id,
-                revision=bound_snapshot.revision,
-                local_files_only=True,
-            )
+        enc = PROVIDERS[name].make_encoder(bound_snapshot)
         _encoders[cache_key] = enc
         return enc
 
