@@ -75,13 +75,34 @@ def image_url(filename: str) -> str:
 
 
 def row_to_card(row: sqlite3.Row, caption: Optional[str] = None,
-                score: Optional[float] = None) -> SampleCard:
+                score: Optional[float] = None,
+                score_basis: Optional[str] = None) -> SampleCard:
     return SampleCard(
         id=row["id"], filename=row["filename"], split=row["split"],
         width=row["width"], height=row["height"],
         thumb_url=thumb_url(row["filename"]), caption=caption, score=score,
+        score_basis=score_basis,
         axes=axis_scores(row),
     )
+
+
+def hydrate_cards(conn: sqlite3.Connection, scored: list[tuple[int, float]],
+                  score_basis: Optional[str] = None) -> list[SampleCard]:
+    """An (id, score) ranking becomes SampleCards: one SELECT, representative
+    captions, cards in the ranking's own order, ids missing from the DB
+    skipped. The one hydration every bare-list ranking endpoint shares — the
+    block used to be copy-pasted per endpoint, which is how a field added to
+    one list would have gone missing from another."""
+    ids = [sid for sid, _ in scored]
+    if not ids:
+        return []
+    qmarks = ",".join("?" * len(ids))
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT * FROM samples WHERE id IN ({qmarks})", ids)}
+    captions = first_captions(conn, ids)
+    return [row_to_card(rows[sid], caption=captions.get(sid), score=score,
+                        score_basis=score_basis)
+            for sid, score in scored if sid in rows]
 
 
 # A pasted list is how a researcher brings back a set computed somewhere else —

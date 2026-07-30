@@ -169,6 +169,8 @@ def test_similar_images(client):
     assert r.status_code == 200
     top = r.json()[0]
     assert "dog" in top["caption"] and top["id"] != dog_id
+    # A bare-list ranking still names what its score is.
+    assert top["score_basis"] == "cosine"
 
 
 def test_caption_qa_available_and_ordered(client):
@@ -459,6 +461,8 @@ def test_search_by_image_ranks_through_the_same_index(client):
     scores = [c["score"] for c in cards]
     assert all(s is not None for s in scores)
     assert scores == sorted(scores, reverse=True)
+    # "Plain cosines" is a claim the response itself now makes, per card.
+    assert all(c["score_basis"] == "cosine" for c in cards)
 
 
 def test_search_by_image_rejects_non_images(client):

@@ -60,6 +60,7 @@ from .deps import (
     filtered_id_set,
     first_captions,
     get_conn,
+    hydrate_cards,
     id_list,
     id_list_clause,
     parse_id_list,
@@ -539,15 +540,9 @@ async def search_by_image(
         raise HTTPException(400, "The request body is not a decodable image") from None
     vec = embedder.encode_images([img])[0]
     results = index.search(vec, top_k=top_k)
-    ids = [sid for sid, _ in results]
-    if not ids:
-        return []
-    qmarks = ",".join("?" * len(ids))
-    rows = {r["id"]: r for r in conn.execute(
-        f"SELECT * FROM samples WHERE id IN ({qmarks})", ids)}
-    captions = first_captions(conn, ids)
-    return [row_to_card(rows[sid], caption=captions.get(sid), score=score)
-            for sid, score in results if sid in rows]
+    # Plain cosines by design (no hubness penalty — see the docstring); the
+    # bare-list response names that basis on every card.
+    return hydrate_cards(conn, results, score_basis="cosine")
 
 
 # -- composed search ----------------------------------------------------------

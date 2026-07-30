@@ -43,6 +43,9 @@ class SampleCard(BaseModel):
     thumb_url: str
     caption: Optional[str] = None       # representative caption
     score: Optional[float] = None       # search relevance, when applicable
+    score_basis: Optional[str] = None   # what `score` is, on endpoints whose
+                                        # response is a bare list with no
+                                        # envelope to carry the basis
     match_caption: Optional[str] = None  # the caption that explains this match
     matched_terms: Optional[list[str]] = None  # terms to highlight (keyword hits)
     match_paths: Optional[list[MatchPath]] = None  # why this result is here

@@ -21,6 +21,7 @@ from .deps import (
     embeddings_fingerprint,
     first_captions,
     get_conn,
+    hydrate_cards,
     id_list,
     image_url,
     order_by_album_position,
@@ -128,14 +129,9 @@ def similar_samples(
     if index is None:
         raise HTTPException(503, "Embeddings not computed yet — run `python -m app.ingest`.")
     results = index.similar_to(sample_id, top_k=top_k)
-    if not results:
-        return []
-    ids = [sid for sid, _ in results]
-    qmarks = ",".join("?" * len(ids))
-    rows = {r["id"]: r for r in conn.execute(f"SELECT * FROM samples WHERE id IN ({qmarks})", ids)}
-    captions = first_captions(conn, ids)
-    return [row_to_card(rows[sid], caption=captions.get(sid), score=score)
-            for sid, score in results if sid in rows]
+    # Raw index cosines — the same label the MCP similar tool has always
+    # published for this ranking; the bare-list response now carries it too.
+    return hydrate_cards(conn, results, score_basis="cosine")
 
 
 @router.get("/export")

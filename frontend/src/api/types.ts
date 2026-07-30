@@ -34,6 +34,9 @@ export interface SampleCard {
   thumb_url: string;
   caption?: string | null;
   score?: number | null;
+  /** What `score` is (e.g. "cosine") on endpoints that return a bare list
+   * with no envelope to carry the basis. */
+  score_basis?: string | null;
   match_caption?: string | null;
   matched_terms?: string[] | null;
   match_paths?: MatchPath[] | null;
