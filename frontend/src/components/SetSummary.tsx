@@ -80,7 +80,8 @@ export default function SetSummary({ params, active }: {
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `params` is rebuilt every render; `key` is its serialized identity, so
+    // depending on the object itself would refetch on every render.
   }, [open, active, key]);
 
   if (!active) return null;

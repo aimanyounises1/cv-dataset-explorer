@@ -171,9 +171,13 @@ export default function GalleryPage() {
     missing.forEach((id) => {
       api.getSample(id)
         .then((d) => setRefThumbs((prev) => ({ ...prev, [id]: d.thumb_url })))
-        .catch(() => {});
+        .catch(() => {
+          /* A thumbnail that cannot load leaves the chip as id text; the
+           * reference still ranks, so there is nothing here to act on. */
+        });
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // refThumbs is a cache read, not a trigger: depending on it would re-run
+    // this after every thumbnail that lands.
   }, [likeIds, unlikeIds]);
 
   const editRef = (id: number, role: "like" | "unlike", add: boolean) => {
@@ -261,7 +265,9 @@ export default function GalleryPage() {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Mount-once on purpose: the handler only forwards the pasted file to
+    // runImageSearch, whose own reads are setters and the api client — a fresh
+    // subscription per render would change nothing but the listener count.
   }, []);
 
   useEffect(() => {
@@ -318,7 +324,9 @@ export default function GalleryPage() {
   const debouncedInput = useDebounce(input, 400);
   useEffect(() => {
     if (debouncedInput.trim() !== query) setParams({ q: debouncedInput.trim(), page: "" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Runs only when the debounce settles. Depending on `query` too would fire
+    // this again when the URL echoes the trimmed value back mid-typing — the
+    // exact "dogon beach" failure the sync effect above guards against.
   }, [debouncedInput]);
 
   /* The recent-queries dropdown. Choosing an entry writes the URL immediately —
@@ -496,7 +504,9 @@ export default function GalleryPage() {
     };
     void run();
     return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Everything this fetch reads (query, mode, selection params, sort) is
+    // serialized into filterKey — the key IS the dependency list, so listing
+    // the parts as well would only duplicate it less reliably.
   }, [filterKey, page, albumTick]);
 
   // The URL remains the source of truth: touching any filter, query or page
@@ -561,7 +571,6 @@ export default function GalleryPage() {
     return () => ctrl.abort();
     // groupThumbs is a cache read inside, never a trigger: depending on it
     // would re-run this effect with every arriving thumbnail.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, scenarios]);
 
   /** The whole ranking, kept: an album named after the query, from the ids on

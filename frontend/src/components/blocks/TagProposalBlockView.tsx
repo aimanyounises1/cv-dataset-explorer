@@ -47,12 +47,13 @@ export default function TagProposalBlockView({ block }: { block: TagProposalBloc
       // id tiles below, so the proposal stays reviewable without pictures.
       .catch(() => { if (!ctrl.signal.aborted) setThumbs([]); });
     return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `ids` is a fresh array each render; `idKey` is its identity, so the
+    // fetch re-runs only when the membership actually changes.
   }, [idKey]);
 
-  // A proposal that changes underneath is a different proposal.
+  // A proposal that changes underneath is a different proposal. Keyed by
+  // idKey for the same identity reason as the thumbnail fetch above.
   useEffect(() => { setPicked(new Set(ids)); setState({ phase: "open" });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idKey]);
 
   const byId = useMemo(() => {
