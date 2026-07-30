@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { QASelection, QASummary, SuspectCaption } from "../api/types";
+import ErrorState from "../components/ErrorState";
 import { Segmented } from "../components/controls";
 import { SURFACE, sequential } from "../lib/viz";
 import { VERDICTS, VERDICT_PREFIX } from "../lib/verdicts";
@@ -202,7 +203,7 @@ export default function QualityPage() {
   const belowCount = exact ? selection!.captions : binnedBelow;
   const totalScored = summary?.scored_captions ?? 0;
 
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <ErrorState error={error} />;
   if (!summary) return <div className="loading">Loading QA…</div>;
 
   if (!summary.available) {

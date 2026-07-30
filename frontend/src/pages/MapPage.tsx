@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ApiError, api } from "../api/client";
 import { AXES } from "../api/types";
 import type { MapPoint } from "../api/types";
+import ErrorState from "../components/ErrorState";
 import MapWorkingSet, { ISOLATED_N } from "../components/MapWorkingSet";
 import ScatterPlot from "../components/ScatterPlot";
 import type {
@@ -414,7 +415,7 @@ export default function MapPage() {
     }
   };
 
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <ErrorState error={error} />;
   if (points === null) return <div className="loading">Loading embedding map…</div>;
   if (points.length === 0) {
     return (

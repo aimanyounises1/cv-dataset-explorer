@@ -4,6 +4,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { EvalResponse } from "../api/types";
+import ErrorState from "../components/ErrorState";
 import { AXIS_STROKE, GRID_STROKE, SERIES, SURFACE, TOOLTIP_STYLE } from "../lib/viz";
 
 /* The three retrieval modes, in three colours checked as a set rather than
@@ -83,7 +84,7 @@ export default function EvalPage() {
         {running ? "Running benchmark…" : result ? "Re-run benchmark" : "Run benchmark"}
       </button>
 
-      {error && <div className="error">{error}</div>}
+      {error && <ErrorState error={error} />}
       {/* Any message, not only the unavailable one. The benchmark also attaches a
           message to an AVAILABLE result — when it could not encode the queries
           live and fell back to stored caption vectors, which is a different

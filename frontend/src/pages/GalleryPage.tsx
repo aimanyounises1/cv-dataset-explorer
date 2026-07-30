@@ -8,6 +8,7 @@ import AxisLegend from "../components/AxisLegend";
 import SearchSettings from "../components/SearchSettings";
 import { ALBUMS_CHANGED, albumsChanged } from "../components/AlbumShelf";
 import AlbumHeader from "../components/AlbumHeader";
+import ErrorState from "../components/ErrorState";
 import FindingsRow from "../components/FindingsRow";
 import ImageCard from "../components/ImageCard";
 import ScoreDistribution, { COSINE_BASES } from "../components/ScoreDistribution";
@@ -824,7 +825,7 @@ export default function GalleryPage() {
       {!query && !selection.active && <FindingsRow />}
 
       {notice && <div className="notice">{notice}</div>}
-      {error && <div className="error">{error}</div>}
+      {error && <ErrorState error={error} />}
 
       {/* Keyword ranking cannot discriminate on a term that most of the corpus
           shares, and a term nothing matches explains an empty page. Say both. */}

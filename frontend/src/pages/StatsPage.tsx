@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { AttributeGroup, CaptionStats, DuplicatePair, StatsOverview } from "../api/types";
+import ErrorState from "../components/ErrorState";
 import LeakagePanel from "../components/LeakagePanel";
 import { AXIS_STROKE, GRID_STROKE, SERIES, TOOLTIP_STYLE } from "../lib/viz";
 import "../styles/profile.css";
@@ -82,7 +83,7 @@ export default function StatsPage() {
     api.coverage().then(setCoverage).catch(fail("zero-shot prompt slices"));
   }, []);
 
-  if (error) return <div className="error">{error}</div>;
+  if (error) return <ErrorState error={error} />;
   if (!overview) return <div className="loading">Loading statistics…</div>;
 
   const splitData = Object.entries(overview.splits).map(([name, count]) => ({ name, count }));
