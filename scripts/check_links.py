@@ -16,28 +16,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LINK = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)\)")
 EXTERNAL = ("http://", "https://", "mailto:", "#")
-# Generated data and ignored agent/IDE control planes are not repository
-# documentation. A locally installed skill may contain its own partial link
-# graph; treating that as this project's broken README makes the check depend on
-# one developer's tooling rather than the submitted tree.
-SKIP_DIRS = {
-    "node_modules",
-    ".venv",
-    "data",
-    "dist",
-    ".agents",
-    ".claude",
-    ".codex",
-    ".omc",
-    ".coordination",
-}
+# Generated data, dependency trees, and hidden tool directories are not
+# repository documentation; checking them would make the result depend on one
+# developer's local tooling rather than on the submitted tree. .github is the
+# one hidden directory whose Markdown faces reviewers, so it stays in scope.
+SKIP_DIRS = {"node_modules", "data", "dist"}
+
+
+def _skipped(parts: tuple[str, ...]) -> bool:
+    return any(
+        part in SKIP_DIRS or (part.startswith(".") and part != ".github")
+        for part in parts
+    )
 
 
 def main() -> int:
     broken: list[str] = []
     checked = 0
     for md in sorted(ROOT.rglob("*.md")):
-        if SKIP_DIRS & set(md.parts):
+        if _skipped(md.parts):
             continue
         for target in LINK.findall(md.read_text(encoding="utf-8")):
             if target.startswith(EXTERNAL):

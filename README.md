@@ -127,6 +127,10 @@ python -c "from huggingface_hub import snapshot_download; snapshot_download(repo
 python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='facebook/sam2.1-hiera-tiny', revision='de431c4043854a71d8101e17995dfe596bf101a5')"
 ```
 
+A detector query is free text: one phrase, or several separated by periods
+(`a person. a dog.`). The backend normalizes input to the detector's own
+candidate-label format, so `dog` and `a dog.` describe the same query.
+
 ### LangChain/LangGraph assistant
 
 The assistant remains available as an optional, experimental interface over

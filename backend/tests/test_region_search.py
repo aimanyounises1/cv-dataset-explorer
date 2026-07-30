@@ -158,6 +158,25 @@ def test_detect_validates_input(ctx):
     ).status_code == 422
 
 
+def test_phrases_from_matches_the_processor_candidate_label_contract():
+    """The processor normalizes only a LIST of dot-free phrases; the helper
+    turns the period-separated wire format into exactly that list."""
+    from app.ml.detect import phrases_from
+
+    assert phrases_from("dog") == ["dog"]
+    assert phrases_from("a dog. a cat.") == ["a dog", "a cat"]
+    assert phrases_from("...") == []
+
+
+def test_detect_rejects_queries_with_no_phrases(ctx):
+    """Pydantic rejects an all-period query before the availability check —
+    a 422, never a 500 from an empty candidate-label list."""
+    client, sids = ctx
+    r = client.post("/api/detect", json={"sample_id": sids[0], "queries": "..."})
+    assert r.status_code == 422
+    assert "at least one phrase" in str(r.json()["detail"])
+
+
 def test_detect_returns_server_bound_proposal_tokens(ctx, monkeypatch):
     client, sids = ctx
     from app.ml import detect as detect_ml

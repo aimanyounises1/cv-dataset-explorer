@@ -29,17 +29,3 @@ uv.lock
 # IDE / local tooling
 .idea/
 .jbeval/
-.omc/
-.claude/
-.agents/
-.codex/
-skills-lock.json
-
-# Local working notes, not part of the submission
-.handoff/
-# The live Claude/Codex ownership channel. Working material in exactly the same
-# sense as .handoff/ — it records who is editing which file right now, not
-# anything a reader of the submission needs.
-.coordination/
-CLAUDE.md
-CLAUDE.local.md

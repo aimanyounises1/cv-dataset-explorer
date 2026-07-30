@@ -12,7 +12,7 @@ disqualify the model and the fourth decides whether it is worth shipping at
 all:
 
   1. Dependency cost. SAM2 must come from the *pinned* transformers, or it is
-     a new dependency and therefore out (see the hard rule in CLAUDE.md).
+     a new dependency and therefore out — this repository adds none.
      The script prints the transformers version it used and the model class.
   2. Speed and memory: cold load, warm ms per mask for a BOX prompt and for a
      POINT prompt, peak RSS, MPS driver bytes.
@@ -427,7 +427,7 @@ def main() -> int:
                     help="interleaved box/point/embed calls in the stability loop")
     ap.add_argument("--retrieval", type=int, default=12,
                     help="regions compared as rectangle-crop vs masked-crop queries")
-    ap.add_argument("--overlays", default="/private/tmp/claude-501/sam2_overlays",
+    ap.add_argument("--overlays", default="/tmp/sam2_overlays",
                     help="directory for overlay PNGs")
     ap.add_argument("--overlay-count", type=int, default=4)
     ap.add_argument("--isolate", action="store_true",

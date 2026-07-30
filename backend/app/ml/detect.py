@@ -136,6 +136,21 @@ def detect_ready() -> tuple[bool, Optional[str]]:
     return state.ready, state.reason
 
 
+def phrases_from(queries: str) -> list[str]:
+    """Split a period-separated query string into dot-free phrases.
+
+    The installed processor (transformers 5.14.1) applies its documented
+    candidate-label normalization — strip, lowercase, ``". ".join(labels)
+    + "."`` — only to a list/tuple of strings with no ``.`` inside any item
+    (``_is_list_of_candidate_labels`` / ``_merge_candidate_labels_text``).
+    A raw string bypasses that path entirely, so natural input like ``"dog"``
+    reached the model unnormalized and failed. Splitting here keeps the wire
+    format (one period-separated string) while handing the library the list
+    form it normalizes itself.
+    """
+    return [phrase.strip() for phrase in queries.split(".") if phrase.strip()]
+
+
 class _Detector:
     def __init__(self, snapshot=None):
         import torch
@@ -166,7 +181,9 @@ class _Detector:
         """Normalized [0..1] boxes for period-separated phrase queries."""
         torch = self._torch
         with self._infer, torch.no_grad():
-            inputs = self.processor(images=image, text=queries,
+            # The processor normalizes candidate labels only when given a
+            # list of dot-free phrases; a raw string would bypass that path.
+            inputs = self.processor(images=image, text=phrases_from(queries),
                                     return_tensors="pt").to(self.device)
             out = self.model(**inputs)
             res = self.processor.post_process_grounded_object_detection(

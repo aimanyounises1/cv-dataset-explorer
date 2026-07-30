@@ -62,6 +62,10 @@ class DetectRequest(BaseModel):
         normalized = " ".join(value.split())
         if len(normalized) < 3:
             raise ValueError("queries must contain a detector phrase")
+        # Periods only separate phrases; input like "..." carries none.
+        if not detect_ml.phrases_from(normalized):
+            raise ValueError(
+                "queries must contain at least one phrase between periods")
         return normalized
 
 
