@@ -183,29 +183,41 @@ def agent_topology():
     }
 
 
+async def _prepare_turn(messages: list[ChatMessage]):
+    """Everything both chat endpoints do before the graph runs: validate the
+    closing user message, probe Ollama, build the graph, bound the context
+    window, and assemble the initial LangGraph state. One definition because
+    the state dict is a schema — a field added to one endpoint's literal and
+    not the other's would quietly break the stream route's documented "same
+    orchestration as POST /chat". Runs inside the caller's turn deadline."""
+    if not messages or messages[-1].role != "user":
+        raise HTTPException(400, "Last message must be from the user.")
+    await _check_ollama()
+    graph = _get_graph()
+
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    lc_messages = [
+        HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
+        for m in messages[-10:]  # bound context
+    ]
+    state = {"messages": lc_messages, "routes": [], "retries": 0,
+             "claims_to_verify": [], "lanes_ok": [], "lanes_failed": []}
+    return graph, lc_messages, state
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     messages: list[ChatMessage] = Body(..., embed=True),
     conn: sqlite3.Connection = Depends(get_conn),
 ):
-    if not messages or messages[-1].role != "user":
-        raise HTTPException(400, "Last message must be from the user.")
     started = time.monotonic()
     deadline = asyncio.get_running_loop().time() + config.AGENT_TURN_BUDGET
     try:
         async with asyncio.timeout_at(deadline):
-            await _check_ollama()
-            graph = _get_graph()
-
-            from langchain_core.messages import AIMessage, HumanMessage
-
-            lc_messages = [
-                HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
-                for m in messages[-10:]  # bound context
-            ]
+            graph, lc_messages, state = await _prepare_turn(messages)
             result = await graph.ainvoke(
-                {"messages": lc_messages, "routes": [], "retries": 0,
-                 "claims_to_verify": [], "lanes_ok": [], "lanes_failed": []},
+                state,
                 config={"recursion_limit": 40},
             )
             elapsed = time.monotonic() - started
@@ -246,23 +258,11 @@ async def chat_stream(
     stream — real node transitions, never a staged animation — then one
     `{"type":"final","response":{...}}` carrying the exact POST /chat payload.
     """
-    if not messages or messages[-1].role != "user":
-        raise HTTPException(400, "Last message must be from the user.")
     started = time.monotonic()
     deadline = asyncio.get_running_loop().time() + config.AGENT_TURN_BUDGET
     try:
         async with asyncio.timeout_at(deadline):
-            await _check_ollama()
-            graph = _get_graph()
-
-            from langchain_core.messages import AIMessage, HumanMessage
-
-            lc_messages = [
-                HumanMessage(m.content) if m.role == "user" else AIMessage(m.content)
-                for m in messages[-10:]
-            ]
-            state = {"messages": lc_messages, "routes": [], "retries": 0,
-                     "claims_to_verify": [], "lanes_ok": [], "lanes_failed": []}
+            graph, lc_messages, state = await _prepare_turn(messages)
     except HTTPException:
         raise
     except TimeoutError as exc:
