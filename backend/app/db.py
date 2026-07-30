@@ -32,6 +32,8 @@ COCO_ROOT_LABELS = ("person",)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS samples (
     id INTEGER PRIMARY KEY,
+    -- Provenance for exports/manifests, never a filter: the contract is one
+    -- corpus per data directory (see app/datasets/__init__.py).
     dataset TEXT NOT NULL,
     filename TEXT NOT NULL UNIQUE,
     split TEXT NOT NULL,
