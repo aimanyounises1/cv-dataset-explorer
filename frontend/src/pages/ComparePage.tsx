@@ -2,9 +2,10 @@ import {
   useCallback, useEffect, useRef, useState,
 } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ApiError, api } from "../api/client";
+import { api } from "../api/client";
 import {
-  AXES, LeakagePair, SampleCard, SegmentAnnotation, SegmentBox,
+  AXES, AxisScores, LeakagePair, SampleCard, SampleDetail, SegmentAnnotation,
+  SegmentBox,
 } from "../api/types";
 import ImageCard from "../components/ImageCard";
 import VisionComparePanel from "../components/VisionComparePanel";
@@ -56,19 +57,6 @@ const STAGE_TITLE =
   + "magnification in each pane header is a button: it snaps to 1:1, one "
   + "source pixel per screen pixel.";
 
-interface SampleDetail {
-  id: number;
-  filename: string;
-  split: string;
-  width: number;
-  height: number;
-  image_url: string;
-  thumb_url: string;
-  vlm_tags: string[];
-  attributes: Record<string, string>;
-  cluster: number | null;
-  axes: Record<string, number | object | null>;
-}
 interface View { s: number; tx: number; ty: number }
 
 /** What one region query produced. `scoreBasis` travels with the items because
@@ -83,12 +71,6 @@ interface RegionResult {
 
 const REST_VIEW: View = { s: 1, tx: 0, ty: 0 };
 
-async function getJSON<T>(path: string): Promise<T> {
-  const r = await fetch(path);
-  if (!r.ok) throw new ApiError(r.status, await r.text());
-  return r.json() as Promise<T>;
-}
-
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** Zoom about a point given in the layer's own (untransformed) coordinates:
@@ -100,7 +82,9 @@ function zoomedView(v: View, factor: number, px: number, py: number): View {
 }
 
 function axisValue(sample: SampleDetail, axis: string): number | null {
-  const v = sample.axes[axis];
+  // The canonical type allows absent axes; a non-number (or nothing) reads as
+  // "not measured", exactly as before the page kept its own copy of the type.
+  const v: unknown = sample.axes?.[axis as keyof AxisScores];
   return typeof v === "number" ? v : null;
 }
 
@@ -122,7 +106,7 @@ function useSample(id: number | null) {
     if (id == null) { setState({ data: null, error: null }); return; }
     let live = true;
     setState({ data: null, error: null });
-    getJSON<SampleDetail>(`/api/samples/${id}`)
+    api.getSample(id)
       .then((d) => { if (live) setState({ data: d, error: null }); })
       .catch((e: unknown) => { if (live) setState({ data: null, error: String(e) }); });
     return () => { live = false; };
@@ -158,7 +142,7 @@ export default function ComparePage() {
     if (aId == null || bId == null) { setSim(null); return; }
     let live = true;
     setSim(null);
-    getJSON<SampleCard[]>(`/api/samples/${aId}/similar?top_k=60`)
+    api.similar(aId, 60)
       .then((cards) => {
         if (!live) return;
         const i = cards.findIndex((c) => c.id === bId);
@@ -498,10 +482,16 @@ function Pane({
     } catch { /* some other drag's payload — not ours to interpret */ }
   };
 
+  // The server does not promise dimensions for every sample; everything that
+  // claims a pixel ratio (the magnification readout, 1:1, the aspect box)
+  // hinges on them being known, so the claim is never fabricated.
+  const dims = sample && sample.width != null && sample.height != null
+    ? { w: sample.width, h: sample.height } : null;
+
   // Displayed pixels per source pixel — the number a loupe exists to make
   // answerable ("is that blocking eight source pixels wide, or two?").
   // `view.s` cannot answer it: at rest it is 1 whatever the layout did.
-  const mag = sample && layerBox.w > 0 ? (layerBox.w * view.s) / sample.width : null;
+  const mag = dims && layerBox.w > 0 ? (layerBox.w * view.s) / dims.w : null;
 
   const pct = (r: SegmentBox): React.CSSProperties => ({
     left: `${r.x * 100}%`,
@@ -546,16 +536,16 @@ function Pane({
                 states the ratio at rest, and clicking it snaps to 1:1. It
                 borrows `.legend-pick`, which exists for exactly this — a
                 fact first, a control second, its border arriving on hover. */}
-            {mag != null && (
+            {mag != null && dims && (
               <button
                 type="button"
                 className="pane-id legend-pick"
                 title={`${mag.toFixed(2)} screen pixels per source pixel of the `
-                  + `${sample.width}×${sample.height} original. Click for 1:1 — `
+                  + `${dims.w}×${dims.h} original. Click for 1:1 — `
                   + "actual pixels, recentred. Both panes share one transform, "
                   + "so the other lands at its own ratio."}
                 onClick={() => setView(
-                  actualPixelView(layerBox.w, layerBox.h, sample.width))}
+                  actualPixelView(layerBox.w, layerBox.h, dims.w))}
               >
                 {mag.toFixed(2)}×
               </button>
@@ -593,8 +583,11 @@ function Pane({
               // shape. Both are set from one pair of fields so they cannot
               // disagree.
               style={{
-                aspectRatio: `${sample.width} / ${sample.height}`,
-                "--ar": `${sample.width / sample.height}`,
+                // Without known dimensions there is no ratio to assert; the
+                // stylesheet's default box applies instead of a made-up shape.
+                ...(dims
+                  ? { aspectRatio: `${dims.w} / ${dims.h}`, "--ar": `${dims.w / dims.h}` }
+                  : {}),
                 transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.s})`,
               } as React.CSSProperties}
             >

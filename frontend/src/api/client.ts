@@ -119,7 +119,8 @@ export const api = {
   listSamples: (params: Params, signal?: AbortSignal) =>
     get<SampleList>("/samples", params, signal),
   getSample: (id: number | string) => get<SampleDetail>(`/samples/${id}`),
-  similar: (id: number | string) => get<SampleCard[]>(`/samples/${id}/similar`),
+  similar: (id: number | string, topK?: number) =>
+    get<SampleCard[]>(`/samples/${id}/similar`, { top_k: topK }),
   search: (q: string, mode: SearchMode, filters: Params, signal?: AbortSignal) =>
     get<SearchResponse>("/search", { q, mode, ...filters }, signal),
   /** Composed retrieval: text pulls, reference images pull, negatives push.
