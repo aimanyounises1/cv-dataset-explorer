@@ -1,0 +1,5 @@
+# One maintainer, so every path has the same owner. Written down anyway: a
+# review request becomes automatic instead of remembered, and the day a second
+# person works on the backend or the frontend, the split has a place to be
+# stated rather than a convention to be discovered.
+*   @aimanyounises1

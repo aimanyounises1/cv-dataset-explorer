@@ -1,0 +1,25 @@
+# Editor defaults that match checks this repository already runs: ruff's
+# line-length 100 (backend/pyproject.toml) and the two-space indentation the
+# frontend is written in. Nothing here is a new rule. It exists so an editor
+# cannot introduce a diff that `ruff check app tests` or `npm run build` then
+# argues with.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+[*.{ts,tsx,js,jsx,css,json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+# Two trailing spaces are a hard line break in Markdown, so here they are
+# content rather than whitespace to clean up.
+trim_trailing_whitespace = false

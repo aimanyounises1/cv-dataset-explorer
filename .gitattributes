@@ -1,0 +1,19 @@
+# Line endings are normalized in the repository so a Windows checkout cannot
+# turn the whole tree into a CRLF diff. The README documents a Windows setup
+# path (.\.venv\Scripts\Activate.ps1), which is the case that would otherwise
+# produce one.
+* text=auto eol=lf
+
+# Never normalized, never diffed as text. The curated product screenshots under
+# assets/ are the only committed images; *.npy is named because the embedding
+# artifacts are generated locally, and a stray one must not arrive as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.npy binary
+
+# Generated, not authored: kept out of the language statistics and collapsed by
+# default in review.
+frontend/package-lock.json linguist-generated=true
