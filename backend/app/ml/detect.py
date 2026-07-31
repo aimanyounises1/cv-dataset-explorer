@@ -191,6 +191,15 @@ class _Detector:
                 text_threshold=threshold, target_sizes=[image.size[::-1]])[0]
         W, H = image.size
         boxes = []
+        # Nothing cleared the threshold. Returned early because the label list
+        # is NOT empty in that case: post_process_grounded_object_detection
+        # decodes one phrase per surviving query, and with none surviving it
+        # still yields a single [""] — so the strict zip below saw 0 boxes
+        # against 1 label and raised, surfacing an honest "no regions" answer
+        # as a 500. Measured on transformers 5.14.1 with a query whose best
+        # score falls under the threshold: boxes=0, scores=0, text_labels=[""].
+        if len(res["boxes"]) == 0:
+            return []
         # transformers renamed this key; falling back to unlabelled boxes keeps
         # the count aligned, so a rename can never silently drop detections.
         labels = (res.get("text_labels") or res.get("labels")

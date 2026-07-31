@@ -268,6 +268,55 @@ def test_detector_model_load_uses_one_resolved_snapshot_offline(
     assert loaded.revision == config.DETECT_REVISION
 
 
+def test_detector_reports_no_regions_instead_of_raising():
+    """Nothing above the threshold is an answer, not a crash.
+
+    post_process_grounded_object_detection decodes one phrase per surviving
+    query, and when none survive it still returns a single [""] — so pairing
+    boxes with labels strictly saw 0 against 1 and raised, which reached the
+    browser as a bare 500. Measured against transformers 5.14.1 with a query
+    whose best score falls under the threshold.
+    """
+    import threading
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    from app.ml import detect as detect_ml
+
+    class Empty:
+        def tolist(self):
+            return []
+
+        def __len__(self):
+            return 0
+
+    class Inputs(dict):
+        def __init__(self):
+            super().__init__(input_ids=[])
+            self.input_ids = self["input_ids"]
+
+        def to(self, _device):
+            return self
+
+    class Processor:
+        def __call__(self, **_kwargs):
+            return Inputs()
+
+        def post_process_grounded_object_detection(self, *_args, **_kwargs):
+            return [{"boxes": Empty(), "scores": Empty(), "text_labels": [""]}]
+
+    detector = object.__new__(detect_ml._Detector)
+    detector.device = "cpu"
+    detector.processor = Processor()
+    detector.model = lambda **_kwargs: object()
+    detector._torch = SimpleNamespace(no_grad=lambda: nullcontext())
+    detector._infer = threading.Lock()
+
+    assert detector.detect(Image.new("RGB", (100, 100)), "a zebra.") == []
+
+
 def test_detector_clips_boxes_and_preserves_thin_positive_geometry():
     """Transformers rescales Grounding DINO boxes but does not clip them."""
     from app.ml import detect as detect_ml
@@ -278,6 +327,11 @@ def test_detector_clips_boxes_and_preserves_thin_positive_geometry():
 
         def tolist(self):
             return self.values
+
+        def __len__(self):
+            # Real post-processing hands back tensors, which are sized; the
+            # detector asks how many boxes survived before it pairs them up.
+            return len(self.values)
 
     class Inputs(dict):
         def __init__(self):
