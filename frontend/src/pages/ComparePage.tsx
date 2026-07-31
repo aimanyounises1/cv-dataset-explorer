@@ -214,6 +214,9 @@ export default function ComparePage() {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+      const engaged = document.activeElement?.closest(".pane-stage")
+        || document.querySelector(".pane-stage:hover");
+      if (!engaged) return;
       const zoom = (factor: number) => setView((v) => {
         const layer = document.querySelector<HTMLElement>(".compare-img-layer");
         if (!layer) return v;
@@ -566,6 +569,7 @@ function Pane({
           <div
             ref={stageRef}
             className={`pane-stage${drawMode ? " drawing" : ""}`}
+            tabIndex={0}
             title={STAGE_TITLE}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
