@@ -220,6 +220,28 @@ backend/data/          generated local database, images, indexes, and reports
 scripts/               benchmarks, validation, link checks, and UI smoke tests
 ```
 
+The same shape, as a request-flow diagram:
+
+```mermaid
+flowchart LR
+    subgraph Ingest["Offline ingest"]
+        HF["Flickr8k on Hugging Face<br/>(pinned commit)"] --> ING["app.ingest"]
+        ING --> DB[("SQLite")]
+        ING --> EMB["SigLIP 2 embeddings<br/>+ quality signals"]
+    end
+
+    subgraph Runtime["Local runtime, one machine"]
+        UI["React 18 + TypeScript UI"] -- REST --> API["FastAPI"]
+        API --> DB
+        API --> SEARCH["Exact NumPy cosine search"]
+        EMB --> SEARCH
+        API -. optional .-> VLM["Ollama vision models"]
+        API -. optional .-> DET["Grounding DINO + SAM 2.1"]
+        API --> MCP["Read-only MCP surface"]
+    end
+```
+
+
 Search state lives in the URL, so an investigation can be shared as a link.
 The gallery, exports, REST API, MCP tools, and assistant all reuse the same
 ranking service rather than implementing competing search logic.
