@@ -2,6 +2,9 @@
 
 [![CI](https://github.com/aimanyounises1/cv-dataset-explorer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aimanyounises1/cv-dataset-explorer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](backend/requirements.txt)
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](frontend/package.json)
+[![Ruff](https://img.shields.io/badge/lint-ruff-D7FF64.svg)](backend/pyproject.toml)
 
 A local workspace for exploring, auditing, comparing, and curating the
 [Flickr8k](https://huggingface.co/datasets/jxie/flickr8k) image-caption dataset.
