@@ -836,13 +836,6 @@ class DetectBoxOut(SegmentBox):
     parent_name: str | None = None
     label_path: list[str] = Field(default_factory=list)
     proposal_token: str = Field(..., min_length=64, max_length=4_096)
-    # What a second, independent model sees in this crop. `score` above is the
-    # detector's phrase-alignment, which has no way to say "absent" — these say
-    # whether the phrase actually beat the alternatives. None = not checked.
-    verified: bool | None = None
-    verified_score: float | None = None
-    best_alternative: str | None = None
-    alternative_score: float | None = None
 
 
 class DetectResponse(BaseModel):

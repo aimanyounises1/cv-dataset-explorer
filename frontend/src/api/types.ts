@@ -227,13 +227,6 @@ export interface DetectBox extends SegmentBox {
   label_path?: string[] | null;
   score: number;
   proposal_token: string;
-  /** A second model's read of the same crop. `score` above is the detector's
-   * phrase alignment, which cannot say "absent"; these say whether the phrase
-   * actually beat the alternatives. null/undefined = not checked. */
-  verified?: boolean | null;
-  verified_score?: number | null;
-  best_alternative?: string | null;
-  alternative_score?: number | null;
 }
 
 export interface DetectResponse {

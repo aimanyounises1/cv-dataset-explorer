@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .. import config
 from ..ml import detect as detect_ml
-from ..ml.verify_regions import verify_regions
 from ..proposal_tokens import issue_detection_proposal
 from ..schemas import (
     DetectionProposalSource,
@@ -86,10 +85,6 @@ def detect_regions(body: DetectRequest,
     except OSError as exc:
         raise HTTPException(503, f"Image file unreadable: {row['filename']}") from exc
     boxes = detector.detect(img, body.queries)
-    # The detector cannot answer "not present" — it returns the best-matching
-    # region for any phrase. A second model scores the crop it produced, so a
-    # proposal arrives with a verdict instead of only a confidence.
-    verify_regions(img, boxes, body.queries)
     for box in boxes:
         resolved = lookup_object_label(conn, box["label"])
         box["label_name"] = (resolved.name if resolved is not None
