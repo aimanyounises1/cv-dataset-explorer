@@ -58,7 +58,10 @@ export default function FilterPanel() {
             updates[`${a}_min`] = r && r[0] != null ? String(r[0]) : "";
             updates[`${a}_max`] = r && r[1] != null ? String(r[1]) : "";
           }
-          sel.set(updates);
+          // Replaces: the dual-range emits on `onInput`, so a single drag
+          // through a range would otherwise bury the previous view under one
+          // history entry per pixel travelled.
+          sel.set(updates, { replace: true });
         }}
       />
 

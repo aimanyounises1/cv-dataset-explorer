@@ -107,8 +107,11 @@ export interface Selection {
   remove: (key: string) => void;
   clearAll: () => void;
   /** Write filter parameters. Empty string deletes. Any control that narrows the
-   * corpus goes through here, from whichever pane it happens to live in. */
-  set: (updates: Record<string, string | string[]>) => void;
+   * corpus goes through here, from whichever pane it happens to live in.
+   * Pushes a history entry so Back undoes the change; pass `{replace: true}`
+   * from controls that emit a stream of values rather than one decision. */
+  set: (updates: Record<string, string | string[]>,
+        options?: { replace?: boolean }) => void;
   /** The four axis ranges, in the shape `AxisFilters` expects. */
   axisRanges: Partial<Record<Axis, [number | null, number | null]>>;
 }
@@ -199,7 +202,25 @@ export function useSelection(): Selection {
     return null;
   }, [get, axisRanges, chips.length, searchParams]);
 
-  const setParams = useCallback((updates: Record<string, string | string[]>) => {
+  /** Write filter parameters.
+   *
+   * Discrete choices PUSH a history entry, so Back undoes the filter a person
+   * just applied. Every write used to replace, which meant two filter clicks
+   * left `history.length` at 2 and the first Back press left the application
+   * entirely — measured: `/` → `?split=train` → `?split=validation` → Back →
+   * about:blank. For a product whose thesis is that the URL is the state, a
+   * back button that cannot walk that state was the sharpest contradiction in
+   * it.
+   *
+   * `replace` is for controls that emit a stream rather than a decision — a
+   * slider dragged through twenty values, a debounced query still being typed,
+   * a "load more" that deepens the same view. Those must not leave twenty
+   * entries between the reader and where they came from.
+   */
+  const setParams = useCallback((
+    updates: Record<string, string | string[]>,
+    options?: { replace?: boolean },
+  ) => {
     setSearchParams((prev) => {
       const p = new URLSearchParams(prev);
       for (const [k, v] of Object.entries(updates)) {
@@ -213,7 +234,7 @@ export function useSelection(): Selection {
         else p.delete(k);
       }
       return p;
-    }, { replace: true });
+    }, { replace: options?.replace ?? false });
   }, [setSearchParams]);
 
   const remove = useCallback((key: string) => {
@@ -227,7 +248,9 @@ export function useSelection(): Selection {
         for (const v of keep) p.append(k, v);
         p.delete("page");
         return p;
-      }, { replace: true });
+        // Pushes, like the other two branches below: dropping one facet of an
+        // intersection is a decision, and Back should put it back.
+      }, { replace: false });
     } else if ((AXES as readonly string[]).includes(key)) {
       setParams({ [`${key}_min`]: "", [`${key}_max`]: "", page: "" });
     } else {

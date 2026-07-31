@@ -300,7 +300,14 @@ export default function GalleryPage() {
   // Publish the result order for keyboard triage on the sample page.
   useEffect(() => { saveResultOrder(items.map((s) => s.id)); }, [items]);
 
-  const setParams = (updates: Record<string, string>) => {
+  /* Mirrors `useSelection.set`, including its history rule: a discrete choice
+   * (a mode, a sort, an album) pushes so Back undoes it, while controls that
+   * emit a stream — the debounced query, "load more" — pass replace. Every
+   * write used to replace, which left the first Back press exiting the app. */
+  const setParams = (
+    updates: Record<string, string>,
+    options?: { replace?: boolean },
+  ) => {
     setSearchParams((prev) => {
       const p = new URLSearchParams(prev);
       for (const [k, v] of Object.entries(updates)) {
@@ -308,7 +315,7 @@ export default function GalleryPage() {
         else p.delete(k);
       }
       return p;
-    }, { replace: true });
+    }, { replace: options?.replace ?? false });
   };
 
   /* Keep the input in sync when the URL changes externally — Back/forward, a
@@ -324,7 +331,12 @@ export default function GalleryPage() {
   // Debounce typed input into the URL; a query change restarts pagination.
   const debouncedInput = useDebounce(input, 400);
   useEffect(() => {
-    if (debouncedInput.trim() !== query) setParams({ q: debouncedInput.trim(), page: "" });
+    // Starting a search pushes, so Back returns to the unsearched view.
+    // Refining one replaces, because the box commits every 400 ms and
+    // "dog", "dog on", "dog on beach" are one search being typed, not three.
+    if (debouncedInput.trim() !== query) {
+      setParams({ q: debouncedInput.trim(), page: "" }, { replace: Boolean(query) });
+    }
     // Runs only when the debounce settles. Depending on `query` too would fire
     // this again when the URL echoes the trimmed value back mid-typing — the
     // exact "dogon beach" failure the sync effect above guards against.
@@ -1031,7 +1043,11 @@ export default function GalleryPage() {
 
       {hasMore && view === "ranked" && (
         <div className="load-more">
-          <button className="primary" onClick={() => setParams({ page: String(page + 1) })}
+          {/* Replaces: deepening the same ranking is not a new view, and a
+              reader who pressed it five times should not press Back five
+              times to leave. The depth still rides in the URL. */}
+          <button className="primary"
+                  onClick={() => setParams({ page: String(page + 1) }, { replace: true })}
                   disabled={loading}>
             {loading ? "Loading…" : query
               ? `Load more results (${items.length.toLocaleString()} so far)`
