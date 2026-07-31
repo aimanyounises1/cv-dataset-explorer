@@ -150,12 +150,46 @@ def test_detector_rejects_a_moving_revision(monkeypatch):
 def test_detect_validates_input(ctx):
     client, sids = ctx
     assert client.post("/api/detect", json={"sample_id": 0}).status_code == 422
-    assert client.post("/api/detect",
-                       json={"sample_id": sids[0], "queries": ""}).status_code == 422
     assert client.post(
         "/api/detect",
-        json={"sample_id": sids[0], "queries": "   "},
+        json={"sample_id": sids[0], "queries": "x"},
     ).status_code == 422
+
+
+def test_blank_detect_query_runs_the_fixed_phrase_bank(ctx, monkeypatch):
+    client, sids = ctx
+    from app.api import detect as detect_api
+    from app.ml import detect as detect_ml
+
+    received = []
+
+    class FakeDetector:
+        model_id = config.DETECT_MODEL
+        revision = config.DETECT_REVISION
+
+        def detect(self, _image, queries):
+            received.append(queries)
+            return []
+
+    monkeypatch.setattr(detect_ml, "get_detector", lambda: FakeDetector())
+    payloads = [
+        {"sample_id": sids[0]},
+        {"sample_id": sids[0], "queries": ""},
+        {"sample_id": sids[0], "queries": "  \n  "},
+    ]
+    responses = [client.post("/api/detect", json=payload) for payload in payloads]
+
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    assert received == [detect_api.AUTO_DETECT_QUERIES] * len(payloads)
+    assert detect_ml.phrases_from(received[0]) == [
+        "a person", "an animal", "a vehicle", "an object",
+    ]
+    assert all(response.json()["queries"] == detect_api.AUTO_DETECT_QUERIES
+               for response in responses)
+    assert all("phrase alignment" in response.json()["note"]
+               for response in responses)
+    assert all("confidence" not in response.json()["note"].lower()
+               for response in responses)
 
 
 def test_phrases_from_matches_the_processor_candidate_label_contract():

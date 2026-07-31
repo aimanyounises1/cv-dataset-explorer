@@ -396,8 +396,10 @@ export default function RegionSearch({
             : "Enter annotation mode — points, box, and detector"}
         </summary>
         <p className="rs-note">
-          Grounding DINO proposes boxes from an open-vocabulary phrase. Choose
-          one instance, then guide SAM2 with keep/remove points or a box. Neither
+          Grounding DINO proposes boxes from the fixed person, animal, vehicle,
+          and object vocabulary when left blank, or aligns regions to expert
+          phrases. Scores only rank phrase alignment within this run; they are
+          not probabilities. Choose one instance, then guide SAM2; neither
           proposal becomes a label until you save it.
         </p>
 
@@ -451,18 +453,23 @@ export default function RegionSearch({
 
       {editor.detectStatus?.ready && (
         <div className="rs-detector">
-          <label htmlFor={`${instructionsId}-detect`}>Detector query</label>
+          <label htmlFor={`${instructionsId}-detect`}>Phrase alignment (optional)</label>
           <input
             ref={detectorInputRef}
             id={`${instructionsId}-detect`}
             value={editor.detectQuery}
             onChange={(event) => editor.setDetectQuery(event.target.value)}
             maxLength={300}
-            placeholder="e.g. person in a red coat. unusual hand-held object."
+            placeholder="Blank = person, animal, vehicle, object"
           />
           <button type="button" className="ghost" onClick={editor.suggest}
-                  disabled={anyBusy || editor.detectQuery.trim().length < 3}>
-            {editor.busy === "detect" ? "Detecting…" : "Suggest boxes"}
+                  disabled={anyBusy || (
+                    editor.detectQuery.trim().length > 0
+                    && editor.detectQuery.trim().length < 3
+                  )}>
+            {editor.busy === "detect"
+              ? "Detecting…"
+              : editor.detectQuery.trim() ? "Align phrases" : "Auto-detect"}
           </button>
         </div>
       )}
@@ -578,18 +585,18 @@ export default function RegionSearch({
               top: `${proposal.y * 100}%`,
               width: `${proposal.w * 100}%`,
               height: `${proposal.h * 100}%`,
-              // Proposals arrive confidence-sorted. A large low-confidence
+              // Proposals arrive score-sorted. A large lower-scoring
               // region (often "sidewalk" or "background") must not paint over
-              // and intercept the tighter, higher-confidence object button.
+              // and intercept the tighter, higher-scoring object button.
               zIndex: 5 + Math.round(proposal.score * 1_000),
             }}
-            aria-label={`Use ${displayLabel} proposal, ${Math.round(proposal.score * 100)} percent confidence`}
-            title={`${displayLabel} — detector confidence ${Math.round(proposal.score * 100)}%`}
+            aria-label={`Use ${displayLabel} proposal, phrase alignment score ${proposal.score}, rank only`}
+            title={`${displayLabel} — phrase alignment ${proposal.score} (rank only, not a probability)`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => chooseProposal(proposal)}
             disabled={anyBusy}
           >
-            <span>{displayLabel} {Math.round(proposal.score * 100)}%</span>
+            <span>{displayLabel} · alignment {proposal.score}</span>
           </button>
           );
         })}
@@ -655,7 +662,7 @@ export default function RegionSearch({
                   ].join("\n")}>
                     {editor.proposalSource.original_label}
                     {" · "}
-                    {Math.round(editor.proposalSource.score * 100)}%
+                    alignment {editor.proposalSource.score} (rank only)
                     {" · "}
                     {editor.proposalSource.model_revision.slice(0, 10)}…
                   </dd>

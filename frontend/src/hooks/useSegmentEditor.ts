@@ -309,14 +309,16 @@ export function useSegmentEditor(sampleId: number) {
     setError(null);
     setProposals([]);
     setDetectorRun(null);
-    setAnnouncement("Finding candidate boxes.");
     const requestedQuery = detectQuery.trim();
+    setAnnouncement(requestedQuery
+      ? "Finding regions aligned with the supplied phrases."
+      : "Auto-detecting regions from the fixed vocabulary.");
     try {
       const response = await api.detectRegions(
         sampleId, requestedQuery, controller.signal,
       );
       if (detectQueryRef.current.trim() !== requestedQuery) {
-        setAnnouncement("Detector query changed; discarded the stale proposals.");
+        setAnnouncement("Detection phrases changed; discarded the stale proposals.");
         return;
       }
       setProposals(response.boxes);
@@ -327,7 +329,9 @@ export function useSegmentEditor(sampleId: number) {
       });
       setAnnouncement(response.boxes.length
         ? `${response.boxes.length} detector proposals ready. Choose one to segment.`
-        : "The detector proposed no regions for this query.");
+        : requestedQuery
+          ? "The detector found no regions aligned with these phrases."
+          : "Auto-detect found no regions from the fixed vocabulary.");
     } catch (e: unknown) {
       if (!aborted(e)) {
         setError(problem(e, "Could not suggest regions"));

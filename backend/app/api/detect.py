@@ -29,6 +29,7 @@ router = APIRouter()
 _BENCHMARKED_MODEL = "IDEA-Research/grounding-dino-tiny"
 _BENCHMARKED_REVISION = "a2bb814dd30d776dcf7e30523b00659f4f141c71"
 _BENCHMARK_MEASUREMENT = "~330 ms/image warm on the reference M4 Max (MPS)"
+AUTO_DETECT_QUERIES = "a person. an animal. a vehicle. an object."
 
 
 @router.get("/detect/status", response_model=ModelCapabilityStatus)
@@ -53,13 +54,14 @@ class DetectRequest(BaseModel):
 
     sample_id: int = Field(..., strict=True, ge=1, le=2**63 - 1)
     # Period-separated phrases, per the model's own query format.
-    queries: str = Field("a person. an animal. a vehicle. an object.",
-                         min_length=3, max_length=300)
+    queries: str = Field(AUTO_DETECT_QUERIES, max_length=300)
 
     @field_validator("queries")
     @classmethod
     def _normalize_queries(cls, value: str) -> str:
         normalized = " ".join(value.split())
+        if not normalized:
+            return AUTO_DETECT_QUERIES
         if len(normalized) < 3:
             raise ValueError("queries must contain a detector phrase")
         # Periods only separate phrases; input like "..." carries none.
@@ -116,5 +118,6 @@ def detect_regions(body: DetectRequest,
             "queries": body.queries,
             "boxes": boxes,
             "note": "zero-shot proposals — click one to use it as region "
-                    "evidence; scores are detector confidences, not "
-                    "retrieval scores"}
+                    "evidence; scores rank phrase alignment within this "
+                    "detector run and are neither calibrated probabilities "
+                    "nor retrieval scores"}

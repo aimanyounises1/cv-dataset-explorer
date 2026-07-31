@@ -213,9 +213,13 @@ python -c "from huggingface_hub import snapshot_download; snapshot_download(repo
 python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='facebook/sam2.1-hiera-tiny', revision='de431c4043854a71d8101e17995dfe596bf101a5')"
 ```
 
-A detector query is free text: one phrase, or several separated by periods
-(`a person. a dog.`). The backend normalizes input to the detector's own
-candidate-label format, so `dog` and `a dog.` describe the same query.
+A detector query is optional. Left blank, the detector scans a fixed
+vocabulary — a person, an animal, a vehicle, an object — so automatic
+proposals stay inside a visible broad label bank rather than introducing
+arbitrary class names. Free-text phrases remain available for targeted
+grounding, separated by periods and normalized to the detector's own
+candidate-label format, so `dog` and `a dog.` describe the same query. Scores
+rank phrase alignment within one run; they are not calibrated probabilities.
 
 ### LangChain/LangGraph assistant
 
