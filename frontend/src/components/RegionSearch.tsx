@@ -572,7 +572,7 @@ export default function RegionSearch({
           <button
             key={`${proposal.label}:${proposal.x}:${proposal.y}:${index}`}
             type="button"
-            className="rs-box"
+            className={`rs-box${proposal.verified === false ? " unconfirmed" : ""}`}
             style={{
               left: `${proposal.x * 100}%`,
               top: `${proposal.y * 100}%`,
@@ -583,13 +583,31 @@ export default function RegionSearch({
               // and intercept the tighter, higher-confidence object button.
               zIndex: 5 + Math.round(proposal.score * 1_000),
             }}
-            aria-label={`Use ${displayLabel} proposal, ${Math.round(proposal.score * 100)} percent confidence`}
-            title={`${displayLabel} — detector confidence ${Math.round(proposal.score * 100)}%`}
+            aria-label={proposal.verified === false
+              ? `Use ${displayLabel} proposal — not confirmed; this region reads as ${proposal.best_alternative}`
+              : `Use ${displayLabel} proposal, ${Math.round(proposal.score * 100)} percent confidence`}
+            /* The detector grounds a phrase and has no way to answer "absent",
+               so its own percentage is not evidence the thing is there. When a
+               second model reads the crop and prefers something else, the box
+               says so instead of printing the phrase back as a finding. */
+            title={proposal.verified === false
+              ? `${displayLabel} — NOT CONFIRMED. The detector grounds any phrase; `
+                + `SigLIP reads this region as “${proposal.best_alternative}” `
+                + `(${proposal.alternative_score}) over “${displayLabel}” `
+                + `(${proposal.verified_score}).`
+              : proposal.verified === true
+                ? `${displayLabel} — confirmed by SigLIP (${proposal.verified_score}), `
+                  + `ahead of “${proposal.best_alternative}” (${proposal.alternative_score}).`
+                : `${displayLabel} — detector confidence ${Math.round(proposal.score * 100)}%, unchecked`}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => chooseProposal(proposal)}
             disabled={anyBusy}
           >
-            <span>{displayLabel} {Math.round(proposal.score * 100)}%</span>
+            <span>
+              {proposal.verified === false
+                ? `not ${displayLabel} — reads as ${proposal.best_alternative}`
+                : `${displayLabel} ${Math.round(proposal.score * 100)}%`}
+            </span>
           </button>
           );
         })}

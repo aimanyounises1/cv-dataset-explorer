@@ -236,6 +236,23 @@
 .rs-box:focus-visible {
   background: color-mix(in srgb, var(--stage-human) 14%, transparent);
 }
+/* A proposal a second model did not confirm. It stays clickable — the
+   detector may still have framed the right region under the wrong phrase, and
+   only a person decides — but it must not read as a finding, so it drops the
+   confident sage outline for the amber this palette already uses to mean
+   "look at this before you trust it". */
+.rs-box.unconfirmed {
+  border-color: var(--amber);
+  border-style: dotted;
+}
+.rs-box.unconfirmed:hover,
+.rs-box.unconfirmed:focus-visible {
+  background: color-mix(in srgb, var(--amber) 14%, transparent);
+}
+.rs-box.unconfirmed span {
+  background: var(--amber);
+  color: #201500;
+}
 .rs-box span {
   position: absolute;
   left: -2px;
