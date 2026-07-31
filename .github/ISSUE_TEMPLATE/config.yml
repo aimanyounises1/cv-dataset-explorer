@@ -1,0 +1,23 @@
+# Two templates already exist and both ask for the one thing this project can
+# act on: the request URL and the smallest reproduction. A blank issue skips
+# that, so it is turned off rather than left as the easiest path.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Security or privacy finding
+    url: https://github.com/aimanyounises1/cv-dataset-explorer/blob/main/SECURITY.md
+    about: >-
+      Read the threat model first. This is a single-user localhost tool with no
+      authentication by design, so "the API is unauthenticated" is documented
+      rather than a finding.
+  - name: Running the checks, and the conventions a change has to survive
+    url: https://github.com/aimanyounises1/cv-dataset-explorer/blob/main/CONTRIBUTING.md
+    about: >-
+      The exact commands CI runs, and the load-bearing conventions: filters
+      inside the ranking, every score naming its basis, optional layers
+      degrading instead of failing.
+  - name: Where the data came from and what is known to be off about it
+    url: https://github.com/aimanyounises1/cv-dataset-explorer/blob/main/README.md#data-provenance
+    about: >-
+      Row count, splits, licensing and composition of this Flickr8k copy, before
+      filing a report about a number the dataset itself explains.
