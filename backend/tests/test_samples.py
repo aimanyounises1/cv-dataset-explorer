@@ -53,3 +53,15 @@ def test_browse_reports_how_many_pasted_entries_matched(client):
     assert r.status_code == 200
     assert r.json()["ids_resolved"] == 0
     assert client.get("/api/samples").json()["ids_resolved"] is None
+
+
+def test_export_json_downloads_like_its_siblings(client):
+    """format=json used to fall through as an inline JSONResponse, so the
+    pill navigated the browser away while csv and jsonl downloaded."""
+    for ext in ("json", "csv", "jsonl"):
+        r = client.get("/api/export", params={"format": ext})
+        assert r.status_code == 200, ext
+        assert f'filename="cvde-export.{ext}"' in r.headers.get(
+            "content-disposition", ""), ext
+    body = client.get("/api/export", params={"format": "json"}).json()
+    assert set(body) == {"count", "filters", "samples"}

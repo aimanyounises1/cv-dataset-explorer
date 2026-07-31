@@ -334,7 +334,9 @@ def export_subset(
         lines = [json.dumps({"_manifest": query, "count": len(samples)})]
         lines += [json.dumps(s) for s in samples]
         return _download("\n".join(lines) + "\n", "application/x-ndjson", "jsonl")
-    return {"count": len(samples), "filters": query, "samples": samples}
+    return _download(json.dumps({"count": len(samples), "filters": query,
+                                 "samples": samples}),
+                     "application/json", "json")
 
 
 def _download(body: str, media_type: str, ext: str) -> Response:
