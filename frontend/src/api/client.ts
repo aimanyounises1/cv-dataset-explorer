@@ -234,11 +234,13 @@ export const api = {
     get<LeakageContamination>("/stats/leakage/contaminated", { threshold }, signal),
 
   qaSummary: () => get<QASummary>("/qa/summary"),
-  qaSelection: (maxAgreement: number, signal?: AbortSignal) =>
-    get<QASelection>("/qa/selection", { max_agreement: maxAgreement }, signal),
+  qaSelection: (maxAgreement: number, signal?: AbortSignal, split?: string) =>
+    get<QASelection>("/qa/selection",
+                     { max_agreement: maxAgreement, split: split || undefined }, signal),
   suspectCaptions: (params?: Params) => get<SuspectCaption[]>("/qa/captions", params),
   // (params carries limit / split / max_agreement — the review threshold)
-  inconsistentSamples: () => get<SuspectCaption[]>("/qa/consistency"),
+  inconsistentSamples: (split?: string) =>
+    get<SuspectCaption[]>("/qa/consistency", { split: split || undefined }),
   coverage: () => get<AttributeGroup[]>("/attributes/coverage"),
   evalRetrieval: (sampleSize = 1000) =>
     get<EvalResponse>("/eval/retrieval", { sample_size: sampleSize }),

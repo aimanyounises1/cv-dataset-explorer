@@ -107,10 +107,13 @@ export default function QualityPage() {
    * the URL: open a suspect, press Back, and the cutoff you set must still be
    * there — as must a pasted /quality?max_agreement=… link. The computed
    * default stays OUT of the URL: only a value the user chose is user state. */
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const carriedThreshold = searchParams.get("max_agreement");
+  const split = searchParams.get("split") ?? "";
   const touched = useRef(false);
   useEffect(() => {
     if (threshold == null || !touched.current) return;
+    if (carriedThreshold === String(threshold)) return;
     const t = setTimeout(() => {
       setSearchParams((p) => {
         const next = new URLSearchParams(p);
@@ -119,7 +122,7 @@ export default function QualityPage() {
       }, { replace: true });
     }, 300);
     return () => clearTimeout(t);
-  }, [threshold, setSearchParams]);
+  }, [threshold, carriedThreshold, setSearchParams]);
   const [listLoading, setListLoading] = useState(false);
   const [selection, setSelection] = useState<QASelection | null>(null);
   const [shownSuspects, setShownSuspects] = useState(LIST_PAGE);
@@ -127,28 +130,32 @@ export default function QualityPage() {
   const [list, setList] = useState<ListKind>("suspect");
 
   useEffect(() => {
+    api.qaSummary()
+      .then(setSummary)
+      .catch((e) => setError(String(e)));
+  }, []);
+
+  useEffect(() => {
+    if (!summary?.available) return;
+    if (carriedThreshold !== null) {
+      const carried = Number(carriedThreshold);
+      if (Number.isFinite(carried)) {
+        touched.current = true;
+        setThreshold(carried);
+      }
+      return;
+    }
+    touched.current = false;
+    setThreshold(defaultThreshold(summary));
+  }, [carriedThreshold, summary]);
+
+  useEffect(() => {
     // On a QA page, a swallowed error rendering as "no problems found" is the
     // worst failure mode — failed sections must announce themselves.
     const fail = (what: string) => () =>
       setSectionErrors((prev) => [...prev, what]);
-    api.qaSummary()
-      .then((s) => {
-        setSummary(s);
-        if (!s.available) return;
-        // A cutoff arriving in the URL is one the user (or their colleague)
-        // chose — restore it exactly; otherwise start at the computed default.
-        const raw = new URLSearchParams(window.location.search).get("max_agreement");
-        const carried = raw !== null ? Number(raw) : NaN;
-        if (Number.isFinite(carried)) {
-          touched.current = true;
-          setThreshold(carried);
-        } else {
-          setThreshold(defaultThreshold(s));
-        }
-      })
-      .catch((e) => setError(String(e)));
-    api.inconsistentSamples().then(setInconsistent).catch(fail("consistency ranking"));
-  }, []);
+    api.inconsistentSamples(split).then(setInconsistent).catch(fail("consistency ranking"));
+  }, [split]);
 
   // The list and the selection size both follow the threshold. Debounced
   // because the control is a slider and every intermediate value would
@@ -163,7 +170,8 @@ export default function QualityPage() {
     setShownSuspects(LIST_PAGE);
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      api.suspectCaptions({ limit: 100, max_agreement: threshold })
+      api.suspectCaptions({ limit: 100, max_agreement: threshold,
+                            split: split || undefined })
         .then(setSuspects)
         .catch(() => setSectionErrors((p) =>
           p.includes("suspect captions") ? p : [...p, "suspect captions"]))
@@ -171,12 +179,12 @@ export default function QualityPage() {
       // Counted in SQL, not from the histogram: bins that straddle the line can
       // only give a rounded answer, and this number labels a button that hands
       // the set to another view — so it has to be the number that view shows.
-      api.qaSelection(threshold, ctrl.signal)
+      api.qaSelection(threshold, ctrl.signal, split)
         .then(setSelection)
         .catch(() => { /* the readout falls back to the binned estimate */ });
     }, 220);
     return () => { clearTimeout(t); ctrl.abort(); };
-  }, [threshold]);
+  }, [threshold, split]);
 
   const hist = summary?.histogram ?? [];
   const peak = useMemo(() => Math.max(1, ...hist.map((b) => b.count)), [hist]);
@@ -363,7 +371,8 @@ export default function QualityPage() {
             <span className="export-label">Export selection</span>
             {(["csv", "jsonl", "json"] as const).map((f) => (
               <a key={f} className="pill export-pill"
-                 href={`/api/export?max_agreement=${threshold}&format=${f}`}
+                 href={`/api/export?${split ? `split=${encodeURIComponent(split)}&` : ""}`
+                       + `max_agreement=${threshold}&format=${f}`}
                  title={`Download every image with a caption at or below ${threshold.toFixed(3)} as ${f.toUpperCase()}`}>
                 {f}
               </a>
