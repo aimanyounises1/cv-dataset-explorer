@@ -206,6 +206,9 @@ class StatsOverview(BaseModel):
     # (from its manifest); None for the legacy flat layout, where the UI keeps
     # its documented SigLIP-derived default.
     sim_floor: Optional[float] = None
+    # The cosine cut the near-duplicate list is computed at, so the UI can name
+    # it next to the count instead of presenting the cut as a bare fact.
+    duplicate_threshold: Optional[float] = None
     vlm_model: Optional[str] = None
     # Is the enrichment model pulled in Ollama right now? Distinct from
     # vlm_enriched (past work) — a corpus can be tagged while the model is

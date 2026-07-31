@@ -78,7 +78,8 @@ export default function LeakagePanel() {
           </div>
         </div>
         <div className="leak-side">
-          <div><strong>{data.pairs.toLocaleString()}</strong> near-duplicate pairs</div>
+          <div><strong>{data.pairs.toLocaleString()}</strong> near-duplicate pairs
+            {" "}at cosine ≥ {data.threshold}</div>
           <div><strong>{data.cross_split_pairs.toLocaleString()}</strong> cross split</div>
           {Object.entries(data.by_split_pair).map(([k, v]) => (
             <div key={k} className="leak-pairtype">{k.replace("~", " ↔ ")} · {v}</div>

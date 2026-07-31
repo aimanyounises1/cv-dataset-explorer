@@ -93,6 +93,7 @@ def overview(conn: sqlite3.Connection = Depends(get_conn)):
         vlm_model=config.VLM_MODEL,
         vlm_ready=_vlm_model_ready(),
         chat_model=config.CHAT_MODEL,
+        duplicate_threshold=config.DUPLICATE_THRESHOLD,
     )
 
 

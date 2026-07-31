@@ -205,6 +205,8 @@ export default function StatsPage() {
 
               <div className="section-title">
                 Near-duplicate pairs {dups.length > 0 && `(${dups.length})`}
+                {overview.duplicate_threshold != null
+                  && ` · cosine ≥ ${overview.duplicate_threshold}`}
               </div>
               {dups.length === 0 ? (
                 <div className="empty">

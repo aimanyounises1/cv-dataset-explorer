@@ -489,6 +489,7 @@ export interface StatsOverview {
   avg_caption_length_words: number;
   image_size_buckets: Record<string, number>;
   embeddings_available: boolean;
+  duplicate_threshold?: number | null;
   vlm_enriched: number;
   /** Model provenance. All optional: a running backend may predate these
    * fields, and the status card must degrade to the older flags above rather
