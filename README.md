@@ -103,6 +103,52 @@ stored until a reviewer accepts it.
 
 ![Two-frame semantic comparison after source validation](assets/pair-comparison.jpg)
 
+## Reading a result set
+
+A search returns a ranking, not an answer, so the gallery is built for
+interrogating one.
+
+**Modes.** Keyword search is FTS5 BM25 over the captions, semantic search
+encodes the query with SigLIP 2 and compares it to the image embeddings, and
+hybrid fuses the two by reciprocal rank. You can also search by image, by a
+region drawn on an image, or by example, using pictures already in the corpus
+as positive and negative references. Scores from different modes are not
+comparable — a cosine and a fused rank sum are different quantities — so every
+response names its own basis and the interface prints that name next to the
+number rather than showing a bare score.
+
+**Search settings** holds the three controls that change how a ranking is
+produced or presented: the mode, the order, and the tile size. Order is either
+relevance or one of the four difficulty axes in either direction, such as
+"Difficulty — hardest first". Sorting is applied to the whole matching set in
+SQL before paging, so it returns the hardest samples in the selection rather
+than the hardest ones on the current page.
+
+![Search modes, ordering, and the filters that narrow a set](assets/search-settings.jpg)
+
+**Filters** live in the left rail and narrow the corpus *before* ranking, never
+after: the split, the zero-shot attribute facets, your own tags, a range on any
+difficulty axis, and a pasted list of ids or filenames for bringing a set back
+from somewhere else. Several filters intersect, the active ones appear as
+removable chips above the results, and all of them live in the URL — so a
+selection is a link you can hand to someone else, and the export button hands
+back exactly the set on screen.
+
+**The frame edge** answers a different question: not *which* samples match, but
+*which of them are hard*. Pick an axis from the dropdown above the grid and
+every tile gets a bar down its left edge, tall where the score is high, so you
+can scan a page of results and see where the difficult samples are without
+opening any of them. It is an overlay and nothing more — it re-ranks nothing,
+filters nothing, and changes no link. Use the order control when you want the
+set itself to change.
+
+![One difficulty axis drawn on every tile in a ranking](assets/signal-edge.jpg)
+
+**The score distribution** above the grid plots the visible results, and the
+"dim below" handle greys out everything under a chosen score. That is also a
+view rather than a filter: the dimmed cards stay in the set and in the export,
+because a threshold you are still choosing should not silently delete data.
+
 ## Data provenance
 
 The corpus is the [`jxie/flickr8k`](https://huggingface.co/datasets/jxie/flickr8k)
