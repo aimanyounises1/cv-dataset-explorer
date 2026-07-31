@@ -97,6 +97,40 @@ stored until a reviewer accepts it.
 
 ![Two-frame semantic comparison after source validation](assets/pair-comparison.jpg)
 
+## Data provenance
+
+The corpus is the [`jxie/flickr8k`](https://huggingface.co/datasets/jxie/flickr8k)
+copy of Flickr8k on Hugging Face. `backend/app/datasets/flickr8k.py` pins the
+full Hub commit `56f58c967835f7c508d684f36bd7897cca9d7634` rather than `main`,
+so a fresh ingest sees the same files and the same splits as the run being
+reviewed. Images and thumbnails are written under `backend/data/`, which is
+gitignored: this repository redistributes nothing.
+
+The application reports the same provenance against your own ingest, with live
+counts, under **Dataset profile → Provenance** (`/stats?view=provenance`). A
+dataset tool that hides its own provenance is asking to be trusted on faith, so
+the known caveats are recorded in both places.
+
+- **Source.** The dataset card for this copy carries no construction methodology
+  and specifies no license.
+- **Row count.** 8,000 images (6,000 / 1,000 / 1,000 across train / validation /
+  test), against about 8,091 in the original Flickr8k distribution. Roughly 90
+  images are absent, with no explanation given upstream.
+- **Splits.** The counts match the canonical Hodosh split, but the per-image
+  assignments are undocumented in this copy and have not been verified against
+  the original split files.
+- **Captions.** Five per image, written by crowdworkers. The adapter detects
+  caption columns by prefix, so a minor upstream schema change does not stop
+  ingestion.
+- **Licensing.** Upstream Flickr8k is for non-commercial research and education
+  only. This copy states no license of its own, so the upstream terms are the
+  safe assumption, and an exported slice inherits them rather than this
+  repository's.
+- **Composition.** Captions were written by US-based crowdworkers and the images
+  came from a handful of Flickr hobby groups, so the corpus is not a neutral
+  sample of the visual world: expect people, dogs, and outdoor action to
+  dominate.
+
 ## Optional local models
 
 The core gallery, search, sample inspection, map, audits, albums, and exports
@@ -173,13 +207,14 @@ A strictly read-only local MCP surface is also exposed at `POST /mcp`.
 ## Architecture
 
 ```text
-frontend/src/        React 18 + TypeScript + Vite
-backend/app/api/     FastAPI routes and the read-only MCP surface
-backend/app/ml/      embeddings, retrieval, detection, and segmentation
-backend/app/agent/   optional LangChain/LangGraph assistant
-backend/app/qa/      browser workflow registry and QA runner
-backend/data/        generated local database, images, indexes, and reports
-scripts/             benchmarks, validation, link checks, and UI smoke tests
+frontend/src/          React 18 + TypeScript + Vite
+backend/app/datasets/  dataset adapters and the pinned Flickr8k source
+backend/app/api/       FastAPI routes and the read-only MCP surface
+backend/app/ml/        embeddings, retrieval, detection, and segmentation
+backend/app/agent/     optional LangChain/LangGraph assistant
+backend/app/qa/        browser workflow registry and QA runner
+backend/data/          generated local database, images, indexes, and reports
+scripts/               benchmarks, validation, link checks, and UI smoke tests
 ```
 
 Search state lives in the URL, so an investigation can be shared as a link.
@@ -192,8 +227,11 @@ Configuration is controlled with environment variables. See
 ## Verification
 
 ```bash
-# Backend
+# Backend lint (ruff is not in requirements.txt: pip install ruff)
 cd backend
+.venv/bin/ruff check app tests
+
+# Backend tests
 .venv/bin/python -m pytest -q
 
 # Frontend
@@ -229,6 +267,8 @@ verification steps because CI does not download the dataset or model weights.
 - The assistant is experimental and is not required for the verified dataset
   exploration workflow.
 - Docker inference is CPU-only and slower than the accelerated host path.
-- Flickr8k is intended for non-commercial research and education. This
-  repository does not redistribute the dataset; ingestion downloads it to the
-  local machine.
+- Flickr8k here is one Hugging Face copy: it states no licence of its own and is
+  missing about 90 of the original images. The upstream terms (non-commercial
+  research and education) are the safe assumption, an exported slice inherits
+  them, and this repository redistributes nothing. See
+  [Data provenance](#data-provenance).
