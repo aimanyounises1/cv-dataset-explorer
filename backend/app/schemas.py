@@ -57,6 +57,9 @@ class SampleList(BaseModel):
     total: int
     page: int
     per_page: int
+    # How many pasted id-list entries exist in this dataset — same contract as
+    # SearchResponse.ids_resolved, for the browse path that has no query.
+    ids_resolved: Optional[int] = None
 
 
 class CaptionOut(BaseModel):

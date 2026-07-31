@@ -48,6 +48,7 @@ export interface SampleList {
   total: number;
   page: number;
   per_page: number;
+  ids_resolved?: number | null;
 }
 
 export interface CaptionOut {

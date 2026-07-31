@@ -80,6 +80,10 @@ export default function GalleryPage() {
   const unlikeIds = useMemo(() => (searchParams.get("unlike") ?? "")
     .split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0), [searchParams]);
   const composed = likeIds.length > 0 || unlikeIds.length > 0;
+  const idsEntryCount = useMemo(() => {
+    const n = (searchParams.get("ids") ?? "").split(/[\s,]+/).filter(Boolean).length;
+    return n || null;
+  }, [searchParams]);
   const albumId = Number(searchParams.get("album")) || null;
   // Labels naming the ACTIVE embedding model read the one truth source.
   const providerName = useActiveProviderName();
@@ -467,7 +471,7 @@ export default function GalleryPage() {
           { page: p, per_page: PER_PAGE, ...selection.params,
             sort: sort || undefined }, ctrl.signal);
         setNotice(fallbackMsg);
-        setMeta({ terms: [] });
+        setMeta({ terms: [], idsResolved: res.ids_resolved });
         return { items: res.items, total: res.total, more: p * PER_PAGE < res.total };
       };
 
@@ -902,6 +906,8 @@ export default function GalleryPage() {
             : `${total.toLocaleString()} samples`}
           {query && meta.basis === "rrf" && meta.rrfK != null &&
             ` · fused by reciprocal rank, k=${meta.rrfK}`}
+          {idsEntryCount != null && meta.idsResolved != null &&
+            ` · ${meta.idsResolved} of ${idsEntryCount} pasted entries matched`}
           {(query || composed) && items.length > 0 && (
             <>
               {" · "}

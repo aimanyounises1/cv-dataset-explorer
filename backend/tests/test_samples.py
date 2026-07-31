@@ -43,3 +43,13 @@ def test_cluster_filter_rejects_what_used_to_500(client):
         assert client.get(route, params={"cluster": TOO_BIG}).status_code == 422, route
         # A real cluster id — including 0, which k-means labels from — answers.
         assert client.get(route, params={"cluster": 0}).status_code == 200, route
+
+
+def test_browse_reports_how_many_pasted_entries_matched(client):
+    """Same contract as SearchResponse.ids_resolved, on the query-less path:
+    a pasted list must come back with an honest match count, and a browse
+    without a list must not pretend one was counted."""
+    r = client.get("/api/samples", params={"ids": "1,2,nope.jpg"})
+    assert r.status_code == 200
+    assert r.json()["ids_resolved"] == 0
+    assert client.get("/api/samples").json()["ids_resolved"] is None

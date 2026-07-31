@@ -23,6 +23,7 @@ from .deps import (
     get_conn,
     hydrate_cards,
     id_list,
+    id_list_clause,
     image_url,
     order_by_album_position,
     order_by_axis,
@@ -88,7 +89,14 @@ def list_samples(
     ).fetchall()
     captions = first_captions(conn, [r["id"] for r in rows])
     items = [row_to_card(r, caption=captions.get(r["id"])) for r in rows]
-    return SampleList(items=items, total=total, page=page, per_page=per_page)
+    ids_resolved = None
+    if ids:
+        clause, id_params = id_list_clause(ids, staged=staged)
+        ids_resolved = conn.execute(
+            f"SELECT COUNT(*) FROM samples s WHERE {clause}", id_params
+        ).fetchone()[0] if clause else 0
+    return SampleList(items=items, total=total, page=page, per_page=per_page,
+                      ids_resolved=ids_resolved)
 
 
 @router.get("/samples/{sample_id}", response_model=SampleDetail)
