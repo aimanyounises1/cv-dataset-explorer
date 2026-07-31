@@ -118,14 +118,12 @@ export default function EvalPage() {
             MRR and median rank are computed to depth {result.depth}.
           </div>
           <div className="meta-line">
-            <strong>Read hybrid’s candidates figure as a sum, not a set.</strong> It is
-            the semantic pool plus the mean lexical match count, and every lexical
-            match is already inside the semantic pool — so two overlapping sets are
-            added where they should be unioned, and the honest figure is the pool
-            itself. The overstatement equals the lexical mean: small on this corpus,
-            but a defect in the column rather than a rounding artifact. Stated here
-            rather than silently re-derived, because changing the number would also
-            change what every cached run means.
+            <strong>Hybrid’s candidates figure counts unique images.</strong> The
+            semantic stage already ranks the full pool, so the union with the
+            lexical matches can meet the corpus size but never exceed it. Earlier
+            protocols summed the two overlapping stages instead; the protocol
+            changelog records the change, and caches from those protocols are not
+            read as this one’s results.
           </div>
           </div>
           <div className="panel chart-wide">
@@ -167,8 +165,8 @@ export default function EvalPage() {
                 <th title={`Mean reciprocal rank within the top ${result.depth}`}>MRR@{result.depth}</th>
                 <th title="Median rank of the correct image (lower is better)">median rank</th>
                 <th title={"How many images this mode actually had to rank, averaged over queries. "
-                         + "For hybrid the figure sums the semantic pool and the mean keyword pool, "
-                         + "so an image both paths returned is counted twice — read it as an upper bound."}>
+                         + "For hybrid it counts unique images across both stages, so it can "
+                         + "reach the corpus size but never exceed it."}>
                   candidates
                 </th>
               </tr>
