@@ -761,6 +761,9 @@ export default function GalleryPage() {
           onMode={(m) => setParams({ mode: m, page: "" })}
           onSort={(s) => setParams({ sort: s, page: "" })}
           onDensity={setDensity}
+          modeLockedReason={composed
+            ? "Reference chips steer this ranking (composed basis) — clear them to change mode"
+            : null}
         />
       </div>
 
@@ -993,7 +996,7 @@ export default function GalleryPage() {
           const card = (
             <ImageCard key={s.id} sample={s} scoreBasis={meta.basis}
                        query={query} mode={modeUsed === mode ? mode : undefined}
-                       rank={i + 1}
+                       rank={sort ? undefined : i + 1}
                        selected={picked.has(s.id)}
                        onToggleSelect={togglePick} getDragIds={getDragIds}
                        onLike={(id) => editRef(id, "like", true)}

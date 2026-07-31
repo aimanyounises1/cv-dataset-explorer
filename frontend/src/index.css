@@ -713,7 +713,7 @@ body {
 .sort-trigger[aria-expanded="true"]::after { transform: rotate(-90deg); color: var(--accent); }
 .sort-options {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
-  max-height: 264px; overflow-y: auto;
+  max-height: 296px; overflow-y: auto;
   margin: 0; padding: 4px; list-style: none;
   background: var(--bg-raised); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); outline: none;

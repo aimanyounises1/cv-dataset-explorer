@@ -32,6 +32,12 @@ function SortListbox({ value, onChange }: { value: string; onChange: (v: string)
   // The list takes focus when it opens so arrow keys land on it, not the page.
   useEffect(() => { if (open) listRef.current?.focus(); }, [open]);
   useEffect(() => {
+    if (open) {
+      document.getElementById(`sort-opt-${active}`)
+        ?.scrollIntoView({ block: "nearest" });
+    }
+  }, [open, active]);
+  useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
@@ -105,6 +111,8 @@ interface Props {
   onMode: (mode: string) => void;
   onSort: (sort: string) => void;
   onDensity: (density: string) => void;
+  /** When set, the mode pills are inert and this text says why. */
+  modeLockedReason?: string | null;
 }
 
 /** One command bar: the query's dials live behind a single quiet button — the
@@ -114,7 +122,7 @@ interface Props {
  * both dismiss it. */
 export default function SearchSettings({ mode, sort, density, densities,
                                          providerName, onMode, onSort,
-                                         onDensity }: Props) {
+                                         onDensity, modeLockedReason }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDetailsElement | null>(null);
 
@@ -158,11 +166,13 @@ export default function SearchSettings({ mode, sort, density, densities,
                 key={m}
                 className={mode === m ? "active" : ""}
                 aria-pressed={mode === m}
+                disabled={Boolean(modeLockedReason)}
                 onClick={() => onMode(m === "hybrid" ? "" : m)}
                 title={
-                  m === "semantic" ? `${providerName} text-to-image similarity`
-                  : m === "keyword" ? "BM25 full-text over captions + VLM tags (Porter-stemmed)"
-                  : "Reciprocal-rank fusion of semantic + keyword"
+                  modeLockedReason
+                  ?? (m === "semantic" ? `${providerName} text-to-image similarity`
+                    : m === "keyword" ? "BM25 full-text over captions + VLM tags (Porter-stemmed)"
+                    : "Reciprocal-rank fusion of semantic + keyword")
                 }
               >
                 {m}
