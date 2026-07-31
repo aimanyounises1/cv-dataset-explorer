@@ -1628,9 +1628,13 @@ input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible
    positioned box collapses to nothing. "Not measured" must not draw as "easiest". */
 .grid[data-signal] .card::before {
   content: ""; position: absolute; left: 0; top: 0; z-index: 1;
-  width: 3px; height: calc(var(--sig) * 10%);
+  /* 6px, not 3: at 3px the edge was measurably drawn and perceptually absent —
+     the difference between a 2 and a 7 could not be read without magnifying a
+     screenshot, so the encoding did no work for the eye it exists for. The
+     opacity floor rises for the same reason: the lowest scores were ghosts. */
+  width: 6px; height: calc(var(--sig) * 10%);
   background: var(--accent);
-  opacity: calc(0.35 + var(--sig) / 18);
+  opacity: calc(0.6 + var(--sig) / 25);
   border-bottom-right-radius: 2px;
 }
 .grid[data-signal="legibility"] .card { --sig: var(--ax-legibility); }

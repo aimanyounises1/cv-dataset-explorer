@@ -71,7 +71,13 @@ export default function AxisLegend({ signal, onSignal }: {
           ))}
         </span>
       )}
-      <span className="axis-legend-scale">taller = harder</span>
+      {/* Only where a bar is actually drawn. In the gallery with the edge off,
+          this described an encoding nothing on screen was using, which made the
+          control read as broken rather than as off. The key mode (no picker)
+          always draws its sparkline, so it always earns the caption. */}
+      {(!onSignal || signal) && (
+        <span className="axis-legend-scale">taller = harder</span>
+      )}
       <button className="axis-legend-more" aria-expanded={open}
               onClick={() => setOpen((v) => !v)}
               title="What these bars measure">
