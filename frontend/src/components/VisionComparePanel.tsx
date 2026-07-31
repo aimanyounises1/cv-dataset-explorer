@@ -109,17 +109,21 @@ export default function VisionComparePanel({ aId, bId, onGround }: Props) {
   const groundingCount = proposal
     ? proposal.grounding_terms_a.length + proposal.grounding_terms_b.length
     : 0;
+  const sources = result ? [result.image_a, result.image_b] : [];
+  const decoded = sources.filter((s) => s.decode_status === "decoded").length;
   const stages = [
     {
       label: "Asset health",
       detail: result
-        ? "2 / 2 decoded"
+        ? `${decoded} / ${sources.length} decoded`
         : runState === "running"
           ? "pending server result"
           : runState === "failed"
             ? "not confirmed by completed run"
             : "will be verified before inference",
-      state: result ? "complete" : "queued",
+      state: result
+        ? (decoded === sources.length ? "complete" : "failed")
+        : "queued",
       authority: "measurement",
     },
     {
@@ -130,7 +134,11 @@ export default function VisionComparePanel({ aId, bId, onGround }: Props) {
           ? `${proposal?.differences.length ?? 0} differences proposed`
           : runState === "failed"
             ? "comparison failed"
-            : "ready",
+            : !loaded
+              ? "checking the local inspector"
+              : ready
+                ? "ready"
+                : "no inspector available",
       state: runState === "complete"
         ? "complete"
         : runState === "failed"
@@ -143,18 +151,6 @@ export default function VisionComparePanel({ aId, bId, onGround }: Props) {
       detail: groundingCount > 0 ? `${groundingCount} phrases proposed` : "choose after comparison",
       state: groundingCount > 0 ? "ready" : "queued",
       authority: "model",
-    },
-    {
-      label: "Segment & isolate",
-      detail: "after a box is chosen",
-      state: "queued",
-      authority: "model",
-    },
-    {
-      label: "Human review",
-      detail: "required before annotation",
-      state: "queued",
-      authority: "human",
     },
   ] as const;
 
