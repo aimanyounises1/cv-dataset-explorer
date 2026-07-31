@@ -1,6 +1,7 @@
 # CV Dataset Explorer
 
 [![CI](https://github.com/aimanyounises1/cv-dataset-explorer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/aimanyounises1/cv-dataset-explorer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A local workspace for exploring, auditing, comparing, and curating the
 [Flickr8k](https://huggingface.co/datasets/jxie/flickr8k) image-caption dataset.
