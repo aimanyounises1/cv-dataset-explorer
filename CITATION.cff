@@ -1,0 +1,39 @@
+# Citation metadata for the tool, which GitHub renders as "Cite this
+# repository". Deliberately says nothing about the dataset's own citation: this
+# software and the Flickr8k copy it reads are separate artifacts with separate
+# terms, and the README's Data provenance section is where that copy is
+# described.
+#
+# No `version` or `date-released` field, because there is no tagged release to
+# name yet. Both belong here the day one exists.
+cff-version: 1.2.0
+message: >-
+  If you use this tool in work you publish, please cite it. The Flickr8k copy it
+  explores carries its own terms and its own citation; see the Data provenance
+  section of the README.
+title: CV Dataset Explorer
+type: software
+authors:
+  - given-names: Aiman
+    family-names: Younis
+    alias: aimanyounises1
+repository-code: https://github.com/aimanyounises1/cv-dataset-explorer
+abstract: >-
+  A local workspace for exploring, auditing, comparing and curating the Flickr8k
+  image-caption dataset. Keyword, semantic, hybrid, image and region search over
+  SigLIP 2 embeddings with a hubness-corrected ranking; an embedding map;
+  caption-consistency, difficulty, near-duplicate and split-leakage audits;
+  optional local detection and segmentation whose output stays a proposal until a
+  reviewer accepts it; and reproducible album exports with provenance manifests.
+  React, FastAPI and SQLite, with no cloud service, hosted search, external
+  vector database or paid API on the request path.
+keywords:
+  - computer-vision
+  - image-captioning
+  - flickr8k
+  - multimodal-retrieval
+  - siglip
+  - dataset-curation
+  - data-centric-ai
+  - fastapi
+  - react
