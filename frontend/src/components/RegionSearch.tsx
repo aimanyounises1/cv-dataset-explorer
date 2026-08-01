@@ -128,6 +128,7 @@ export default function RegionSearch({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const toolsRef = useRef<HTMLDetailsElement | null>(null);
   const detectorInputRef = useRef<HTMLInputElement | null>(null);
+  const handledSuggestionRef = useRef<number | null>(null);
   const instructionsId = useId();
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [pendingBox, setPendingBox] = useState<SegmentBox | null>(null);
@@ -152,11 +153,16 @@ export default function RegionSearch({
     setSteer("");
     setExportingId(null);
     setExportError(null);
+    handledSuggestionRef.current = null;
   }, [sampleId]);
 
   useEffect(() => {
-    if (!detectorSuggestion) return undefined;
+    if (!detectorSuggestion) return;
     editor.setDetectQuery(detectorSuggestion.query);
+  }, [detectorSuggestion, editor.setDetectQuery]);
+
+  useEffect(() => {
+    if (!detectorSuggestion) return undefined;
     if (imageState !== "decoded") return undefined;
     setAnnotationMode(true);
     const frame = requestAnimationFrame(() => {
@@ -164,7 +170,30 @@ export default function RegionSearch({
       detectorInputRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [detectorSuggestion, editor.setDetectQuery, imageState]);
+  }, [detectorSuggestion, imageState]);
+
+  useEffect(() => {
+    if (
+      !detectorSuggestion
+      || imageState !== "decoded"
+      || editor.detectStatus?.ready !== true
+      || editor.segmentStatus === null
+      || editor.busy !== null
+      || handledSuggestionRef.current === detectorSuggestion.token
+    ) return;
+    handledSuggestionRef.current = detectorSuggestion.token;
+    void editor.suggest({
+      query: detectorSuggestion.query,
+      selectTopProposal: true,
+    });
+  }, [
+    detectorSuggestion,
+    editor.busy,
+    editor.detectStatus?.ready,
+    editor.segmentStatus,
+    editor.suggest,
+    imageState,
+  ]);
 
   const normalizedPoint = useCallback((clientX: number, clientY: number): Point | null => {
     const stage = stageRef.current;
@@ -364,6 +393,15 @@ export default function RegionSearch({
             ?? "Promptable segmentation is unavailable. Draw a box to search by region."}
         </div>
       )}
+      {annotationMode
+        && detectorSuggestion
+        && editor.detectStatus?.ready === false
+        && (
+          <div className="notice rs-model-note">
+            Automatic grounding could not run. {editor.detectStatus.reason
+              ?? "The detector is unavailable; manual points and boxes remain available."}
+          </div>
+        )}
 
       {/* The tools wait; the photograph does not.
           Measured, this panel put 316px of chrome above the subject at 1440 and
@@ -398,9 +436,10 @@ export default function RegionSearch({
         <p className="rs-note">
           Grounding DINO proposes boxes from the fixed person, animal, vehicle,
           and object vocabulary when left blank, or aligns regions to expert
-          phrases. Scores only rank phrase alignment within this run; they are
-          not probabilities. Choose one instance, then guide SAM2; neither
-          proposal becomes a label until you save it.
+          phrases. A grounded comparison phrase previews the top-ranked box with
+          SAM2; manual detector runs leave every box available to choose. Scores
+          only rank phrase alignment within one run and are not probabilities.
+          Review or correct the draft; it becomes a label only when you save it.
         </p>
 
         <dl className="rs-model-contract">
@@ -462,7 +501,8 @@ export default function RegionSearch({
             maxLength={300}
             placeholder="Blank = person, animal, vehicle, object"
           />
-          <button type="button" className="ghost" onClick={editor.suggest}
+          <button type="button" className="ghost"
+                  onClick={() => void editor.suggest()}
                   disabled={anyBusy || (
                     editor.detectQuery.trim().length > 0
                     && editor.detectQuery.trim().length < 3

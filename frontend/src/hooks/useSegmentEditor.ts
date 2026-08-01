@@ -31,6 +31,17 @@ export interface RegionResults {
   scoreBasis?: string | null;
 }
 
+interface DetectorRun {
+  model: string;
+  revision: string;
+  queries: string;
+}
+
+interface DetectRunOptions {
+  query?: string;
+  selectTopProposal?: boolean;
+}
+
 const aborted = (error: unknown) =>
   error instanceof DOMException && error.name === "AbortError";
 
@@ -69,11 +80,7 @@ export function useSegmentEditor(sampleId: number) {
   const [parentName, setParentName] = useState("");
   const [detectQuery, setDetectQuery] = useState("");
   const [proposals, setProposals] = useState<DetectBox[]>([]);
-  const [detectorRun, setDetectorRun] = useState<{
-    model: string;
-    revision: string;
-    queries: string;
-  } | null>(null);
+  const [detectorRun, setDetectorRun] = useState<DetectorRun | null>(null);
   const [proposalSource, setProposalSource] =
     useState<DetectionProposalSource | null>(null);
   const [proposalToken, setProposalToken] = useState<string | null>(null);
@@ -251,12 +258,16 @@ export function useSegmentEditor(sampleId: number) {
     void requestSegment(points, next);
   }, [points, requestSegment]);
 
-  const useProposal = useCallback((proposal: DetectBox) => {
+  const applyProposal = useCallback((
+    proposal: DetectBox,
+    run: DetectorRun | null,
+    remaining: DetectBox[] = [],
+  ) => {
     if (busyKind.current !== null) return;
     const next = {
       x: proposal.x, y: proposal.y, w: proposal.w, h: proposal.h,
     };
-    setProposals([]);
+    setProposals(remaining);
     setBox(next);
     setSelectedId(null);
     const leaf = proposal.label_name?.trim()
@@ -273,11 +284,11 @@ export function useSegmentEditor(sampleId: number) {
     // draft). The proposal label and its resolved parent must travel together.
     setLabelName(leaf);
     setParentName(explicitParent);
-    setProposalSource(detectorRun ? {
+    setProposalSource(run ? {
       kind: "detector",
-      model_id: detectorRun.model,
-      model_revision: detectorRun.revision,
-      queries: detectorRun.queries,
+      model_id: run.model,
+      model_revision: run.revision,
+      queries: run.queries,
       original_label: proposal.label,
       proposed_label: leaf,
       score: proposal.score,
@@ -285,7 +296,11 @@ export function useSegmentEditor(sampleId: number) {
     } : null);
     setProposalToken(proposal.proposal_token);
     void requestSegment(points, next);
-  }, [detectorRun, points, requestSegment, taxonomy]);
+  }, [points, requestSegment, taxonomy]);
+
+  const useProposal = useCallback((proposal: DetectBox) => {
+    applyProposal(proposal, detectorRun);
+  }, [applyProposal, detectorRun]);
 
   const updateDetectQuery = useCallback((value: string) => {
     detectQueryRef.current = value;
@@ -300,7 +315,7 @@ export function useSegmentEditor(sampleId: number) {
     setDetectorRun(null);
   }, []);
 
-  const suggest = useCallback(async () => {
+  const suggest = useCallback(async (options: DetectRunOptions = {}) => {
     const operation = beginBusy("detect");
     if (operation === null) return;
     detectAbort.current?.abort();
@@ -309,7 +324,7 @@ export function useSegmentEditor(sampleId: number) {
     setError(null);
     setProposals([]);
     setDetectorRun(null);
-    const requestedQuery = detectQuery.trim();
+    const requestedQuery = (options.query ?? detectQueryRef.current).trim();
     setAnnouncement(requestedQuery
       ? "Finding regions aligned with the supplied phrases."
       : "Auto-detecting regions from the fixed vocabulary.");
@@ -321,12 +336,21 @@ export function useSegmentEditor(sampleId: number) {
         setAnnouncement("Detection phrases changed; discarded the stale proposals.");
         return;
       }
-      setProposals(response.boxes);
-      setDetectorRun({
+      const run = {
         model: response.model,
         revision: response.revision,
         queries: response.queries,
-      });
+      };
+      setProposals(response.boxes);
+      setDetectorRun(run);
+      if (options.selectTopProposal && response.boxes.length > 0) {
+        // The detector operation must release its lock before the selected box
+        // can start SAM. `endBusy` is epoch-guarded, so this function's finally
+        // cannot clear the newer segmentation operation.
+        endBusy(operation);
+        applyProposal(response.boxes[0], run, response.boxes.slice(1));
+        return;
+      }
       setAnnouncement(response.boxes.length
         ? `${response.boxes.length} detector proposals ready. Choose one to segment.`
         : requestedQuery
@@ -340,7 +364,7 @@ export function useSegmentEditor(sampleId: number) {
     } finally {
       endBusy(operation);
     }
-  }, [beginBusy, detectQuery, endBusy, sampleId]);
+  }, [applyProposal, beginBusy, endBusy, sampleId]);
 
   const clearDraft = useCallback(() => {
     if (busyKind.current !== null) return;

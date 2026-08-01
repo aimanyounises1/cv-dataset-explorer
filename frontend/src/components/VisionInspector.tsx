@@ -491,8 +491,8 @@ export default function VisionInspector({ sample, onDetectorQuery }: Props) {
       </header>
       <p className="vi-intro">
         Compare a structured VLM proposal, then hand useful concepts to measured
-        search or the detector → mask workflow. Nothing here becomes a label
-        automatically.
+        search or the detector → mask workflow. Nothing here is stored as a
+        label automatically.
       </p>
 
       <div className="vi-tasks" role="tablist" aria-label="Vision inspection task">

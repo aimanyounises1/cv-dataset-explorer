@@ -88,14 +88,14 @@ stored under `backend/data/` in both workflows.
 | Inspect one sample | Review the source image, five captions, metadata, quality signals, nearest neighbours, and search provenance in one place. |
 | Audit the dataset | Explore the embedding map, caption consistency, difficulty axes, split leakage, near-duplicates, and retrieval quality. |
 | Detect and segment | Ground an open-vocabulary phrase with Grounding DINO, refine it with SAM 2.1, and require human review before saving a mask. |
-| Compare two frames | Use synchronized zoom, corruption checks, stored signals, and an optional local semantic-difference proposal. |
+| Compare two frames | Use synchronized zoom, corruption checks, stored signals, an optional local semantic-difference proposal, and a grounding phrase that opens a detector-to-mask draft for review. |
 | Curate and export | Save ordered albums and export slices, accepted masks, transparent cutouts, and provenance manifests. |
 
 ![Embedding map for dataset-level exploration](assets/embedding-map.jpg)
 
-Model output is always presented as a proposal. A VLM result never becomes a
-caption or label automatically, and a detector or segmentation result is not
-stored until a reviewer accepts it.
+Model output is always presented as a proposal. A VLM result can seed a
+detector-to-mask draft, but no caption, label, detector box, or segmentation is
+stored until a reviewer explicitly accepts it.
 
 ![Local vision inspection with a structured proposal](assets/vision-inspector.jpg)
 
@@ -220,6 +220,10 @@ arbitrary class names. Free-text phrases remain available for targeted
 grounding, separated by periods and normalized to the detector's own
 candidate-label format, so `dog` and `a dog.` describe the same query. Scores
 rank phrase alignment within one run; they are not calibrated probabilities.
+When a vision proposal hands off one phrase, the sample page automatically runs
+the detector and previews its top-ranked box with SAM 2.1. Lower-ranked boxes
+remain available for correction, and the draft is not stored until the reviewer
+selects **Accept & save**.
 
 ### LangChain/LangGraph assistant
 

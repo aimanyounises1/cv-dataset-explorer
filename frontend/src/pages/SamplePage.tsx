@@ -76,8 +76,8 @@ export default function SamplePage() {
 
   // A pair-comparison proposal can hand one visible noun phrase to this
   // sample's open-vocabulary detector. The URL keeps that hand-off explicit
-  // and reproducible; RegionSearch still requires the user to run detection,
-  // choose a box, refine the mask, and save the annotation.
+  // and reproducible. RegionSearch runs the detector, opens its top-ranked box
+  // as a SAM preview, and still requires explicit review before persistence.
   const detectorFromUrl = searchParams.get("detector");
   useEffect(() => {
     const query = detectorFromUrl?.trim().replace(/\s+/g, " ") ?? "";

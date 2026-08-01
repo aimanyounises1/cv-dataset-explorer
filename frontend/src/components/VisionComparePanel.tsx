@@ -164,7 +164,8 @@ export default function VisionComparePanel({ aId, bId, onGround }: Props) {
           <h2 id="vision-compare-title">Visual difference</h2>
           <p>
             Decode checks run first. A local vision model then proposes semantic
-            differences; detector and mask actions remain separate, reviewable steps.
+            differences. Choosing a grounding phrase opens a detector-to-mask
+            draft; saving remains a separate review step.
           </p>
         </div>
         <span className="vc-authority">Model proposal</span>
@@ -320,7 +321,7 @@ export default function VisionComparePanel({ aId, bId, onGround }: Props) {
             <div className="vc-grounding">
               <div>
                 <h3>Ground in image A</h3>
-                <p>Pass one phrase to the open-vocabulary detector.</p>
+                <p>Open the top-ranked detector box as a SAM2 draft for review.</p>
                 <div>
                   {proposal.grounding_terms_a.map((term) => (
                     <button
@@ -336,7 +337,7 @@ export default function VisionComparePanel({ aId, bId, onGround }: Props) {
               </div>
               <div>
                 <h3>Ground in image B</h3>
-                <p>Geometry remains a proposal until human review.</p>
+                <p>The mask remains a proposal until you explicitly save it.</p>
                 <div>
                   {proposal.grounding_terms_b.map((term) => (
                     <button

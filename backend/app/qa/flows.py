@@ -787,6 +787,320 @@ def compare(pg, ok):
        f"{toggles} Draw region toggles")
 
 
+@flow("Automatic grounding draft", budget_s=60.0)
+def automatic_grounding_draft(pg, ok):
+    """A Compare phrase opens a reviewable detector + SAM draft, never a write."""
+    sample_a, sample_b = 614, 7572
+    query = "climber in red jacket"
+    top_box = {"x": 0.2, "y": 0.1, "w": 0.3, "h": 0.7}
+    other_box = {"x": 0.62, "y": 0.2, "w": 0.2, "h": 0.3}
+    mask_data_url = (
+        "data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'"
+        "%3E%3C/svg%3E"
+    )
+    state = {"detect_ready": True, "segment_ready": True, "boxes": True}
+    vision_calls = []
+    detect_calls = []
+    segment_calls = []
+    annotation_requests = []
+
+    def vision_models(route):
+        route.fulfill(json={
+            "default_model": config.VISION_PAIR_MODEL,
+            "models": [],
+            "pair_comparison": {
+                "ready": True,
+                "reason": None,
+                "provider": "ollama",
+                "model": config.VISION_PAIR_MODEL,
+                "model_digest": config.VISION_PAIR_MODEL_DIGEST,
+                "runtime": "ollama",
+                "runtime_version": config.VISION_PAIR_RUNTIME_VERSION,
+                "adapter_id": "ollama_sequential_frames",
+                "adapter_version": 1,
+                "protocol": "sequential_frames_v1",
+            },
+        })
+
+    def pair_source(sample_id, filename, split):
+        return {
+            "sample_id": sample_id,
+            "filename": filename,
+            "split": split,
+            "image_sha256": config.VISION_PAIR_MODEL_DIGEST,
+            "decode_status": "decoded",
+            "width": 640,
+            "height": 480,
+            "mode": "RGB",
+            "byte_length": 1,
+        }
+
+    def vision_compare(route):
+        vision_calls.append(route.request.post_data_json)
+        route.fulfill(json={
+            "epistemic_status": "model_proposal",
+            "task": "semantic_difference",
+            "image_a": pair_source(sample_a, "train_000613.jpg", "train"),
+            "image_b": pair_source(sample_b, "test_000571.jpg", "test"),
+            "model": config.VISION_PAIR_MODEL,
+            "model_digest": config.VISION_PAIR_MODEL_DIGEST,
+            "provider": "ollama",
+            "runtime": "ollama",
+            "runtime_version": config.VISION_PAIR_RUNTIME_VERSION,
+            "adapter_id": "ollama_sequential_frames",
+            "adapter_version": 1,
+            "protocol": "sequential_frames_v1",
+            "prompt_version": 1,
+            "schema_version": 1,
+            "request_sha256": config.VISION_PAIR_MODEL_DIGEST,
+            "proposal_id": "vp_" + config.VISION_PAIR_MODEL_DIGEST[:32],
+            "latency_ms": 1,
+            "proposal": {
+                "kind": "pair_comparison",
+                "summary": "The climber moved.",
+                "shared": ["An ice wall is visible."],
+                "only_a": [],
+                "only_b": [],
+                "differences": [],
+                "uncertainties": [],
+                "grounding_terms_a": [query],
+                "grounding_terms_b": ["climber near overhang"],
+            },
+            "note": "Fixture comparison proposal.",
+        })
+
+    def detect_status(route):
+        ready = state["detect_ready"]
+        route.fulfill(json={
+            "ready": ready,
+            "reason": None if ready else "Detector fixture unavailable.",
+            "model": config.DETECT_MODEL,
+            "revision": config.DETECT_REVISION,
+        })
+
+    def segment_status(route):
+        ready = state["segment_ready"]
+        route.fulfill(json={
+            "ready": ready,
+            "reason": None if ready else "Segmenter fixture unavailable.",
+            "model": config.SEGMENT_MODEL,
+            "revision": config.SEGMENT_REVISION,
+        })
+
+    def detect(route):
+        body = route.request.post_data_json
+        detect_calls.append(body)
+        boxes = []
+        if state["boxes"]:
+            boxes = [
+                {
+                    **top_box,
+                    "label": "climber",
+                    "label_name": "climber",
+                    "parent_name": "person",
+                    "label_path": ["person", "climber"],
+                    "score": 0.81,
+                    "proposal_token": "d" * 64,
+                },
+                {
+                    **other_box,
+                    "label": "ice wall",
+                    "label_name": "ice wall",
+                    "score": 0.42,
+                    "proposal_token": "e" * 64,
+                },
+            ]
+        route.fulfill(json={
+            "sample_id": sample_a,
+            "model": config.DETECT_MODEL,
+            "revision": config.DETECT_REVISION,
+            "queries": body["queries"],
+            "boxes": boxes,
+            "note": "Fixture proposal",
+        })
+
+    def segment(route):
+        body = route.request.post_data_json
+        segment_calls.append(body)
+        route.fulfill(json={
+            "sample_id": sample_a,
+            "preview_token": "s" * 64,
+            "source_sha256": "a" * 64,
+            "mask_sha256": "b" * 64,
+            "prompt": {"points": body["points"], "box": body.get("box")},
+            "mask_data_url": mask_data_url,
+            "bbox": body["box"],
+            "area_fraction": 0.21,
+            "predicted_iou": 0.92,
+            "model": config.SEGMENT_MODEL,
+            "model_revision": config.SEGMENT_REVISION,
+            "mask_width": 1,
+            "mask_height": 1,
+        })
+
+    def annotations(route):
+        method = route.request.method
+        body = route.request.post_data_json if method == "POST" else None
+        annotation_requests.append({"method": method, "body": body})
+        if method == "GET":
+            route.fulfill(json=[])
+            return
+        route.fulfill(json={
+            "id": 9001,
+            "sample_id": sample_a,
+            "kind": "mask",
+            "geometry": top_box,
+            "label": "climber",
+            "created_at": "2026-08-01T00:00:00Z",
+            "label_name": "climber",
+            "parent_name": "person",
+            "label_path": ["person", "climber"],
+            "points": [],
+            "box": top_box,
+            "bbox": top_box,
+            "mask_data_url": mask_data_url,
+            "mask_width": 1,
+            "mask_height": 1,
+            "model_id": config.SEGMENT_MODEL,
+            "model_revision": config.SEGMENT_REVISION,
+            "prompt": {"points": [], "box": top_box},
+            "predicted_iou": 0.92,
+        })
+
+    pg.route("**/api/vision/models", vision_models)
+    pg.route("**/api/vision/compare", vision_compare)
+    pg.route("**/api/detect/status", detect_status)
+    pg.route("**/api/segment/status", segment_status)
+    pg.route("**/api/detect", detect)
+    pg.route("**/api/segment", segment)
+    pg.route("**/api/samples/614/segment-annotations", annotations)
+
+    pg.goto(
+        url(f"/compare?a={sample_a}&b={sample_b}"),
+        wait_until="domcontentloaded",
+    )
+    pg.wait_for_selector(".vision-compare button.primary:enabled")
+    pg.click(".vision-compare button.primary")
+    pg.wait_for_selector(".vc-grounding > div:first-child button")
+    pg.click(".vc-grounding > div:first-child button")
+    pg.wait_for_selector(".rs-mask")
+
+    ok(
+        "Compare sends the exact ordered pair request",
+        vision_calls == [{"a_sample_id": sample_a, "b_sample_id": sample_b}],
+        str(vision_calls),
+    )
+    ok(
+        "grounding button keeps its sample and phrase",
+        f"/samples/{sample_a}?detector=climber%20in%20red%20jacket" in pg.url,
+        pg.url,
+    )
+    ok(
+        "grounding handoff sends the exact detector request",
+        detect_calls == [{"sample_id": sample_a, "queries": query}],
+        str(detect_calls),
+    )
+    ok(
+        "top grounded box sends the exact mask preview request",
+        segment_calls == [{"sample_id": sample_a, "points": [], "box": top_box}],
+        str(segment_calls),
+    )
+    ok(
+        "lower-ranked boxes remain available for correction",
+        len(pg.query_selector_all(".rs-box")) == 1,
+    )
+    ok(
+        "automatic draft renders the mask and review workbench",
+        bool(pg.query_selector(".rs-mask"))
+        and bool(pg.query_selector(".rs-workbench")),
+    )
+    label = pg.input_value(".rs-fields input[aria-label='Annotation class']")
+    ok("draft uses the detector's resolved class", label == "climber", label)
+    provenance = pg.get_attribute(".rs-metrics dd[title]", "title") or ""
+    ok(
+        "draft preserves the grounding phrase in provenance",
+        query in provenance,
+        provenance,
+    )
+    ok(
+        "draft waits for explicit acceptance",
+        {item["method"] for item in annotation_requests} == {"GET"}
+        and pg.is_enabled(".rs-primary-actions button:has-text('Accept & save')"),
+        str(annotation_requests),
+    )
+
+    pg.click(".rs-primary-actions button:has-text('Accept & save')")
+    pg.wait_for_selector(".rs-live:has-text('Accepted')")
+    writes = [
+        item["body"] for item in annotation_requests
+        if item["method"] == "POST"
+    ]
+    ok(
+        "explicit acceptance forwards the reviewed draft exactly",
+        writes == [{
+            "points": [],
+            "box": top_box,
+            "label_name": "climber",
+            "parent_name": "person",
+            "preview_token": "s" * 64,
+            "mask_data_url": mask_data_url,
+            "proposal_token": "d" * 64,
+        }],
+        str(writes),
+    )
+
+    state.update(detect_ready=True, segment_ready=True, boxes=False)
+    detect_calls.clear()
+    segment_calls.clear()
+    pg.goto(
+        url(f"/samples/{sample_a}?detector=unmatched%20target"),
+        wait_until="domcontentloaded",
+    )
+    pg.wait_for_selector(".rs-live:has-text('found no regions')")
+    ok(
+        "no grounded box stops before segmentation with an explanation",
+        detect_calls == [{"sample_id": sample_a, "queries": "unmatched target"}]
+        and not segment_calls
+        and not pg.query_selector(".rs-workbench"),
+    )
+
+    state.update(detect_ready=False, segment_ready=True, boxes=True)
+    detect_calls.clear()
+    segment_calls.clear()
+    pg.goto(
+        url(f"/samples/{sample_a}?detector=unavailable%20target"),
+        wait_until="domcontentloaded",
+    )
+    pg.wait_for_selector(
+        ".rs-model-note:has-text('Automatic grounding could not run')",
+    )
+    ok(
+        "an unavailable detector is explained without model calls",
+        not detect_calls and not segment_calls,
+    )
+
+    state.update(detect_ready=True, segment_ready=False, boxes=True)
+    detect_calls.clear()
+    segment_calls.clear()
+    pg.goto(
+        url(f"/samples/{sample_a}?detector=segment%20fallback"),
+        wait_until="domcontentloaded",
+    )
+    pg.wait_for_selector(".rs-workbench")
+    message = pg.text_content(".rs-live") or ""
+    ok(
+        "an unavailable segmenter leaves an honest box-only draft",
+        detect_calls == [{"sample_id": sample_a, "queries": "segment fallback"}]
+        and not segment_calls
+        and not pg.query_selector(".rs-mask")
+        and not pg.is_enabled(
+            ".rs-primary-actions button:has-text('Accept & save')",
+        )
+        and "No segmenter is available" in message,
+        message,
+    )
+
+
 @flow("Hero journey", budget_s=180.0)
 def hero_journey(pg, ok):
     """The workspace's spine as one continuous story: search -> inspect
