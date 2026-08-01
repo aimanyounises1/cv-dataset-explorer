@@ -18,6 +18,9 @@ paid API.
 
 ![Searchable Flickr8k gallery](assets/gallery.jpg)
 
+For a task-by-task tour of every user-facing route and cross-page handoff, see
+the [visual workflow guide](docs/workflows.md).
+
 ## Run locally
 
 ### Requirements
@@ -93,15 +96,16 @@ stored under `backend/data/` in both workflows.
 
 ![Embedding map for dataset-level exploration](assets/embedding-map.jpg)
 
-Model output is always presented as a proposal. A VLM result can seed a
-detector-to-mask draft, but no caption, label, detector box, or segmentation is
-stored until a reviewer explicitly accepts it.
+Model output is always presented as a proposal. VLM captions and semantic
+comparisons remain read-only. Proposed classes and detector boxes can seed a
+mask draft; only the reviewed annotation is persisted through **Accept &
+save**. Generated album summaries are persisted only when explicitly saved.
 
 ![Local vision inspection with a structured proposal](assets/vision-inspector.jpg)
 
 ![Grounding DINO box refined into a reviewable SAM 2.1 mask](assets/segmentation.jpg)
 
-![Two-frame semantic comparison after source validation](assets/pair-comparison.jpg)
+![Completed two-frame semantic comparison with grounding handoffs](assets/pair-comparison.jpg)
 
 ## Reading a result set
 
