@@ -19,23 +19,32 @@ fused only the top ten of each path; both are cheaper, and both measured
 something the application never runs — the cached vectors are encodings of the
 *raw* caption text, which is not what a search request produces.
 """
+import hashlib
 import json
+import logging
 import sqlite3
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 
 import numpy as np
 from fastapi import APIRouter, Depends, Query
 
 from .. import config, db
 from ..ml import hubness
-from ..schemas import EvalModeResult, EvalResponse
+from ..ml.index import ranked_rows
+from ..schemas import EvalMetadata, EvalModeResult, EvalResponse
 from . import search as search_api
 from .deps import get_conn
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 KS = (1, 5, 10)
 TOP = 10
 ENCODE_BATCH = 128
+SAMPLE_SEED = 42
+TIE_POLICY = "score_desc_item_id_asc"
+RUNTIME_PACKAGES = ("numpy", "torch", "transformers", "sentence-transformers", "pydantic")
 # Bumped whenever the protocol or reported metrics change, so a cached result
 # from an older definition is never served as if it were current.
 #   4: queries encoded live (normalized) instead of read from the caption index;
@@ -63,7 +72,22 @@ ENCODE_BATCH = 128
 #  10: hybrid mean_candidates counts unique corpus images. The semantic stage
 #      already evaluates every image, so adding the lexical pool double-counted
 #      overlapping images and could report more candidates than the corpus.
-PROTOCOL_VERSION = 10
+#  11: semantic and fused input ranks use the same deterministic item-ID tie
+#      breaker as search. Equal embeddings no longer all receive rank one.
+#      Responses carry the query sample, generation and effective configuration.
+PROTOCOL_VERSION = 11
+
+
+def _runtime_versions() -> dict[str, str | None]:
+    """Identify the query/ranking runtime independently of ingest-time versions."""
+    versions = {}
+    for package in RUNTIME_PACKAGES:
+        try:
+            versions[package] = version(package)
+        except PackageNotFoundError:
+            versions[package] = None
+            logger.debug("Optional evaluation package %s is not installed", package)
+    return versions
 
 
 def _cache_path(
@@ -71,6 +95,8 @@ def _cache_path(
     runtime=None,
     *,
     live_encoder: bool | None = None,
+    corpus_sha256: str = "",
+    runtime_versions: dict[str, str | None] | None = None,
 ):
     """Key on everything the result actually depends on.
 
@@ -97,6 +123,8 @@ def _cache_path(
     encoder_mode = (
         f"_{'live' if live_encoder else 'stored'}"
         if live_encoder is not None else "")
+    runtime_stamp = hashlib.sha256(json.dumps(
+        runtime_versions or {}, sort_keys=True).encode("utf-8")).hexdigest()[:12]
     stamp = 0.0
     for embs in ("image_embeddings.npy", "caption_embeddings.npy"):
         p = emb_dir / embs
@@ -106,7 +134,7 @@ def _cache_path(
         stamp = max(stamp, config.DB_PATH.stat().st_mtime)
     return (config.CACHE_DIR /
             f"eval_v{PROTOCOL_VERSION}_{provider}{generation}{encoder_mode}"
-            f"_{sample_size}_k{config.RRF_K}"
+            f"_{corpus_sha256[:12]}_{runtime_stamp}_{sample_size}_k{config.RRF_K}"
             f"_d{config.SEARCH_DEPTH}"
             # The hubness constants re-rank the semantic path, so they belong in
             # the key for exactly the reason RRF_K does.
@@ -128,7 +156,7 @@ def lexical_candidates(conn, text: str, own_caption_id: int, limit: int = TOP):
     return conn.execute(
         "SELECT c.sample_id AS sid, MIN(rank) AS best FROM captions_fts f "
         "JOIN captions c ON c.id = f.rowid WHERE captions_fts MATCH ? "
-        "AND c.id != ? GROUP BY c.sample_id ORDER BY best LIMIT ?",
+        "AND c.id != ? GROUP BY c.sample_id ORDER BY best, c.sample_id LIMIT ?",
         (match, own_caption_id, limit)).fetchall()
 
 
@@ -246,16 +274,24 @@ def retrieval_benchmark(
     img = indexes.image_index
     cap = indexes.caption_index
 
+    all_rows = conn.execute(
+        "SELECT id, sample_id, text FROM captions ORDER BY id").fetchall()
+    corpus_sha256 = hashlib.sha256(json.dumps(
+        [tuple(row) for row in all_rows], ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    runtime_versions = _runtime_versions()
     cache = _cache_path(
         sample_size,
         runtime,
         live_encoder=embedder is not None,
+        corpus_sha256=corpus_sha256,
+        runtime_versions=runtime_versions,
     )
     if cache.exists():
         return EvalResponse(**json.loads(cache.read_text()))
 
-    rows = conn.execute("SELECT id, sample_id, text FROM captions ORDER BY id").fetchall()
-    rows = [r for r in rows if cap.row_of(r["id"]) is not None
+    rows = [r for r in all_rows if cap.row_of(r["id"]) is not None
             and img.row_of(r["sample_id"]) is not None]
     # Hold the hubness bank out of the benchmark. Those captions were used to
     # build the per-image penalty the semantic path now subtracts, so scoring
@@ -263,7 +299,13 @@ def retrieval_benchmark(
     # the same class of mistake as the self-retrieval this file already guards.
     bank = set(hubness.bank_caption_ids(conn, index=img))
     rows = [r for r in rows if r["id"] not in bank]
-    rng = np.random.default_rng(42)
+    if not rows:
+        logger.warning("Retrieval evaluation has no eligible caption queries")
+        return EvalResponse(
+            available=False,
+            message="No eligible caption queries remain after index alignment "
+                    "and hubness-bank exclusion. Rebuild aligned indexes first.")
+    rng = np.random.default_rng(SAMPLE_SEED)
     picked = [rows[i] for i in rng.choice(len(rows), min(sample_size, len(rows)),
                                           replace=False)]
 
@@ -284,7 +326,8 @@ def retrieval_benchmark(
                    "queries were taken from the "
                    "stored caption vectors (raw, un-normalized text) instead of "
                    "being encoded the way /api/search encodes them. The semantic "
-                   "and hybrid rows understate the shipped path.")
+                   "and hybrid rows are a stored-vector baseline, not a "
+                   "measurement of the live search encoder.")
 
     # Semantic: full score matrix (S x N), exact ranks. The hubness penalty is
     # subtracted here for the same reason the queries are encoded live — the
@@ -298,15 +341,15 @@ def retrieval_benchmark(
     )
     if penalty is not None:
         scores = scores - penalty
-    own = scores[np.arange(len(picked)), target_cols]
-    sem_ranks = (scores > own[:, None]).sum(axis=1)
-
-    # Semantic id lists for fusion, taken to the same depth run_search fuses to.
-    k = min(depth, scores.shape[1])
-    top_cols = np.argpartition(-scores, k - 1, axis=1)[:, :k]
-    row_order = np.take_along_axis(scores, top_cols, axis=1).argsort(axis=1)[:, ::-1]
-    top_cols = np.take_along_axis(top_cols, row_order, axis=1)
-    sem_lists = [[int(img.ids[c]) for c in row] for row in top_cols]
+    # Use the shipped search order, including ties. Counting strictly greater
+    # scores would optimistically award every identical embedding rank one.
+    sem_ranks = np.empty(len(picked), dtype=np.int64)
+    sem_lists = []
+    for i, score_row in enumerate(scores):
+        order = ranked_rows(score_row, img.ids)
+        matches = np.flatnonzero(order == target_cols[i])
+        sem_ranks[i] = int(matches[0]) if len(matches) else len(img.ids)
+        sem_lists.append([int(img.ids[col]) for col in order[:depth]])
 
     kw_lists, kw_pool = _keyword_paths(conn, texts, [r["id"] for r in picked], depth)
     kw_ranks = _ranks_of(kw_lists, targets)
@@ -322,7 +365,7 @@ def retrieval_benchmark(
             fused[sid] = fused.get(sid, 0.0) + 1 / (k_rrf + rank + 1)
         for rank, sid in enumerate(kw_lists[i]):
             fused[sid] = fused.get(sid, 0.0) + 1 / (k_rrf + rank + 1)
-        hy_lists.append(sorted(fused, key=lambda sid: -fused[sid])[:TOP])
+        hy_lists.append(sorted(fused, key=lambda sid: (-fused[sid], sid))[:TOP])
     hy_ranks = _ranks_of(hy_lists, targets)
 
     # How much each path actually got to rank. The semantic path always scores
@@ -355,7 +398,32 @@ def retrieval_benchmark(
         available=True, message=message, sample_size=len(picked),
         pool_size=int(full_pool), depth=TOP,
         mean_query_words=round(float(np.mean([len(r["text"].split()) for r in picked])), 1),
-        results=results)
+        results=results,
+        metadata=EvalMetadata(
+            evaluated_at=datetime.now(timezone.utc).isoformat(),
+            protocol_version=PROTOCOL_VERSION,
+            seed=SAMPLE_SEED,
+            tie_policy=TIE_POLICY,
+            provider=runtime.provider,
+            model_id=runtime.model_id,
+            model_revision=runtime.manifest.get("revision"),
+            provider_generation=runtime.generation,
+            encoding_mode=("live_normalized_text" if embedder is not None
+                           else "stored_caption_vectors"),
+            query_caption_ids=[r["id"] for r in picked],
+            hubness_bank_caption_ids=sorted(bank),
+            corpus_caption_sha256=corpus_sha256,
+            effective_config={
+                "rrf_k": config.RRF_K,
+                "search_depth": depth,
+                "hubness_beta": config.HUBNESS_BETA,
+                "hubness_temperature": config.HUBNESS_TEMPERATURE,
+                "hubness_bank_size": config.HUBNESS_BANK_SIZE,
+                "hubness_applied": penalty is not None,
+            },
+            provider_manifest=runtime.manifest,
+            runtime_versions=runtime_versions,
+        ))
     config.ensure_dirs()
     cache.write_text(resp.model_dump_json())
     return resp

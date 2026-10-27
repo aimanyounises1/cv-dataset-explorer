@@ -11,8 +11,10 @@ CVDE_EMBED_PROVIDER pinned runs:
   - peak RSS and, where available, MPS driver memory,
   - index size on disk and the ingest encode timings the manifest recorded.
 
-Output: a markdown table on stdout and a JSON artifact under
-backend/data/cache/bench_providers.json. Providers that do not resolve are
+Output: a markdown table on stdout and a JSON artifact (choose a reviewable
+location with --output; the default is backend/data/cache/bench_providers.json).
+The complete retrieval response is retained, including its protocol and inputs.
+Providers that do not resolve are
 reported with their named reason — a missing number is a fact, not a blank.
 
     cd backend && .venv/bin/python ../scripts/bench_providers.py [--sample-size 1000]
@@ -25,9 +27,18 @@ import statistics
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parent.parent / "backend"
+DEFAULT_ARTIFACT = BACKEND / "data" / "cache" / "bench_providers.json"
+ARTIFACT_VERSION = 1
+DEFAULT_SAMPLE_SIZE = 1000
+MIN_SAMPLE_SIZE = 50
+MAX_SAMPLE_SIZE = 5000
+TEXT_QUERY_COUNT = 100
+IMAGE_QUERY_COUNT = 20
+PERCENTILE_INTERVALS = 20
 
 
 def child(provider: str, sample_size: int) -> int:
@@ -57,10 +68,14 @@ def child(provider: str, sample_size: int) -> int:
 
     conn = db.connect()
     captions = [r["text"] for r in conn.execute(
-        "SELECT text FROM captions ORDER BY id LIMIT 100")]
+        "SELECT text FROM captions ORDER BY id LIMIT ?", (TEXT_QUERY_COUNT,))]
     files = [r["filename"] for r in conn.execute(
-        "SELECT filename FROM samples ORDER BY id LIMIT 20")]
+        "SELECT filename FROM samples ORDER BY id LIMIT ?", (IMAGE_QUERY_COUNT,))]
     conn.close()
+    if len(captions) < 2 or not files:
+        out["unavailable"] = "Latency measurement requires two captions and one image."
+        print(json.dumps(out))
+        return 0
 
     encoder.encode_texts(captions[:1])  # warm-up
     lat = []
@@ -69,7 +84,9 @@ def child(provider: str, sample_size: int) -> int:
         encoder.encode_texts([text])
         lat.append((time.perf_counter() - t) * 1000)
     out["text_ms_p50"] = round(statistics.median(lat), 1)
-    out["text_ms_p95"] = round(statistics.quantiles(lat, n=20)[18], 1)
+    out["text_ms_p95"] = round(
+        statistics.quantiles(lat, n=PERCENTILE_INTERVALS)[-1], 1)
+    out["text_latency_queries"] = len(lat)
 
     from PIL import Image
     imgs = [Image.open(config.IMAGES_DIR / f).convert("RGB") for f in files]
@@ -80,13 +97,17 @@ def child(provider: str, sample_size: int) -> int:
         encoder.encode_images([im])
         ilat.append((time.perf_counter() - t) * 1000)
     out["image_ms_p50"] = round(statistics.median(ilat), 1)
+    out["image_latency_queries"] = len(ilat)
 
     # The repository's own benchmark, through the real route.
     from fastapi.testclient import TestClient
 
     from app.main import app
     with TestClient(app) as client:
-        r = client.get(f"/api/eval/retrieval?sample_size={sample_size}").json()
+        response = client.get("/api/eval/retrieval", params={"sample_size": sample_size})
+        response.raise_for_status()
+        r = response.json()
+    out["retrieval"] = r
     if r.get("available"):
         out["recall"] = {row["mode"]: {"r1": row["recall_at"]["1"],
                                        "r5": row["recall_at"]["5"],
@@ -105,24 +126,64 @@ def child(provider: str, sample_size: int) -> int:
         out["ingest_image_encode_s"] = manifest.get("image_encode_seconds")
         out["ingest_caption_encode_s"] = manifest.get("caption_encode_seconds")
         out["sim_floor_p10"] = manifest.get("sim_floor_p10")
-    out["peak_rss_gb"] = round(
-        resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 ** 3, 2)
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    if sys.platform in {"darwin", "linux"}:
+        # getrusage reports bytes on macOS and KiB on Linux.
+        rss_bytes = rss if sys.platform == "darwin" else rss * 1024
+        out["peak_rss_gb"] = round(rss_bytes / 1024 ** 3, 2)
+    else:
+        out["peak_rss_unavailable"] = "RSS units are not defined for this platform."
     try:
         import torch
         if torch.backends.mps.is_available():
             out["mps_driver_gb"] = round(
                 torch.mps.driver_allocated_memory() / 1024 ** 3, 2)
-    except Exception:
-        pass
+    except (ImportError, RuntimeError) as exc:
+        out["mps_memory_unavailable"] = str(exc)
     print(json.dumps(out))
     return 0
 
 
+def write_artifact(path: Path, results: list[dict], sample_size: int) -> None:
+    """Export complete provider results with the source revision and run context.
+
+    Filesystem errors propagate so a failed export cannot look successful.
+    This does not claim that synthetic tests or a stored-vector baseline are
+    full-data model measurements: each retrieval response names its own mode.
+    """
+    if not MIN_SAMPLE_SIZE <= sample_size <= MAX_SAMPLE_SIZE:
+        raise ValueError("sample_size is outside the retrieval endpoint's supported range")
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=BACKEND,
+        capture_output=True, text=True, check=False,
+    )
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=BACKEND,
+        capture_output=True, text=True, check=False,
+    )
+    artifact = {
+        "artifact_version": ARTIFACT_VERSION,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source_revision": revision.stdout.strip() if revision.returncode == 0 else None,
+        "source_worktree_dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
+        "python_version": sys.version,
+        "platform": sys.platform,
+        "sample_size": sample_size,
+        "results": results,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(artifact, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sample-size", type=int, default=1000)
+    ap.add_argument("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE)
+    ap.add_argument("--output", type=Path, default=DEFAULT_ARTIFACT,
+                    help="JSON destination; choose a path outside generated data to share results")
     ap.add_argument("--child", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if not MIN_SAMPLE_SIZE <= args.sample_size <= MAX_SAMPLE_SIZE:
+        ap.error(f"--sample-size must be between {MIN_SAMPLE_SIZE} and {MAX_SAMPLE_SIZE}")
     if args.child:
         return child(args.child, args.sample_size)
 
@@ -132,17 +193,14 @@ def main() -> int:
         proc = subprocess.run(
             [sys.executable, __file__, "--child", provider,
              "--sample-size", str(args.sample_size)],
-            capture_output=True, text=True, cwd=BACKEND)
+            capture_output=True, text=True, cwd=BACKEND, check=False)
         if proc.returncode != 0:
             results.append({"provider": provider,
                             "error": proc.stderr.strip()[-400:]})
             continue
         results.append(json.loads(proc.stdout.strip().splitlines()[-1]))
 
-    artifact = BACKEND / "data" / "cache" / "bench_providers.json"
-    artifact.parent.mkdir(parents=True, exist_ok=True)
-    artifact.write_text(json.dumps(
-        {"results": results, "sample_size": args.sample_size}, indent=1))
+    write_artifact(args.output, results, args.sample_size)
 
     print("\n| provider | dim | load s | text ms p50/p95 | image ms p50 "
           "| semantic R@1/5/10 | hybrid R@1/5/10 | index MB | ingest s (img+cap) |")
@@ -163,7 +221,7 @@ def main() -> int:
         print(f"| {r['provider']} | {r['dim']} | {r['load_s']} "
               f"| {r['text_ms_p50']}/{r['text_ms_p95']} | {r['image_ms_p50']} "
               f"| {rk('semantic')} | {rk('hybrid')} | {r['index_mb']} | {ing} |")
-    print(f"\nartifact: {artifact}")
+    print(f"\nartifact: {args.output}")
     return 0
 
 

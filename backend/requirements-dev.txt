@@ -1,0 +1,4 @@
+# The full verification suite imports the optional assistant contract too.
+-r requirements.txt
+-r requirements-agent.txt
+ruff>=0.16,<0.17

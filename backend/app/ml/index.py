@@ -21,6 +21,20 @@ FILES = {
 }
 
 
+def ranked_rows(scores: np.ndarray, ids: np.ndarray) -> np.ndarray:
+    """Finite-score rows, descending by score then ascending by stable item ID.
+
+    Search and evaluation share this order, including ties at a top-k boundary.
+    A partial partition alone can select a different tied item on each run or
+    index layout. Full sorting is a deliberate tradeoff for this small corpus.
+    """
+    if scores.ndim != 1 or ids.shape != scores.shape:
+        raise ValueError("scores and IDs must be aligned one-dimensional arrays")
+    order = np.lexsort((ids, -scores))
+    logger.debug("Ranking %d candidates by score and item ID", len(scores))
+    return order[np.isfinite(scores[order])]
+
+
 class EmbeddingIndex:
     def __init__(self, ids: np.ndarray, embeddings: np.ndarray):
         assert len(ids) == len(embeddings)
@@ -88,6 +102,8 @@ class EmbeddingIndex:
         image-to-image paths (`similar_to`, duplicate detection) that share this
         method.
         """
+        if top_k < 0:
+            raise ValueError("top_k must be non-negative")
         scores = self.embeddings @ query_vec.reshape(-1)
         if penalty is not None:
             if penalty.shape != scores.shape:
@@ -110,11 +126,8 @@ class EmbeddingIndex:
             allowed = np.fromiter(allowed_ids, dtype=self.ids.dtype,
                                   count=len(allowed_ids))
             scores = np.where(np.isin(self.ids, allowed), scores, -np.inf)
-        k = min(top_k, len(scores))
-        top = np.argpartition(-scores, k - 1)[:k]
-        top = top[np.argsort(-scores[top])]
-        return [(int(self.ids[i]), float(scores[i])) for i in top
-                if np.isfinite(scores[i])]
+        top = ranked_rows(scores, self.ids)[:top_k]
+        return [(int(self.ids[i]), float(scores[i])) for i in top]
 
     def similar_to(self, item_id: int, top_k: int = 12) -> list[tuple[int, float]]:
         vec = self.vector_of(item_id)

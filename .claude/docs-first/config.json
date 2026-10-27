@@ -1,0 +1,11 @@
+{
+  "scope_gate": true,
+  "hardcode_gate": true,
+  "workaround_gate": true,
+  "slop_gate": true,
+  "evidence_gate": true,
+  "stop_verify_gate": true,
+  "readme_gate": true,
+  "verify_command": "",
+  "verify_timeout_seconds": 600
+}

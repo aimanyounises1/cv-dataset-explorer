@@ -20,9 +20,10 @@ EMBED_MODEL = os.environ.get("CVDE_EMBED_MODEL", "google/siglip2-base-patch16-25
 EMBED_BATCH_SIZE = int(os.environ.get("CVDE_EMBED_BATCH", "32"))
 
 # Retrieval provider ----------------------------------------------------------
-# Default is "siglip2" because it MEASURES better on this corpus's own
-# benchmark (R@1 55.2% vs 50.2%, ~5x the encode speed — scripts/
-# bench_providers.py; parameter count is not quality). "qwen3_vl" is the
+# SigLIP 2 remains the established default. Earlier local comparisons did not
+# retain a reviewable protocol-bound artifact, so they are not current quality
+# evidence. Re-measure with scripts/bench_providers.py before claiming that
+# one provider is better or faster. "qwen3_vl" is the
 # explicit opt-in multimodal alternative: Qwen/Qwen3-VL-Embedding-2B
 # in-process through sentence-transformers (Ollama serves the language models
 # only — it cannot host an image-embedding model), falling back to siglip2

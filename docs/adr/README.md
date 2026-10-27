@@ -15,6 +15,7 @@ conclusion.
 | [0003](0003-separate-ingest-time-analysis-from-request-time-search.md) | Ingest-time analysis is separated from request-time search |
 | [0004](0004-optional-capabilities-degrade-instead-of-failing.md) | Optional capabilities degrade instead of failing the application |
 | [0005](0005-human-review-as-the-write-boundary.md) | Human review is the boundary between a model suggestion and a saved change |
+| [0006](0006-deterministic-retrieval-evaluation.md) | Search and evaluation share deterministic ties and export their provenance |
 
 ## Format
 

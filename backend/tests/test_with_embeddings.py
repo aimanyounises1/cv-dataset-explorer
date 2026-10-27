@@ -190,6 +190,97 @@ def test_retrieval_benchmark(client):
     assert modes["semantic"]["1"] == 1.0
 
 
+def test_benchmark_ties_match_the_search_order(client, monkeypatch, tmp_path):
+    """Four identical images have one first place, not four perfect R@1s."""
+    from app.ml import hubness
+
+    original = search_module.get_retrieval_bundle()
+    vector = _vec({0: 1.0})
+    tied_index = EmbeddingIndex(
+        original.image_index.ids[::-1], np.tile(vector, (4, 1)))
+    tied = SimpleNamespace(**vars(original))
+    tied.image_index = tied_index
+    monkeypatch.setattr(tied.encoder, "encode_texts", lambda texts: np.tile(vector, (len(texts), 1)))
+    monkeypatch.setattr(search_module, "get_retrieval_bundle", lambda: tied)
+    monkeypatch.setattr(search_module, "get_retrieval_index_bundle", lambda: tied)
+    monkeypatch.setattr(search_module, "bind_retrieval_bundle", lambda indexes: tied)
+    monkeypatch.setattr(hubness, "get_penalty", lambda *args, **kwargs: None)
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+
+    searched = client.get("/api/search", params={"q": "dog", "mode": "semantic"}).json()
+    assert [item["id"] for item in searched["items"]] == sorted(tied_index.ids)
+    body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+    semantic = next(row for row in body["results"] if row["mode"] == "semantic")
+    assert semantic["recall_at"]["1"] == 0.25
+    assert semantic["mrr"] == pytest.approx(0.5208)
+    assert semantic["median_rank"] == 2.5
+
+
+def test_benchmark_metadata_identifies_the_exact_run(client):
+    from app.api.eval import PROTOCOL_VERSION, SAMPLE_SEED, TIE_POLICY
+
+    body = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+    metadata = body["metadata"]
+    runtime = search_module.get_retrieval_bundle()
+    assert metadata["protocol_version"] == PROTOCOL_VERSION
+    assert metadata["seed"] == SAMPLE_SEED
+    assert metadata["tie_policy"] == TIE_POLICY
+    assert metadata["provider_generation"] == runtime.generation
+    assert metadata["model_id"] == runtime.model_id
+    assert metadata["provider_manifest"] == runtime.manifest
+    assert metadata["encoding_mode"] == "live_normalized_text"
+    assert set(metadata["query_caption_ids"]) == set(runtime.caption_index.ids)
+    assert len(metadata["query_caption_ids"]) == body["sample_size"]
+    assert not set(metadata["query_caption_ids"]) & set(metadata["hubness_bank_caption_ids"])
+    assert len(metadata["corpus_caption_sha256"]) == 64
+    assert metadata["effective_config"]["search_depth"] == config.SEARCH_DEPTH
+    assert metadata["runtime_versions"]["numpy"] == np.__version__
+    assert metadata["evaluated_at"].endswith("+00:00")
+    assert client.get("/api/eval/retrieval", params={"sample_size": 50}).json() == body
+
+
+def test_benchmark_caption_edits_invalidate_cached_provenance(client, monkeypatch, tmp_path):
+    """A cache with the old lexical corpus must not survive a same-second edit."""
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    conn = db.connect()
+    row = conn.execute("SELECT id, text FROM captions ORDER BY id LIMIT 1").fetchone()
+    before = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+    try:
+        conn.execute("UPDATE captions SET text = ? WHERE id = ?", (row["text"] + " revised", row["id"]))
+        conn.commit()
+        after = client.get("/api/eval/retrieval", params={"sample_size": 50}).json()
+        assert before["metadata"]["corpus_caption_sha256"] != after["metadata"]["corpus_caption_sha256"]
+    finally:
+        conn.execute("UPDATE captions SET text = ? WHERE id = ?", (row["text"], row["id"]))
+        conn.commit()
+        conn.close()
+
+
+def test_hybrid_ties_use_item_ids_independent_of_path_insertion_order(client, monkeypatch):
+    runtime = search_module.get_retrieval_bundle()
+    first, second = sorted(int(sid) for sid in runtime.image_index.ids)[:2]
+    monkeypatch.setattr(search_module, "_semantic_ranking", lambda *args: (
+        [(second, 1.0), (first, 0.9)], _vec({0: 1.0}), "cosine", runtime))
+    monkeypatch.setattr(search_module, "_keyword_ranking", lambda *args, **kwargs: (
+        [first, second], {}))
+    body = client.get("/api/search", params={"q": "dog", "mode": "hybrid"}).json()
+    assert [item["id"] for item in body["items"]] == [first, second]
+
+
+def test_benchmark_with_no_eligible_queries_is_explicit(client, monkeypatch, tmp_path):
+    original = search_module.get_retrieval_index_bundle()
+    empty = SimpleNamespace(**vars(original))
+    empty.caption_index = EmbeddingIndex(np.array([], dtype=np.int64), np.empty((0, 8)))
+    monkeypatch.setattr(search_module, "get_retrieval_index_bundle", lambda: empty)
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    response = client.get("/api/eval/retrieval", params={"sample_size": 50})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["available"] is False
+    assert body["results"] == []
+    assert "No eligible caption queries" in body["message"]
+
+
 def test_benchmark_excludes_the_held_out_caption(client):
     """FR-EV-2: the query caption must not be in the index it searches.
 
@@ -430,6 +521,7 @@ def test_benchmark_says_so_when_it_could_not_encode_the_queries(client):
             f.unlink(missing_ok=True)
     assert body["available"] is True
     assert "unavailable" in (body["message"] or "")
+    assert body["metadata"]["encoding_mode"] == "stored_caption_vectors"
 
 
 def test_benchmark_reports_pool_size_and_rank_metrics(client):
