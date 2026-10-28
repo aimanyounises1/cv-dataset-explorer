@@ -35,6 +35,23 @@ def test_search_respects_allowed_ids(index):
     assert 10 not in ids and 20 not in ids
 
 
+def test_search_breaks_ties_by_id_across_top_k_boundary():
+    """Index storage order must not choose which tied items the user sees."""
+    tied = EmbeddingIndex(
+        np.array([40, 10, 30, 20]), np.tile(_unit([1, 0]), (4, 1)))
+    assert [sid for sid, _ in tied.search(_unit([1, 0]), top_k=2)] == [10, 20]
+    assert [sid for sid, _ in tied.search(
+        _unit([1, 0]), top_k=2, allowed_ids={20, 30, 40})] == [20, 30]
+
+
+def test_search_handles_empty_or_zero_result_requests(index):
+    empty = EmbeddingIndex(np.array([], dtype=np.int64), np.empty((0, 3)))
+    assert empty.search(_unit([1, 0, 0])) == []
+    assert index.search(_unit([1, 0, 0]), top_k=0) == []
+    with pytest.raises(ValueError, match="non-negative"):
+        index.search(_unit([1, 0, 0]), top_k=-1)
+
+
 def test_search_allowed_ids_never_empties_results(index):
     # Even though the best match is excluded, filtered results still appear.
     results = index.search(_unit([1, 0, 0]), top_k=1, allowed_ids={30})

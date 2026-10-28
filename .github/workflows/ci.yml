@@ -38,8 +38,8 @@ jobs:
       # would otherwise pull CUDA and Triton libraries that this runner cannot
       # use; requirements.txt then sees the declared torch constraint satisfied.
       - run: pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.2"
-      - run: pip install -r requirements.txt -r requirements-agent.txt ruff
-      - run: ruff check app tests
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check app tests ../scripts/bench_providers.py
       - run: pytest -q
 
   frontend:

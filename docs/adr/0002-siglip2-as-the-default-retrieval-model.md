@@ -15,19 +15,23 @@ unfalsifiable.
 
 ## Decision
 
-SigLIP 2 is the default embedding model, chosen because it scored better
-than the alternatives on this project's own Flickr8k retrieval benchmark,
-not because of general reputation. Qwen3-VL remains available as an
-optional retrieval provider behind the same interface, for cases where a
-reviewer wants to compare it directly.
+Keep SigLIP 2 as the established default while allowing Qwen3-VL behind the
+same provider interface. The base requirements already support SigLIP 2;
+Qwen3-VL requires an optional stack and a separately built index.
+
+Earlier local comparisons motivated the original choice, but no committed
+artifact binds their metrics to a provider generation, query sample and
+protocol. They are historical observations, not a reproducible claim that
+SigLIP 2 is currently better or faster. Before changing or defending the
+default on quality grounds, export a new comparison following the
+[evaluation guide](../evaluation.md).
 
 ## Consequences
 
-The default is falsifiable: it names the benchmark that produced it, and a
-change to that benchmark's definition bumps PROTOCOL_VERSION so a cached
-result can never be misread as comparable to a new one. Anyone who disputes
-the choice can re-run the same benchmark rather than argue about which
-model should be better in the abstract.
+The benchmark remains the way to revisit the default. Changes to its ranking
+or metric definition bump PROTOCOL_VERSION so cached results cannot be read
+as measurements under a new protocol. Protocol 11 fixes optimistic tie ranks
+and records the inputs required to compare exported results.
 
 Keeping a second provider behind the same interface costs some abstraction
 overhead, but it means the default can be revisited later, given a newer

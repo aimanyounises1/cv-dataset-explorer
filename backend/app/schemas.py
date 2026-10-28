@@ -319,6 +319,27 @@ class EvalModeResult(BaseModel):
     note: Optional[str] = None
 
 
+class EvalMetadata(BaseModel):
+    """Inputs needed to identify and compare one retrieval evaluation run."""
+
+    evaluated_at: str
+    protocol_version: int
+    seed: int
+    tie_policy: str
+    provider: str
+    model_id: str
+    model_revision: Optional[str] = None
+    provider_generation: str
+    encoding_mode: Literal["live_normalized_text", "stored_caption_vectors"]
+    query_caption_ids: list[int]
+    hubness_bank_caption_ids: list[int]
+    corpus_caption_sha256: str
+    hubness_penalty_sha256: Optional[str] = None
+    effective_config: dict[str, Union[int, float, bool]]
+    provider_manifest: dict
+    runtime_versions: dict[str, Optional[str]]
+
+
 class EvalResponse(BaseModel):
     available: bool
     message: Optional[str] = None
@@ -327,6 +348,7 @@ class EvalResponse(BaseModel):
     depth: int = 0                      # rank depth MRR/median are computed to
     mean_query_words: float = 0.0       # queries are whole captions, not phrases
     results: list[EvalModeResult] = []
+    metadata: Optional[EvalMetadata] = None
 
 
 class LeakagePoint(BaseModel):

@@ -117,7 +117,7 @@ def _keyword_ranking(
         "FROM captions_fts f JOIN captions c ON c.id = f.rowid "
         "JOIN samples s ON s.id = c.sample_id "
         f"WHERE captions_fts MATCH ?{and_where} "
-        "GROUP BY c.sample_id ORDER BY best LIMIT ?",
+        "GROUP BY c.sample_id ORDER BY best, c.sample_id LIMIT ?",
         [match] + params + [top_k],
     ).fetchall()
     ids = [r["sid"] for r in rows]
@@ -130,7 +130,7 @@ def _keyword_ranking(
         tag_rows = conn.execute(
             "SELECT DISTINCT v.sample_id AS sid FROM vlm_tags v "
             "JOIN samples s ON s.id = v.sample_id "
-            f"WHERE v.tag IN ({qmarks}){and_where}",
+            f"WHERE v.tag IN ({qmarks}){and_where} ORDER BY v.sample_id",
             terms + params,
         ).fetchall()
         seen = set(ids)
@@ -382,7 +382,7 @@ def run_search(
             fused[sid] = fused.get(sid, 0.0) + 1.0 / (rrf_k + rank + 1)
         for rank, sid in enumerate(keyword):
             fused[sid] = fused.get(sid, 0.0) + 1.0 / (rrf_k + rank + 1)
-        ranked = sorted(fused, key=lambda sid: -fused[sid])
+        ranked = sorted(fused, key=lambda sid: (-fused[sid], sid))
         scores = fused
         score_basis = "rrf"
         record("semantic", [sid for sid, _ in semantic])

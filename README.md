@@ -262,9 +262,11 @@ A strictly read-only local MCP surface is also exposed at `POST /mcp`.
 - **SQLite and exact NumPy search fit this dataset.** With 8,000 images, an
   external vector database would add operational complexity without improving
   the main request path.
-- **SigLIP 2 is the default retrieval model because it performed better in the
-  built-in Flickr8k retrieval benchmark.** Qwen3-VL retrieval remains an
-  optional provider behind the same interface.
+- **SigLIP 2 is the established default retrieval model.** Qwen3-VL remains
+  an optional provider behind the same interface. Earlier local comparisons
+  lack a committed, protocol-bound artifact; they do not establish a current
+  quality or speed advantage. The [evaluation guide](docs/evaluation.md)
+  explains how to produce inspectable measurements.
 - **Analysis is separated from interaction.** Ingest-time work computes
   embeddings, projections, quality signals, and attributes; normal search
   requests perform database reads and at most one query encoding.
@@ -319,22 +321,58 @@ Configuration is controlled with environment variables. See
 
 ## Verification
 
+From the repository root, after creating the backend environment:
+
 ```bash
-# Backend lint (ruff is not in requirements.txt: pip install ruff)
+# Install the complete verification stack. The suite imports assistant
+# contracts even when no Ollama server is running; inference is stubbed.
 cd backend
-.venv/bin/ruff check app tests
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/ruff check app tests ../scripts/bench_providers.py
 
 # Backend tests
 .venv/bin/python -m pytest -q
 
 # Frontend
 cd ../frontend
+npm ci
 npm run build
 
 # Repository links
 cd ..
 backend/.venv/bin/python scripts/check_links.py
 ```
+
+The same checks, including the benchmark exporter and patch whitespace, run
+with `.claude/docs-first/verify.sh` from the repository root. Set `PYTHON_BIN`
+to another installed interpreter if the environment has a different location.
+
+## Retrieval evaluation
+
+`GET /api/eval/retrieval?sample_size=1000` evaluates held-out caption queries
+against the image corpus. It reports recall, MRR at depth 10, candidate-pool
+coverage, and provenance: protocol, seed, exact query IDs, model revision,
+provider generation, corpus-caption digest, effective configuration and whether
+queries were encoded live or read from stored vectors. The latter is explicitly
+a baseline and must not be described as live search quality.
+
+Search and evaluation order equal scores by ascending item ID. A synthetic
+regression with four identical image vectors therefore has one first place
+(R@1 = 0.25), instead of awarding all four rank one. This is a correctness
+fixture, not a Flickr8k model result.
+
+To compare installed, ingested providers and export their complete responses:
+
+```bash
+cd backend
+.venv/bin/python ../scripts/bench_providers.py --sample-size 1000 \
+  --output ../artifacts/retrieval-benchmark.json
+```
+
+The artifact records the source revision, whether the working tree was dirty,
+platform, Python version, latency sample counts and full evaluation responses.
+Missing providers are recorded with their reason. See the
+[evaluation guide](docs/evaluation.md) for comparison limits and reproduction.
 
 Optional end-to-end browser verification requires Chrome and
 `backend/requirements-qa.txt`:
