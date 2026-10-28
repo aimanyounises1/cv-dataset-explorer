@@ -43,7 +43,8 @@ metadata records:
   the provider manifest, including index hashes and ingest library versions.
 - Digest of all `(caption ID, sample ID, text)` rows used by lexical retrieval.
 - Search depth, RRF constant, hubness settings, actual correction application
-  and the excluded hubness-bank caption IDs.
+  and the excluded hubness-bank caption IDs. The applied penalty vector has
+  its own SHA-256 digest; it is null when no correction was applied.
 - `live_normalized_text` or `stored_caption_vectors`, plus evaluation time.
 - Evaluation runtime package versions, separately from the ingest manifest.
 
@@ -52,6 +53,9 @@ tree was dirty, Python/platform, latency sample counts and memory observations.
 `evaluated_at` may precede export time: the API caches results by protocol,
 provider generation, encoding mode, runtime package versions, corpus-caption
 digest and ranking settings.
+The applied hubness penalty is resolved before cache lookup and its digest
+joins the key, so loading a new or replacement correction cannot reuse an
+evaluation from a different correction state.
 
 Compare only matching protocol, corpus digest, query sample and encoding mode.
 Model revisions and provider generations identify what changed. A dirty tree
@@ -71,6 +75,9 @@ Latency samples use 100 captions and 20 images (or the available smaller
 corpus), one unmeasured warm-up per modality, then serial single-item encodes.
 These are local microbenchmarks, not request latency or service-load results.
 The evaluation may be cached; its compute time is not a reported latency.
+Fewer than two captions or no image leaves latency fields null with
+`latency_status=unavailable`; retrieval evaluation still runs over any eligible
+queries. This is a missing latency measurement, not a provider failure.
 
 ## Verified correctness versus unmeasured quality
 

@@ -39,6 +39,7 @@ MAX_SAMPLE_SIZE = 5000
 TEXT_QUERY_COUNT = 100
 IMAGE_QUERY_COUNT = 20
 PERCENTILE_INTERVALS = 20
+MIN_TEXT_LATENCY_QUERIES = 2
 
 
 def child(provider: str, sample_size: int) -> int:
@@ -72,32 +73,39 @@ def child(provider: str, sample_size: int) -> int:
     files = [r["filename"] for r in conn.execute(
         "SELECT filename FROM samples ORDER BY id LIMIT ?", (IMAGE_QUERY_COUNT,))]
     conn.close()
-    if len(captions) < 2 or not files:
-        out["unavailable"] = "Latency measurement requires two captions and one image."
-        print(json.dumps(out))
-        return 0
+    out.update(
+        latency_status="unavailable",
+        text_ms_p50=None,
+        text_ms_p95=None,
+        image_ms_p50=None,
+        text_latency_queries=0,
+        image_latency_queries=0,
+    )
+    if len(captions) < MIN_TEXT_LATENCY_QUERIES or not files:
+        out["latency_unavailable"] = "Latency measurement requires two captions and one image."
+    else:
+        encoder.encode_texts(captions[:1])  # warm-up
+        lat = []
+        for text in captions:
+            t = time.perf_counter()
+            encoder.encode_texts([text])
+            lat.append((time.perf_counter() - t) * 1000)
+        out["text_ms_p50"] = round(statistics.median(lat), 1)
+        out["text_ms_p95"] = round(
+            statistics.quantiles(lat, n=PERCENTILE_INTERVALS)[-1], 1)
+        out["text_latency_queries"] = len(lat)
 
-    encoder.encode_texts(captions[:1])  # warm-up
-    lat = []
-    for text in captions:
-        t = time.perf_counter()
-        encoder.encode_texts([text])
-        lat.append((time.perf_counter() - t) * 1000)
-    out["text_ms_p50"] = round(statistics.median(lat), 1)
-    out["text_ms_p95"] = round(
-        statistics.quantiles(lat, n=PERCENTILE_INTERVALS)[-1], 1)
-    out["text_latency_queries"] = len(lat)
-
-    from PIL import Image
-    imgs = [Image.open(config.IMAGES_DIR / f).convert("RGB") for f in files]
-    encoder.encode_images(imgs[:1])  # warm-up
-    ilat = []
-    for im in imgs:
-        t = time.perf_counter()
-        encoder.encode_images([im])
-        ilat.append((time.perf_counter() - t) * 1000)
-    out["image_ms_p50"] = round(statistics.median(ilat), 1)
-    out["image_latency_queries"] = len(ilat)
+        from PIL import Image
+        imgs = [Image.open(config.IMAGES_DIR / f).convert("RGB") for f in files]
+        encoder.encode_images(imgs[:1])  # warm-up
+        ilat = []
+        for im in imgs:
+            t = time.perf_counter()
+            encoder.encode_images([im])
+            ilat.append((time.perf_counter() - t) * 1000)
+        out["image_ms_p50"] = round(statistics.median(ilat), 1)
+        out["image_latency_queries"] = len(ilat)
+        out["latency_status"] = "measured"
 
     # The repository's own benchmark, through the real route.
     from fastapi.testclient import TestClient
@@ -218,8 +226,13 @@ def main() -> int:
         ing = "—"
         if r.get("ingest_image_encode_s") is not None:
             ing = f"{r['ingest_image_encode_s']:.0f}+{r.get('ingest_caption_encode_s') or 0:.0f}"
+        text_latency = (
+            f"{r['text_ms_p50']}/{r['text_ms_p95']}"
+            if r.get("text_ms_p50") is not None and r.get("text_ms_p95") is not None
+            else "—")
+        image_latency = r.get("image_ms_p50")
         print(f"| {r['provider']} | {r['dim']} | {r['load_s']} "
-              f"| {r['text_ms_p50']}/{r['text_ms_p95']} | {r['image_ms_p50']} "
+              f"| {text_latency} | {image_latency if image_latency is not None else '—'} "
               f"| {rk('semantic')} | {rk('hybrid')} | {r['index_mb']} | {ing} |")
     print(f"\nartifact: {args.output}")
     return 0

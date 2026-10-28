@@ -334,6 +334,7 @@ class EvalMetadata(BaseModel):
     query_caption_ids: list[int]
     hubness_bank_caption_ids: list[int]
     corpus_caption_sha256: str
+    hubness_penalty_sha256: Optional[str] = None
     effective_config: dict[str, Union[int, float, bool]]
     provider_manifest: dict
     runtime_versions: dict[str, Optional[str]]

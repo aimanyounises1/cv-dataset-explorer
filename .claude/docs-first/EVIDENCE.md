@@ -25,6 +25,16 @@ remain in requirements files; this is evidence for this verification run, not a 
 | `importlib.metadata.version` | Python@3.13.9 | Installed `importlib.metadata.version.__doc__` | "Get the version string for the named package." |
 | `resource.getrusage().ru_maxrss` | macOS installed system manual | `/usr/bin/man 2 getrusage` | "the maximum resident set size utilized (in bytes)." |
 | `resource.getrusage().ru_maxrss` | Linux since 2.6.32 | https://man7.org/linux/man-pages/man2/getrusage.2.html | "This is the maximum resident set size used (in KiB)." |
+| `numpy.ndarray.tobytes` | numpy@2.4.6 | Installed `numpy.ndarray.tobytes.__doc__` | "Construct Python bytes containing the raw data bytes in the array." |
+| `numpy.savez` | numpy@2.4.6 | Installed `numpy.savez.__doc__` | "Save several arrays into a single file in uncompressed ``.npz`` format." |
+| `numpy.zeros` | numpy@2.4.6 | Installed `numpy.zeros.__doc__` | "zeros(shape, dtype=None, order='C', *, device=None, like=None)" |
+| `numpy.array` | numpy@2.4.6 | Installed `numpy.array.__doc__` | "array(object, dtype=None, *, copy=True, order='K', subok=False, ndmin=0," |
+| `MonkeyPatch.syspath_prepend` | pytest@9.1.1 | Installed `pytest.MonkeyPatch.syspath_prepend.__doc__` | "Prepend ``path`` to ``sys.path`` list of import locations." |
+| `MonkeyPatch.chdir` | pytest@9.1.1 | Installed `pytest.MonkeyPatch.chdir.__doc__` | "Change the current working directory to the specified path." |
+| `MonkeyPatch.setenv` | pytest@9.1.1 | Installed `pytest.MonkeyPatch.setenv.__doc__` | "Set environment variable ``name`` to ``value``." |
+| `SimpleNamespace` | Python@3.13.9 | Installed `types.SimpleNamespace.__doc__` | "A simple attribute-based namespace." |
+| `Path.mkdir` | Python@3.13.9 | Installed `pathlib.Path.mkdir.__doc__` | "Create a new directory at this given path." |
+| `Path.unlink` | Python@3.13.9 | Installed `pathlib.Path.unlink.__doc__` | "Remove this file or link." |
 
 The archived Apple web manual says kilobytes, while this machine's current
 system manual says bytes. The installed system documentation is authoritative

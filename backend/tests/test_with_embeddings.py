@@ -256,6 +256,103 @@ def test_benchmark_caption_edits_invalidate_cached_provenance(client, monkeypatc
         conn.close()
 
 
+def test_benchmark_tracks_applied_hubness_artifact_changes(client, monkeypatch, tmp_path):
+    """A cached uncorrected result must not outlive a newly loaded correction."""
+    from app.ml import hubness
+
+    runtime = SimpleNamespace(**vars(search_module.get_retrieval_bundle()))
+    runtime.emb_dir = tmp_path / "embeddings"
+    runtime.emb_dir.mkdir()
+    monkeypatch.setattr(search_module, "get_retrieval_index_bundle", lambda: runtime)
+    monkeypatch.setattr(search_module, "bind_retrieval_bundle", lambda indexes: runtime)
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(config, "HUBNESS_AUTOBUILD", False)
+    monkeypatch.setattr(config, "HUBNESS_BETA", 1.0)
+    artifact = runtime.emb_dir / "hubness.npz"
+    fingerprint = np.array(hubness._fingerprint(
+        runtime.image_index, emb_dir=runtime.emb_dir,
+        model_id=runtime.model_id, generation=runtime.generation))
+
+    def evaluate():
+        response = client.get("/api/eval/retrieval", params={"sample_size": 50})
+        assert response.status_code == 200
+        return response.json()
+
+    hubness.invalidate()
+    try:
+        without = evaluate()
+        assert without["metadata"]["hubness_penalty_sha256"] is None
+        assert without["metadata"]["effective_config"]["hubness_applied"] is False
+
+        penalty = np.zeros(len(runtime.image_index.ids), dtype=np.float32)
+        penalty[0] = 10.0
+        np.savez(artifact, penalty=penalty, ids=runtime.image_index.ids, fingerprint=fingerprint)
+        hubness.invalidate()
+        corrected = evaluate()
+        assert corrected["metadata"]["effective_config"]["hubness_applied"] is True
+        assert corrected["metadata"]["hubness_penalty_sha256"]
+        before = next(row for row in without["results"] if row["mode"] == "semantic")
+        after = next(row for row in corrected["results"] if row["mode"] == "semantic")
+        assert after["recall_at"]["1"] < before["recall_at"]["1"]
+        assert evaluate() == corrected
+
+        # A replacement artifact can have the same expected fingerprint but
+        # different values. The cache identifies what was actually applied.
+        penalty[1] = 10.0
+        np.savez(artifact, penalty=penalty, ids=runtime.image_index.ids, fingerprint=fingerprint)
+        hubness.invalidate()
+        replaced = evaluate()
+        assert replaced["metadata"]["hubness_penalty_sha256"] != corrected["metadata"]["hubness_penalty_sha256"]
+
+        artifact.unlink()
+        hubness.invalidate()
+        assert evaluate() == without
+    finally:
+        hubness.invalidate()
+
+
+def test_provider_export_keeps_single_query_retrieval(client, monkeypatch, tmp_path, capsys):
+    """One eligible caption can be evaluated even without a latency sample."""
+    import json
+    import os
+    import sys
+    from pathlib import Path
+
+    from app.ml import providers
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
+    from scripts import bench_providers
+
+    original = search_module.get_retrieval_bundle()
+    runtime = SimpleNamespace(**vars(original))
+    runtime.image_index = EmbeddingIndex(
+        original.image_index.ids[:1], original.image_index.embeddings[:1])
+    runtime.caption_index = EmbeddingIndex(
+        original.caption_index.ids[:1], original.caption_index.embeddings[:1])
+    monkeypatch.setattr(search_module, "get_retrieval_index_bundle", lambda: runtime)
+    monkeypatch.setattr(search_module, "get_retrieval_bundle", lambda: runtime)
+    monkeypatch.setattr(search_module, "bind_retrieval_bundle", lambda indexes: runtime)
+    monkeypatch.setattr(providers, "get_retrieval_bundle", lambda: runtime)
+    monkeypatch.setattr(providers, "read_manifest", lambda directory: runtime.manifest)
+    monkeypatch.setattr(bench_providers, "TEXT_QUERY_COUNT", 1)
+    monkeypatch.setattr(bench_providers, "IMAGE_QUERY_COUNT", 1)
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    monkeypatch.setenv("CVDE_EMBED_PROVIDER", os.environ["CVDE_EMBED_PROVIDER"])
+    monkeypatch.chdir(tmp_path)
+
+    assert bench_providers.child(runtime.provider, 50) == 0
+    exported = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert "unavailable" not in exported
+    assert exported["latency_status"] == "unavailable"
+    assert exported["text_ms_p50"] is None and exported["text_ms_p95"] is None
+    assert exported["image_ms_p50"] is None
+    assert exported["text_latency_queries"] == exported["image_latency_queries"] == 0
+    assert exported["retrieval"]["available"] is True
+    assert exported["retrieval"]["sample_size"] == 1
+    assert exported["recall"]["semantic"]["r1"] == 1.0
+
+
 def test_hybrid_ties_use_item_ids_independent_of_path_insertion_order(client, monkeypatch):
     runtime = search_module.get_retrieval_bundle()
     first, second = sorted(int(sid) for sid in runtime.image_index.ids)[:2]

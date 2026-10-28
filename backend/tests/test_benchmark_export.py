@@ -1,6 +1,7 @@
 """Benchmark exports preserve the evidence instead of only formatted recall."""
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -34,3 +35,32 @@ def test_export_rejects_an_unsupported_sample_size(monkeypatch, tmp_path):
 
     with pytest.raises(ValueError, match="sample_size"):
         write_artifact(tmp_path / "benchmark.json", [], sample_size=0)
+
+
+def test_parent_renders_unavailable_latency_without_hiding_recall(monkeypatch, tmp_path, capsys):
+    """Missing latency has its own state and does not become provider failure."""
+    import sys
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
+    from scripts import bench_providers
+
+    result = {
+        "provider": "synthetic", "dim": 8, "load_s": 0.0, "index_mb": 0.0,
+        "latency_status": "unavailable", "text_ms_p50": None,
+        "text_ms_p95": None, "image_ms_p50": None,
+        "retrieval": {"available": True, "sample_size": 1},
+        "recall": {"semantic": {"r1": 1.0, "r5": 1.0, "r10": 1.0}},
+    }
+    monkeypatch.setattr(bench_providers.subprocess, "run", lambda *args, **kwargs:
+                        SimpleNamespace(returncode=0, stdout=json.dumps(result), stderr=""))
+    written = []
+    monkeypatch.setattr(bench_providers, "write_artifact",
+                        lambda path, results, sample_size: written.extend(results))
+    monkeypatch.setattr(sys, "argv", ["bench_providers.py", "--output", str(tmp_path / "result.json")])
+
+    assert bench_providers.main() == 0
+    output = capsys.readouterr().out
+    assert "| — | — | 100.0%/100.0%/100.0% |" in output
+    assert "None" not in output
+    assert len(written) == 2
+    assert all(row["retrieval"]["sample_size"] == 1 for row in written)

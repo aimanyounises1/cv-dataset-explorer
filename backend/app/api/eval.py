@@ -97,6 +97,7 @@ def _cache_path(
     live_encoder: bool | None = None,
     corpus_sha256: str = "",
     runtime_versions: dict[str, str | None] | None = None,
+    hubness_penalty_sha256: str | None = None,
 ):
     """Key on everything the result actually depends on.
 
@@ -136,6 +137,7 @@ def _cache_path(
             f"eval_v{PROTOCOL_VERSION}_{provider}{generation}{encoder_mode}"
             f"_{corpus_sha256[:12]}_{runtime_stamp}_{sample_size}_k{config.RRF_K}"
             f"_d{config.SEARCH_DEPTH}"
+            f"_p{hubness_penalty_sha256 or 'none'}"
             # The hubness constants re-rank the semantic path, so they belong in
             # the key for exactly the reason RRF_K does.
             f"_h{config.HUBNESS_BETA}-{config.HUBNESS_TEMPERATURE}"
@@ -281,16 +283,6 @@ def retrieval_benchmark(
         separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
     runtime_versions = _runtime_versions()
-    cache = _cache_path(
-        sample_size,
-        runtime,
-        live_encoder=embedder is not None,
-        corpus_sha256=corpus_sha256,
-        runtime_versions=runtime_versions,
-    )
-    if cache.exists():
-        return EvalResponse(**json.loads(cache.read_text()))
-
     rows = [r for r in all_rows if cap.row_of(r["id"]) is not None
             and img.row_of(r["sample_id"]) is not None]
     # Hold the hubness bank out of the benchmark. Those captions were used to
@@ -305,6 +297,28 @@ def retrieval_benchmark(
             available=False,
             message="No eligible caption queries remain after index alignment "
                     "and hubness-bank exclusion. Rebuild aligned indexes first.")
+
+    # Resolve the same penalty search would use before accepting a cached
+    # result. The expected artifact fingerprint alone is unchanged when a
+    # missing artifact is built or its penalty values are replaced.
+    penalty = hubness.get_penalty(
+        conn,
+        _bank_encoder(embedder),
+        runtime=runtime,
+    )
+    penalty_sha256 = (
+        None if penalty is None else hashlib.sha256(penalty.tobytes()).hexdigest())
+    cache = _cache_path(
+        sample_size,
+        runtime,
+        live_encoder=embedder is not None,
+        corpus_sha256=corpus_sha256,
+        runtime_versions=runtime_versions,
+        hubness_penalty_sha256=penalty_sha256,
+    )
+    if cache.exists():
+        return EvalResponse(**json.loads(cache.read_text()))
+
     rng = np.random.default_rng(SAMPLE_SEED)
     picked = [rows[i] for i in rng.choice(len(rows), min(sample_size, len(rows)),
                                           replace=False)]
@@ -334,11 +348,6 @@ def retrieval_benchmark(
     # benchmark has to rank the way `index.search` ranks, or it is measuring a
     # path the application does not take.
     scores = qvecs @ img.embeddings.T
-    penalty = hubness.get_penalty(
-        conn,
-        _bank_encoder(embedder),
-        runtime=runtime,
-    )
     if penalty is not None:
         scores = scores - penalty
     # Use the shipped search order, including ties. Counting strictly greater
@@ -413,6 +422,7 @@ def retrieval_benchmark(
             query_caption_ids=[r["id"] for r in picked],
             hubness_bank_caption_ids=sorted(bank),
             corpus_caption_sha256=corpus_sha256,
+            hubness_penalty_sha256=penalty_sha256,
             effective_config={
                 "rrf_k": config.RRF_K,
                 "search_depth": depth,
